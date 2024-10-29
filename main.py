@@ -246,18 +246,18 @@ class MainWindow(QMainWindow):
 		self.line_table.setRowCount(20)
 		for i in range(20):
 			items = [
-				str(i+1),
-				f'회선-{i+1}',
-				f'192.168.0.{i+1}',
-				f'사용자{i+1}',
-				f'USER{i+1}',
-				f'내용 {i+1}',
-				f'기타 {i+1}'
+				str(20-i),  # 순번을 역순으로 변경 (20부터 1까지)
+				f'회선-{20-i}',
+				f'192.168.0.{20-i}',
+				f'사용자{20-i}',
+				f'USER{20-i}',
+				f'내용 {20-i}',
+				f'기타 {20-i}'
 			]
 			for j, item in enumerate(items):
 				table_item = QTableWidgetItem(item)
 				if j not in [5, 6]:
-					table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
+						table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
 				if j == 0:  # 순번 열은 중앙 정렬
 					table_item.setTextAlignment(Qt.AlignCenter)
 				self.line_table.setItem(i, j, table_item)
@@ -332,17 +332,17 @@ class MainWindow(QMainWindow):
 		current_datetime = QDateTime.currentDateTime().toString('yyyy-MM-dd hh:mm:ss')
 		for i in range(20):
 			items = [
-				str(i+1),
+				str(20-i),
 				current_datetime,
 				'구분A',
 				'구분B',
-				f'로그내용 {i+1}',
-				f'기타 {i+1}'
+				f'로그내용 {20-i}',
+				f'기타 {20-i}'
 			]
 			for j, item in enumerate(items):
 				table_item = QTableWidgetItem(item)
 				table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-				if j == 0:  # 순번 열은 중앙 정렬
+				if j == 0 or j == 1:  # 순번과 시간 열을 중앙 정렬
 					table_item.setTextAlignment(Qt.AlignCenter)
 				self.log_table.setItem(i, j, table_item)
 
