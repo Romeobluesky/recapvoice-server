@@ -12,8 +12,6 @@
 # ignore all files in the build/ directory
 build/
 myenv/
-venv/
-__pycache__/
 # ignore doc/notes.txt, but not doc/server/arch.txt
 doc/*.txt
 
