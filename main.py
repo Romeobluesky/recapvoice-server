@@ -46,8 +46,8 @@ class MainWindow(QMainWindow):
 		# 타이머 설정
 		self.timer = QTimer(self)
 		self.timer.timeout.connect(self.update_disk_usage)
-		self.timer.start(5000)
-		self.update_disk_usage()
+		self.timer.start(600000)  # 10분(600,000ms)으로 변경
+		self.update_disk_usage()  # 초기 디스크 사용량 표시
 
 	def setup_company_section(self):
 		company_group = QGroupBox('회사정보')
