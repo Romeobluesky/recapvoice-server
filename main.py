@@ -1,5 +1,4 @@
 import sys
-
 from PyQt5.QtWidgets import (
 	QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 	QGroupBox, QLabel, QLineEdit, QPushButton, QCheckBox,
@@ -9,7 +8,6 @@ from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt, QTimer, QTime, QDateTime
 import psutil
 from settings_popup import SettingsPopup  # 팝업창 import
-
 
 def create_led(label, color):
 	widget = QWidget()
