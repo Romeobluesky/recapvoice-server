@@ -1,5 +1,5 @@
 import sys
-import warnings
+
 from PyQt5.QtWidgets import (
 	QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 	QGroupBox, QLabel, QLineEdit, QPushButton, QCheckBox,
@@ -10,7 +10,6 @@ from PyQt5.QtCore import Qt, QTimer, QTime, QDateTime
 import psutil
 from settings_popup import SettingsPopup  # 팝업창 import
 
-warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def create_led(label, color):
 	widget = QWidget()
