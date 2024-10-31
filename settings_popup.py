@@ -1,10 +1,10 @@
 import os
 import psutil
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
 	QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, 
 	QHBoxLayout, QCheckBox, QComboBox, QProgressBar, QGroupBox, QFileDialog
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 class SettingsPopup(QDialog):
 	def __init__(self):
@@ -91,6 +91,7 @@ class SettingsPopup(QDialog):
 		""")
 		path_button = QPushButton('경로탐색')  # 버튼 텍스트 변경
 		path_button.setFixedWidth(100)  # 버튼 너비 조정
+		path_button.setFixedHeight(28)  #
 		path_button.clicked.connect(self.select_path)
 		path_layout.addWidget(self.path_input)
 		path_layout.addWidget(path_button)

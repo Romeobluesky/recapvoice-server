@@ -1,13 +1,15 @@
 import sys
-from PyQt5.QtWidgets import (
+import psutil
+
+from PySide6.QtWidgets import (
 	QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 	QGroupBox, QLabel, QLineEdit, QPushButton, QCheckBox,
-	QTableWidget, QTableWidgetItem, QProgressBar, QStyle, QComboBox
+	QTableWidget, QTableWidgetItem, QProgressBar, QStyle, QComboBox,
+	QHeaderView
 )
-from PyQt5.QtGui import QColor
-from PyQt5.QtCore import Qt, QTimer, QTime, QDateTime
-import psutil
-from settings_popup import SettingsPopup  # 팝업창 import
+from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer, QDateTime
+from settings_popup import SettingsPopup
 
 def create_led(label, color):
 	widget = QWidget()
@@ -38,8 +40,8 @@ class MainWindow(QMainWindow):
 		# UI 섹션 추가
 		self.setup_company_section()
 		self.setup_record_section()
-		self.setup_led_section()
 		self.setup_disk_section()
+		self.setup_led_section()
 		self.setup_line_section()
 		self.setup_log_section()
 		
@@ -50,23 +52,33 @@ class MainWindow(QMainWindow):
 		self.update_disk_usage()  # 초기 디스크 사용량 표시
 
 	def setup_company_section(self):
-		company_group = QGroupBox('회사정보')
+		company_group = QGroupBox('회사 정보')
 		company_layout = QHBoxLayout()
 		
 		input_layout = QHBoxLayout()
-		input_layout.addWidget(QLabel('대표번호:'))
+		
+		# 대표번호
+		label1 = QLabel('대표번호:')
+		label1.setStyleSheet("QLabel { background: transparent; }")
+		input_layout.addWidget(label1)
 		tel_input = QLineEdit()
-		tel_input.setFixedHeight(tel_input.sizeHint().height() + 4)  # 높이 4px 증가
+		tel_input.setFixedHeight(tel_input.sizeHint().height() + 4)
 		input_layout.addWidget(tel_input)
 		
-		input_layout.addWidget(QLabel('회사명:'))
+		# 회사명
+		label2 = QLabel('회사명:')
+		label2.setStyleSheet("QLabel { background: transparent; }")
+		input_layout.addWidget(label2)
 		company_input = QLineEdit()
-		company_input.setFixedHeight(company_input.sizeHint().height() + 4)  # 높이 4px 증가
+		company_input.setFixedHeight(company_input.sizeHint().height() + 4)
 		input_layout.addWidget(company_input)
 		
-		input_layout.addWidget(QLabel('회사ID:'))
+		# 회사ID
+		label3 = QLabel('회사ID:')
+		label3.setStyleSheet("QLabel { background: transparent; }")
+		input_layout.addWidget(label3)
 		id_input = QLineEdit()
-		id_input.setFixedHeight(id_input.sizeHint().height() + 4)  # 높이 4px 증가
+		id_input.setFixedHeight(id_input.sizeHint().height() + 4)
 		input_layout.addWidget(id_input)
 		
 		button_layout = QHBoxLayout()
@@ -75,7 +87,7 @@ class MainWindow(QMainWindow):
 		
 		# 버튼 크기 통일
 		button_width = 80
-		button_height = 25
+		button_height = 27
 		settings_btn.setFixedSize(button_width, button_height)
 		close_btn.setFixedSize(button_width, button_height)
 		
@@ -187,6 +199,7 @@ class MainWindow(QMainWindow):
 		except Exception as e:
 			self.disk_usage_label.setText('D드라이브 정보를 읽을 수 없습니다')
 
+	# 회선 리스트
 	def setup_line_section(self):
 		line_group = QGroupBox('회선 리스트')
 		line_layout = QVBoxLayout()
@@ -209,6 +222,9 @@ class MainWindow(QMainWindow):
 				color: white;
 				padding: 4px;
 			}
+			QTableWidget {
+				alternate-background-color: #f5f5f5;  /* 홀수 행 배경색 */
+			}
 			QTableWidget::item:selected {
 				background-color: lightblue;
 				color: black;
@@ -217,23 +233,37 @@ class MainWindow(QMainWindow):
 				background-color: black;
 			}
 			QHeaderView::section:selected {
-				background-color: black;  /* 헤더 선택 시에도 검정색 유지 */
+				background-color: black;
 				color: white;
 			}
 		""")
 		
-		# 컬럼 너비 비율 설정
+		# 홀수 행 배경색 적용 설정
+		self.line_table.setAlternatingRowColors(True)
+		
+		# 컬럼 너비 설정
 		header = self.line_table.horizontalHeader()
-		header.setSectionResizeMode(0, header.Fixed)  # 순번
-		header.setSectionResizeMode(7, header.Fixed)  # 상태
-		self.line_table.setColumnWidth(0, 50)        # 순번 폭 고정
-		self.line_table.setColumnWidth(7, 80)        # 상태 폭 고정
 		
-		# 나머지 컬럼들은 자동 조절
-		for i in range(1, 7):
-			header.setSectionResizeMode(i, header.Stretch)
+		# 고정 너비 컬럼 설정
+		fixed_widths = {
+			0: 50,   # 순번
+			1: 100,  # 회선번호
+			2: 100,  # 전화기 IP
+			3: 100,  # 사용자명
+			4: 100,  # 사용자ID
+			6: 200,  # 기타
+			7: 80    # 상태
+		}
 		
-		# 이블 높이 설정
+		# 고정 너비 적용
+		for col, width in fixed_widths.items():
+			header.setSectionResizeMode(col, QHeaderView.Fixed)
+			self.line_table.setColumnWidth(col, width)
+		
+		# 자동 조절 컬럼 설정 (내용)
+		header.setSectionResizeMode(5, QHeaderView.Stretch)
+		
+		# 테이블 높이 설정
 		self.line_table.setMinimumHeight(300)
 		
 		# 행 번호 숨기기
@@ -248,14 +278,14 @@ class MainWindow(QMainWindow):
 				f'192.168.0.{20-i}',
 				f'사용자{20-i}',
 				f'USER{20-i}',
-				f'내용 {20-i}',
+				f'PyMySQL은 아래의 6가지 패턴 순서대로 진행됩니다. 하나씩 실행해보면서 그 역할을 확인해봅시다. {20-i}',
 				f'기타 {20-i}'
 			]
 			for j, item in enumerate(items):
 				table_item = QTableWidgetItem(item)
 				if j not in [5, 6]:
-						table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-				if j == 0:  # 순번 열은 중앙 정렬
+					table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
+				if j in [0, 3, 4]:  # 순번, 사용자명, 사용자ID
 					table_item.setTextAlignment(Qt.AlignCenter)
 				self.line_table.setItem(i, j, table_item)
 			
@@ -273,7 +303,10 @@ class MainWindow(QMainWindow):
 
 		line_layout.addWidget(self.line_table)
 		line_group.setLayout(line_layout)
-		self.main_layout.addWidget(line_group)
+		self.main_layout.addWidget(line_group, stretch=2)
+
+		# 행 높이 설정
+		self.line_table.verticalHeader().setDefaultSectionSize(25)  # 25px로 설정
 
 	def setup_log_section(self):
 		log_group = QGroupBox('로그 리스트')
@@ -292,31 +325,48 @@ class MainWindow(QMainWindow):
 		# 스타일 시트 설정
 		self.log_table.setStyleSheet("""
 			QHeaderView::section {
-				background-color: black;
+				background-color: #333333;
 				color: white;
 				padding: 4px;
+			}
+			QTableWidget {
+				alternate-background-color: #f5f5f5;  /* 홀수 행 배경색 */
 			}
 			QTableWidget::item:selected {
 				background-color: lightblue;
 				color: black;
 			}
 			QHeaderView {
-				background-color: black;
+				background-color: #333333;
 			}
 			QHeaderView::section:selected {
-				background-color: black;  /* 헤더 선택 시에도 검정색 유지 */
+				background-color: #333333;
 				color: white;
 			}
 		""")
 		
-		# 컬럼 너비 비율 설정
-		header = self.log_table.horizontalHeader()
-		header.setSectionResizeMode(0, header.Fixed)  # 순번
-		self.log_table.setColumnWidth(0, 50)         # 순번 폭 고정
+		# 홀수 행 배경색 적용 설정
+		self.log_table.setAlternatingRowColors(True)
 		
-		# 나머지 컬럼들은 자동 조절
-		for i in range(1, 6):
-			header.setSectionResizeMode(i, header.Stretch)
+		# 컬럼 너비 설정
+		header = self.log_table.horizontalHeader()
+		
+		# 고정 너비 컬럼 설정
+		fixed_widths = {
+			0: 50,    # 순번
+			1: 150,   # 시간
+			2: 100,   # 구분
+			3: 100,   # 구분
+			5: 200    # 기타
+		}
+		
+		# 고정 너비 적용
+		for col, width in fixed_widths.items():
+			header.setSectionResizeMode(col, QHeaderView.Fixed)
+			self.log_table.setColumnWidth(col, width)
+		
+		# 자동 조절 컬럼 설정 (내용)
+		header.setSectionResizeMode(4, QHeaderView.Stretch)  # 내용 컬럼만 Stretch
 		
 		# 테이블 높이 설정
 		self.log_table.setMinimumHeight(200)
@@ -339,16 +389,72 @@ class MainWindow(QMainWindow):
 			for j, item in enumerate(items):
 				table_item = QTableWidgetItem(item)
 				table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-				if j == 0 or j == 1:  # 순번과 시간 열을 중앙 정렬
+				if j in [0, 1, 2, 3]:  # 순번, 시간, 구분A, 구분B
 					table_item.setTextAlignment(Qt.AlignCenter)
 				self.log_table.setItem(i, j, table_item)
 
 		log_layout.addWidget(self.log_table)
 		log_group.setLayout(log_layout)
-		self.main_layout.addWidget(log_group)
+		self.main_layout.addWidget(log_group, stretch=1)
+
+		# 행 높이 설정
+		self.log_table.verticalHeader().setDefaultSectionSize(25)  # 25px로 설정
 
 if __name__ == '__main__':
 	app = QApplication(sys.argv)
+	app.setStyle('Fusion')
+	
+	# 라이트 모드 스타일 설정
+	app.setStyleSheet("""
+		QMainWindow, QWidget {
+			background-color: #ffffff;
+			color: black;
+		}
+		QGroupBox {
+			background-color: white;
+			border: 1px solid #cccccc;
+			margin-top: 6px;
+			padding-top: 6px;
+			color: black;
+			font-weight: bold;
+		}
+		QGroupBox::title {
+			subcontrol-origin: margin;
+			left: 7px;
+			padding: 0 3px 0 3px;
+			color: black;
+		}
+		QLabel {
+			color: black;
+		}
+		QTableWidget {
+			background-color: white;
+			color: black;
+			gridline-color: #cccccc;
+		}
+		QHeaderView::section {
+			background-color: #f0f0f0;
+			color: black;
+			border: 1px solid #cccccc;
+			padding: 4px;
+		}
+		QLineEdit {
+			background-color: white;
+			color: black;
+			border: 1px solid #cccccc;
+			padding: 3px;
+		}
+		QComboBox {
+			background-color: white;
+			color: black;
+			border: 1px solid #cccccc;
+			padding: 3px;
+		}
+		QCheckBox {
+			color: black;
+		}
+	""")
+	
 	window = MainWindow()
 	window.show()
-	sys.exit(app.exec_())
+	sys.exit(app.exec())
