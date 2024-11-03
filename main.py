@@ -1,6 +1,7 @@
 import sys
 import psutil
 from pathlib import Path
+import configparser
 
 from PySide6.QtWidgets import (
 	QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -124,16 +125,38 @@ class MainWindow(QMainWindow):
 		self.main_layout.addWidget(company_group)
 
 	def show_settings_popup(self):
-		popup = SettingsPopup()
-		popup.setGeometry(
+		settings_popup = SettingsPopup()
+		settings_popup.path_changed.connect(self.on_path_changed)  # 새로운 메서드 연결
+		settings_popup.setGeometry(
 			QStyle.alignedRect(
 				Qt.LeftToRight,
 				Qt.AlignCenter,
-				popup.size(),
+				settings_popup.size(),
 				self.frameGeometry()
 			)
 		)
-		popup.exec_()
+		settings_popup.exec_()
+
+	def on_path_changed(self, new_path):
+		"""경로 변경 시 호출되는 메서드"""
+		try:
+			drive_letter = new_path.split(':')[0]
+			
+			# UI 업데이트
+			self.disk_label.setText(f'녹취드라이버 ( {drive_letter} : \\) 사용률:')
+			
+			# 디스크 정보 업데이트
+			disk_usage = psutil.disk_usage(f"{drive_letter}:")
+			total_gb = disk_usage.total / (1024**3)
+			used_gb = disk_usage.used / (1024**3)
+			free_gb = disk_usage.free / (1024**3)
+			percent = int(disk_usage.percent)
+			
+			self.progress_bar.setValue(percent)
+			self.disk_usage_label.setText(f'전체: {total_gb:.1f}GB | 사용중: {used_gb:.1f}GB | 남은용량: {free_gb:.1f}GB')
+		except Exception as e:
+			print(f"Error updating disk info: {e}")
+			self.disk_usage_label.setText(f'드라이브 정보를 읽을 수 없습니다')
 
 	def setup_record_section(self):
 		record_group = QGroupBox('녹취정보')
@@ -196,14 +219,26 @@ class MainWindow(QMainWindow):
 	def setup_disk_section(self):
 		disk_group = QGroupBox('디스크 정보')
 		disk_layout = QHBoxLayout()
-		disk_layout.addWidget(QLabel('녹취드라이버(D:) 사용률:'))
+		
+		# settings.ini에서 Storage 경로 읽기
+		config = configparser.ConfigParser()
+		config.read('settings.ini', encoding='utf-8')
+		storage_path = config.get('Storage', 'path', fallback='D:\\')
+		drive_letter = storage_path.split(':')[0]
+		
+		# 클래스 변수로 저장
+		self.disk_label = QLabel(f'녹취드라이버 ( {drive_letter} : \\) 사용률:')
 		self.progress_bar = QProgressBar()
 		self.progress_bar.setStyleSheet("QProgressBar { text-align: center; }")
 		self.progress_bar.setMinimum(0)
 		self.progress_bar.setMaximum(100)
-		disk_layout.addWidget(self.progress_bar)
 		self.disk_usage_label = QLabel()
+		
+		# 레이아웃에 추가
+		disk_layout.addWidget(self.disk_label)
+		disk_layout.addWidget(self.progress_bar)
 		disk_layout.addWidget(self.disk_usage_label)
+		
 		disk_group.setLayout(disk_layout)
 		self.main_layout.addWidget(disk_group)
 
