@@ -34,10 +34,10 @@ def load_config():
         config = configparser.ConfigParser()
         config.read('settings.ini', encoding='utf-8')
 
-        save_path = config.get('Recording', 'save_path', fallback='.')
-        sample_rate = config.getint('Recording', 'sample_rate', fallback=8000)
+        SAVE_PATH = config.get('Recording', 'SAVE_PATH', fallback='.')
+        SAMPLE_RATE = config.getint('Recording', 'SAMPLE_RATE', fallback=8000)
 
-        return save_path, sample_rate
+        return SAVE_PATH, SAMPLE_RATE
     except Exception as e:
         log_message("오류", f"설정 파일 로드 실패: {str(e)}")
         return '.', 8000
@@ -112,10 +112,22 @@ def analyze_sip(packet):
             log_message("정보", f"통화 종료: {call_id}")
             save_audio(call_id, active_calls[call_id]["audio_frames"])
             del active_calls[call_id]
-        elif sip_layer.get_field_value('status_code') == '180':
+        elif sip_layer.get_field_value('status_code') == '100':
+            log_message("정보", f"통화 발신가능: {call_id}")            
+        elif sip_layer.get_field_value('status_code') == '183':
             log_message("정보", f"통화 중: {call_id}")
+        elif sip_method == "INVITE IN":
+            log_message("정보", f"온 전화 받는 주: {call_id}")
+        elif sip_method == "IN CALL":
+            log_message("정보", f"한 전화 받는 중: {call_id}")            
         elif sip_layer.get_field_value('status_code') == '200' and sip_method != "BYE":
-            log_message("정보", f"통화 연결됨: {call_id}")
+            log_message("정보", f"통화 수신가능: {call_id}")        
+        elif sip_layer.get_field_value('status_code') == '200' and sip_method == "BYE":
+            log_message("정보", f"통화.종료: {call_id}")
+        elif sip_layer.get_field_value('status_code') == '407':
+            log_message("정보", f"전화거는 중..: {call_id}")
+        elif sip_layer.get_field_value('status_code') == '407' and sip_method == '200':
+            log_message("정보", f"통화연결 성공: {call_id}")
         elif sip_layer.get_field_value('status_code') in ['403', '404', '487']:
             log_message("경고", f"통화 실패: {call_id} (코드: {sip_layer.get_field_value('status_code')})")
 
