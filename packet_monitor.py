@@ -42,13 +42,18 @@ def load_config():
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
 		
-		# 설정 로드 확인 위한 로그 추가
+		# Recording 섹션 검증
 		if 'Recording' in config:
-			log_message("정보", f"녹취 저장 경로: {config['Recording']['save_path']}")
+			recording_config = {
+				'save_path': config['Recording'].get('save_path', r'C:\\'),
+				'channels': config['Recording'].getint('channels', 1),
+				'sample_rate': config['Recording'].getint('sample_rate', 8000)
+			}
+			log_message("정보", f"녹취 설정 로드: {recording_config}")
+			return recording_config
 		else:
 			log_message("오류", "Recording 섹션을 찾을 수 없습니다")
-			
-		return config
+			return None
 	except Exception as e:
 		log_message("오류", f"설정 파일 로드 실패: {str(e)}")
 		return None
@@ -57,6 +62,15 @@ def save_audio(call_id, call_info):
 	"""음성 데이터 WAV 파일로 저장"""
 	try:
 		log_message("디버그", f"녹취 저장 시작 - Call-ID: {call_id}")
+		
+		# 설정 가져오기
+		config = load_config()
+		if not config:
+			config = {
+				'save_path': r"C:\\",  # 기본값
+				'channels': 1,
+				'sample_rate': 8000
+			}
 		
 		# call_info 유효성 검사
 		if not call_info or not isinstance(call_info, dict):
@@ -83,7 +97,7 @@ def save_audio(call_id, call_info):
 					   f"패킷 수: {packet_count}, "
 					   f"Source IP: {stream_info.get('source_ip')}")
 		
-		save_dir = r"D:\PacketWaveRecord"
+		save_dir = config['save_path']
 		if not os.path.exists(save_dir):
 			os.makedirs(save_dir, exist_ok=True)
 		
@@ -100,11 +114,11 @@ def save_audio(call_id, call_info):
 					f"{timestamp}_{call_info.get('from_number', 'unknown')}_{call_info.get('to_number', 'unknown')}_{stream_id}.wav"
 				)
 				
-				# WAV 파일 생성
+				# WAV 파일 생성 (설정값 적용)
 				with wave.open(filename, 'wb') as wav_file:
-					wav_file.setnchannels(1)  # 모노
+					wav_file.setnchannels(config['channels'])
 					wav_file.setsampwidth(2)  # 16-bit
-					wav_file.setframerate(8000)  # G.711 샘플레이트
+					wav_file.setframerate(config['sample_rate'])
 					
 					# 패킷 정렬
 					sorted_packets = sorted(stream_info["packets"], key=lambda x: x["sequence"])
@@ -369,7 +383,7 @@ def analyze_sip(packet):
 					active_calls[call_id]['duration'] = str(duration).split('.')[0]
 					
 					log_message("정보", 
-							   f"통화 종료 리 ��� - Call-ID: {call_id}, "
+							   f"통화 종료 리셋 - Call-ID: {call_id}, "
 							   f"결과: {active_calls[call_id]['result']}, "
 							   f"통화시간: {active_calls[call_id]['duration']}")
 					
@@ -426,7 +440,7 @@ def cleanup_old_calls():
 				del active_calls[call_id]
 
 def determine_stream_direction(packet):
-	"""통화 방향 및 번�� 정보 결정"""
+	"""통화 방향 및 번 정보 결정"""
 	src_port = int(packet.udp.srcport)
 	dst_port = int(packet.udp.dstport)
 	
@@ -443,7 +457,7 @@ def determine_stream_direction(packet):
 	return direction, local_num, remote_num
 
 def start_capture(interface, ui_callback=None):
-	"""패킷 캡처 시작"""
+	"""패킷 패킷모니터 시작"""
 	try:
 		loop = asyncio.new_event_loop()
 		asyncio.set_event_loop(loop)
@@ -537,7 +551,7 @@ def start_capture(interface, ui_callback=None):
 				print(f"패킷 분석 중 오류: {str(e)}")
 				
 	except Exception as e:
-		print(f"캡처 시작 중 오류: {str(e)}")
+		print(f"패킷모니터 시작 중 오류: {str(e)}")
 	finally:
 		# 모든 스트림 상태를 녹음완료로 변경
 		for stream_key in streams:
@@ -555,37 +569,6 @@ def start_capture(interface, ui_callback=None):
 		
 		if 'loop' in locals():
 			loop.close()
-
-def save_wav_file(stream_key, stream_info):
-	"""WAV 파일 저장"""
-	try:
-		save_dir = r"D:\PacketWaveRecord"
-		if not os.path.exists(save_dir):
-			os.makedirs(save_dir)
-		
-		# 파일명에서 콜론을 언더스코어로 변경
-		local_num = stream_info['local_num'].replace(':', '_')
-		remote_num = stream_info['remote_num'].replace(':', '_')
-		
-		timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-		filename = os.path.join(
-			save_dir, 
-			f"{timestamp}_{stream_info['direction']}_{local_num}-{remote_num}.wav"
-		)
-		
-		with wave.open(filename, 'wb') as wav_file:
-			wav_file.setnchannels(1)
-			wav_file.setsampwidth(2)
-			wav_file.setframerate(8000)
-			
-			# 모든 음성 데이터를 하나의 바이트 문자열로 결합
-			all_data = b''.join(stream_info['voice_data'])
-			wav_file.writeframes(all_data)
-		
-		print(f"WAV 파일 저장 완료: {filename}")
-		
-	except Exception as e:
-		print(f"WAV 파일 저장 실패: {str(e)}")
 
 class VoIPMonitorUI(QMainWindow):
 	def __init__(self):
@@ -610,10 +593,13 @@ class VoIPMonitorUI(QMainWindow):
 		
 		# 인터페이스 선택 영역
 		interface_layout = QHBoxLayout()
+		interface_layout.addSpacing(20)  # 왼쪽 여백 추가
 		interface_label = QLabel("네트워크 인터페이스:")
 		self.interface_combo = QComboBox()
-		self.start_button = QPushButton("캡처 시작")
-		
+		self.interface_combo.setStyleSheet("QComboBox { min-width: 200px; height: 27px; }")
+		self.start_button = QPushButton("패킷모니터 시작")
+		self.start_button.setStyleSheet("QPushButton { min-width: 150px; height: 22px; }")
+
 		interface_layout.addWidget(interface_label)
 		interface_layout.addWidget(self.interface_combo)
 		interface_layout.addWidget(self.start_button)
@@ -657,7 +643,7 @@ class VoIPMonitorUI(QMainWindow):
 				self.interface_combo.addItem(f"{iface} - {ip_addresses[0]}", iface)
 
 	def start_capture(self):
-		"""UI에서 캡처 시작"""
+		"""UI에서 패킷모니터 시작"""
 		try:
 			selected_interface = self.interface_combo.currentData()
 			if not selected_interface:
@@ -676,7 +662,7 @@ class VoIPMonitorUI(QMainWindow):
 			self.start_button.setText("캡처 중...")
 			
 		except Exception as e:
-			log_message("오류", f"캡처 시작 실패: {str(e)}")
+			log_message("오류", f"패킷모니터 시작 실패: {str(e)}")
 
 	def update_table(self):
 		"""테이블 업데이트"""
@@ -792,8 +778,6 @@ if __name__ == '__main__':
 
 	# 전역 변수 초기화
 	active_calls = {}
-	rtp_streams = {}
-	rpt_stream_buffer = {}
 	config = load_config()
 	
 	if not config:
