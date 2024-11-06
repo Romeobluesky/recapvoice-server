@@ -14,7 +14,7 @@ def setup_logging():
 		level=logging.INFO,
 		format='%(asctime)s - %(levelname)s - %(message)s',
 		handlers=[
-			logging.FileHandler('voip_monitor.log'),
+			logging.FileHandler('voip_monitor.log', encoding='utf-8'),
 			logging.StreamHandler()
 		]
 	)
@@ -33,14 +33,10 @@ def load_config():
 	try:
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
-
-		SAVE_PATH = config.get('Recording', 'SAVE_PATH', fallback='.')
-		SAMPLE_RATE = config.getint('Recording', 'SAMPLE_RATE', fallback=8000)
-
-		return SAVE_PATH, SAMPLE_RATE
+		return config
 	except Exception as e:
 		log_message("오류", f"설정 파일 로드 실패: {str(e)}")
-		return '.', 8000
+		return None
 
 def choose_interface():
 	"""네트워크 인터페이스 선택"""
@@ -198,120 +194,132 @@ def load_sip_codes():
 
 def analyze_sip(packet):
 	"""SIP 패킷 분석"""
-	if 'SIP' not in packet:
-		return
-
-	sip_layer = packet['SIP']
-	call_id = sip_layer.get_field_value('call-id')
-	
 	try:
-		# Request 분석
-		method = sip_layer.get_field_value('request_method')
-		if method:
-			handle_sip_request(method, call_id, sip_layer)
+		if 'SIP' not in packet:
 			return
 
-		# Response 분석
-		status_code = sip_layer.get_field_value('status_code')
-		if status_code:
-			handle_sip_response(status_code, call_id, sip_layer)
+		sip = packet.sip
+		print("\r[DEBUG] SIP 패킷 감지됨", flush=True)
+		
+		if hasattr(sip, 'call_id'):
+			call_id = sip.call_id
+			print(f"\r[DEBUG] Call-ID: {call_id}", flush=True)
+		else:
+			return
+
+		if hasattr(sip, 'request_line'):
+			method = sip.request_line.split()[0]
+			print(f"\r[DEBUG] Request: {method}", flush=True)
+			handle_sip_request(method, call_id, sip, packet)
+		
+		elif hasattr(sip, 'status_line'):
+			status_code = sip.status_line.split()[1]
+			print(f"\r[DEBUG] Response: {status_code}", flush=True)
+			handle_sip_response(status_code, call_id, sip)
 			
 	except Exception as e:
-		log_message("오류", f"SIP 패킷 분석 중 오류: {str(e)}")
+		print(f"\r[ERROR] SIP 패킷 분석 중 오류: {str(e)}", flush=True)
 
-def handle_sip_request(method, call_id, sip_layer):
+def handle_sip_request(method, call_id, sip_layer, packet):
 	"""SIP Request 처리"""
-	if method == "INVITE":
-		if call_id not in active_calls:
-			# From/To URI에서 전화번호 추출
-			from_number = sip_layer.get_field_value('from').split('@')[0].replace('sip:', '')
-			to_number = sip_layer.get_field_value('to').split('@')[0].replace('sip:', '')
+	try:
+		if method == "INVITE":
+			print("\r[DEBUG] INVITE 요청 처리 시작", flush=True)
 			
-			active_calls[call_id] = {
-				"sip_packets": [],
-				"audio_frames": [],
-				"status": "initiating",
-				"start_time": datetime.datetime.now(),
-				"from_number": from_number,  # 발신 번호
-				"to_number": to_number,      # 수신 번호
-				"call_info": f"{from_number} -> {to_number}"  # 통화 정보
-			}
-			log_message("정보", f"새로운 통화 시도: {from_number} -> {to_number}")
+			# From/To 헤더 접근 방식 수정
+			from_header = getattr(sip_layer, 'from')  # from_ -> from
+			to_header = getattr(sip_layer, 'to')
+			
+			print(f"\r[DEBUG] From: {from_header}", flush=True)
+			print(f"\r[DEBUG] To: {to_header}", flush=True)
+			
+			from_number = from_header.split('@')[0].split(':')[-1]
+			to_number = to_header.split('@')[0].split(':')[-1]
+			
+			# settings.ini에서 IP 가져오기
+			config = configparser.ConfigParser()
+			config.read('settings.ini', encoding='utf-8')
+			network_ip = config.get('Network', 'ip')
+			
+			# 발신/수신 구분
+			source_ip = packet.ip.src
+			call_direction = "발신" if source_ip in network_ip.split(',') else "수신"
+			
+			if call_id not in active_calls:
+				active_calls[call_id] = {
+					"direction": call_direction,
+					"status": "시도중",
+					"start_time": datetime.datetime.now(),
+					"from_number": from_number,
+					"to_number": to_number,
+					"audio_frames": {"streams": {}}
+				}
+				print(f"\r통화 시작: [{call_direction}] {from_number} -> {to_number}", flush=True)
 	
-		# SIP 패킷 저장
-		if call_id in active_calls:
-			active_calls[call_id]["sip_packets"].append({
-				"method": method,
-				"timestamp": datetime.datetime.now(),
-				"from_uri": sip_layer.get_field_value('from'),
-				"to_uri": sip_layer.get_field_value('to')
-			})
-
-	elif method == "BYE":
-		if call_id in active_calls:
-			duration = datetime.datetime.now() - active_calls[call_id]["start_time"]
-			log_message("정보", f"통화 종료: {call_id} (통화시간: {duration})")
-			save_audio(call_id, active_calls[call_id]["audio_frames"])
-			del active_calls[call_id]
-	
-	elif method == "REGISTER":
-		log_message("정보", f"SIP 등록 요청: {sip_layer.get_field_value('from')}")
-	
-	elif method == "OPTIONS":
-		log_message("정보", f"SIP 옵션 요청: {call_id}")
+	except Exception as e:
+		print(f"\r[ERROR] SIP 요청 처리 중 오류: {str(e)}", flush=True)
+		import traceback
+		print(traceback.format_exc())
 
 def handle_sip_response(status_code, call_id, sip_layer):
 	"""SIP Response 처리"""
-	response_desc = sip_codes.get(status_code, "Unknown Response")
-	
-	# Informational (1xx)
-	if status_code.startswith('1'):
+	try:
 		if call_id in active_calls:
-			active_calls[call_id]["status"] = "progressing"
-			log_message("정보", f"통화 진행 중: {call_id} ({status_code} {response_desc})")
+			direction = active_calls[call_id].get("direction", "알수없음")
+			from_number = active_calls[call_id].get("from_number", "알수없음")
+			to_number = active_calls[call_id].get("to_number", "알수없음")
+			
+			# sip_codes 로드
+			sip_codes = load_sip_codes()
+			status_desc = sip_codes.get(str(status_code), "알수없는 응답")
+			call_info = f"[{direction}] {from_number} -> {to_number}"
+			
+			# 상태 메시지 출력 형식
+			status_msg = f"통화 상태: {call_info} ({status_code} {status_desc})"
+			
+			print(f"\r{status_msg:<100}", flush=True)
+			
+			if status_code == "100":
+				active_calls[call_id]["status"] = "시도중"
+			elif status_code == "180":
+				active_calls[call_id]["status"] = "벨울림"
+			elif status_code == "182":
+				active_calls[call_id]["status"] = "대기중"
+			elif status_code == "183":
+				active_calls[call_id]["status"] = "호처리중"
+			elif status_code == "200":
+				active_calls[call_id]["status"] = "통화중"
+			elif status_code == "401" or status_code == "407":
+				active_calls[call_id]["status"] = "인증필요"
+			elif status_code.startswith('4'):
+				active_calls[call_id]["status"] = "실패"
+				if status_code not in ["401", "407"]:
+					del active_calls[call_id]
+			elif status_code.startswith('5'):
+				active_calls[call_id]["status"] = "서버오류"
+				del active_calls[call_id]
+			elif status_code.startswith('6'):
+				active_calls[call_id]["status"] = "전역오류"
+				del active_calls[call_id]
 	
-	# Success (2xx)
-	elif status_code.startswith('2'):
-		if call_id in active_calls:
-			active_calls[call_id]["status"] = "established"
-			log_message("정보", f"통화 연결됨: {call_id} ({status_code} {response_desc})")
-	
-	# Redirection (3xx)
-	elif status_code.startswith('3'):
-		log_message("정보", f"통화 리다이렉션: {call_id} ({status_code} {response_desc})")
-	
-	# Client Error (4xx)
-	elif status_code.startswith('4'):
-		log_message("경고", f"클라이언트 오류: {call_id} ({status_code} {response_desc})")
-		if call_id in active_calls:
-			del active_calls[call_id]
-	
-	# Server Error (5xx)
-	elif status_code.startswith('5'):
-		log_message("오류", f"서버 오류: {call_id} ({status_code} {response_desc})")
-		if call_id in active_calls:
-			del active_calls[call_id]
-	
-	# Global Error (6xx)
-	elif status_code.startswith('6'):
-		log_message("오류", f"전역 오류: {call_id} ({status_code} {response_desc})")
-		if call_id in active_calls:
-			del active_calls[call_id]
+	except Exception as e:
+		log_message("오류", f"SIP 응답 처리 중 오류: {str(e)}")
 
 def cleanup_old_calls():
 	"""오래된 통화 정리"""
 	current_time = datetime.datetime.now()
 	for call_id in list(active_calls.keys()):
-		call_start_time = active_calls[call_id].get("start_time")
-		if call_start_time and (current_time - call_start_time).seconds > 7200:
-			log_message("정보", f"오래된 통화 기록 제거: {call_id}")
-			save_audio(call_id, active_calls[call_id]["audio_frames"])
-			del active_calls[call_id]
+			call_start_time = active_calls[call_id].get("start_time")
+			if call_start_time and (current_time - call_start_time).seconds > 7200:
+				log_message("정보", f"오래된 통화 기록 제거: {call_id}")
+				save_audio(call_id, active_calls[call_id]["audio_frames"])
+				del active_calls[call_id]
 
 def start_capture(interface):
 	"""패킷 캡처 시작"""
 	cleanup_timer = 0
-	capture = pyshark.LiveCapture(interface=interface, bpf_filter="port 5060")
+	# SIP와 RTP 패킷 모두 캡처하도록 필터 수정
+	capture = pyshark.LiveCapture(interface=interface, bpf_filter="port 5060 or udp portrange 10000-20000")
 	log_message("정보", f"패킷 캡처 시작: {interface}")
 
 	try:
@@ -346,8 +354,10 @@ if __name__ == '__main__':
 
 	# 전역 변수 초기화
 	active_calls = {}
-	SAVE_PATH, SAMPLE_RATE = load_config()
-	sip_codes = load_sip_codes()  # SIP 응답 코드 로드
+	config = load_config()
+	if not config:
+		log_message("오류", "설정 파일 로드 실패")
+		exit(1)
 
 	# 메인 로직 실행
 	interface = choose_interface()
