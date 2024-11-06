@@ -184,23 +184,38 @@ def analyze_sip(packet):
 			# INVITE 요청 처리
 			if 'INVITE' in sip_layer.request_line:
 				if call_id not in active_calls:
+					to_number = extract_number(sip_layer.to_user)
+					# 내선번호가 1xxx, 2xxx, 3xxx, 4xxx 형태라고 가정
+					direction = '수신' if to_number and to_number[0] in ['1','2','3','4'] else '발신'
+					
 					active_calls[call_id] = {
 						'start_time': datetime.datetime.now(),
 						'status': '시도중',
 						'result': '',
-						'direction': '발신' if packet.ip.src == packet.ip.dst else '수신',
+						'direction': direction,
 						'from_number': extract_number(sip_layer.from_user),
-						'to_number': extract_number(sip_layer.to_user),
-						'call_id': call_id.split('@')[0] if '@' in call_id else call_id
+						'to_number': to_number,
+						'call_id': call_id
 					}
+			
+			# CANCEL 요청 처리 (벨 울리는 중 발신자 종료)
+			elif 'CANCEL' in sip_layer.request_line and call_id in active_calls:
+				if active_calls[call_id]['status'] == '시도중':
+					active_calls[call_id]['status'] = '통화종료'
+					active_calls[call_id]['result'] = '수신전종료'
+					active_calls[call_id]['end_time'] = datetime.datetime.now()
 			
 			# BYE 요청 처리
 			elif 'BYE' in sip_layer.request_line and call_id in active_calls:
 				if active_calls[call_id]['status'] == '통화중':
 					active_calls[call_id]['status'] = '통화종료'
-					active_calls[call_id]['result'] = 'OK'
+					bye_from_number = extract_number(sip_layer.from_user)
+					if bye_from_number == active_calls[call_id]['from_number']:
+						active_calls[call_id]['result'] = '발신종료'
+					else:
+						active_calls[call_id]['result'] = '수신종료'
 					active_calls[call_id]['end_time'] = datetime.datetime.now()
-				
+	
 		elif hasattr(sip_layer, 'status_line'):
 			handle_sip_response(sip_layer.status_code, call_id, sip_layer)
 			
@@ -339,7 +354,7 @@ class VoIPMonitorUI(QMainWindow):
         self.table.setColumnWidth(3, 120)
         self.table.setColumnWidth(4, 80)
         self.table.setColumnWidth(5, 80)
-        self.table.setColumnWidth(6, 200)
+        self.table.setColumnWidth(6, 400)
         
         layout.addWidget(self.table)
         
@@ -406,19 +421,18 @@ class VoIPMonitorUI(QMainWindow):
             result_item = QTableWidgetItem(call_info.get('result', ''))
             self.table.setItem(row, 5, result_item)
             
-            # Call-ID (@ 앞부분만)
+            # Call-ID
             callid_item = QTableWidgetItem(call_info.get('call_id', ''))
             self.table.setItem(row, 6, callid_item)
             
-            # IP 주소 표시
+            # IP 주소 표시 (컬럼 7로 변경)
             if 'media_endpoints' in call_info:
                 ip_addresses = [f"{ep['ip']}:{ep['port']}" for ep in call_info['media_endpoints']]
                 ip_text = '\n'.join(ip_addresses)
             else:
                 ip_text = ''
-                
             ip_item = QTableWidgetItem(ip_text)
-            self.table.setItem(row, 6, ip_item)
+            self.table.setItem(row, 7, ip_item)
             
             # 포트 정보
             if 'media_endpoints' in call_info:
@@ -426,7 +440,6 @@ class VoIPMonitorUI(QMainWindow):
                 port_text = ', '.join(ports)
             else:
                 port_text = ''
-                
             port_item = QTableWidgetItem(port_text)
             self.table.setItem(row, 8, port_item)
 

@@ -1,0 +1,22 @@
+SIP/2.0 183 Session Progress
+Via: SIP/2.0/UDP 192.168.0.55:5060;branch=z9hG4bK124fe9913;received=222.100.152.166;rport=1295
+From: "07086661427,1427" <sip:109Q1427@112.222.225.104:5060>;tag=cdfe6f62715d4b5
+To: <sip:01077141436@112.222.225.104:5060>;tag=as5fc2f62b
+Call-ID: 0736a512dcb5e450cb5a3924ca37cdcc@192.168.0.55
+CSeq: 10002 INVITE
+User-Agent: Unknown_
+Allow: INVITE, ACK, CANCEL, OPTIONS, BYE, REFER, SUBSCRIBE, NOTIFY
+Contact: <sip:01077141436@112.222.225.104:5060>
+Content-Type: application/sdp
+Content-Length: 218
+
+v=0
+o=root 2578 2578 IN IP4 112.222.225.77
+s=session
+c=IN IP4 112.222.225.77
+t=0 0
+m=audio 32042 RTP/AVP 8 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=silenceSupp:off - - - -
