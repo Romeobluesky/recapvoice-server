@@ -110,20 +110,26 @@ class SettingsPopup(QDialog):
 	def create_record_ip_section(self):
 		"""Record IP 섹션 생성"""
 		layout = QHBoxLayout()
-		layout.addWidget(QLabel('Record IP:'))
+		
+		# Record IP 라벨 생성 및 고정 너비 설정
+		record_ip_label = QLabel('Record IP:')
+		record_ip_label.setFixedWidth(80)  # 라벨 너비 고정
 		
 		# 이더넷 인터페이스 콤보박스
 		self.ip_combo = QComboBox()
-		self.ip_combo.setFixedHeight(24)
-		self.load_network_interfaces()  # 이더넷 인터페이스 로드
+		self.ip_combo.setFixedHeight(26)
+		self.load_network_interfaces()
 		
+		layout.addWidget(record_ip_label)
 		layout.addWidget(self.ip_combo)
+		layout.setSpacing(10)  # 위젯 간 간격 설정
+		
 		return layout
 	
 	def create_path_section(self):
 		"""저장 경로 섹션 생성"""
 		layout = QHBoxLayout()
-		layout.addWidget(QLabel('저장 경로: '))
+		layout.addWidget(QLabel('저장 경로 : '))
 		
 		# 드라이브 선택
 		self.drive_combo = QComboBox()
@@ -151,10 +157,13 @@ class SettingsPopup(QDialog):
 	def create_alarm_section(self):
 		"""Alarm 설정 섹션 생성"""
 		layout = QHBoxLayout()
+		layout.setAlignment(Qt.AlignLeft)  # 전체 레이아웃 왼쪽 정렬
 		
 		# Disk 사용률 입력
 		self.disk_percent_input = QLineEdit()
 		self.disk_percent_input.setText(self.config['OtherSettings'].get('disk_persent', '90'))
+		self.disk_percent_input.setFixedWidth(50)
+		self.disk_percent_input.setAlignment(Qt.AlignCenter)  # 오른쪽 정렬
 		
 		# Alarm 끄기 체크박스
 		self.alarm_checkbox = QCheckBox('Alarm 끄기')
@@ -164,6 +173,9 @@ class SettingsPopup(QDialog):
 		layout.addWidget(self.disk_percent_input)
 		layout.addWidget(QLabel('% 이상이면 Alarm 발생'))
 		layout.addWidget(self.alarm_checkbox)
+		
+		# 오른쪽 여백을 채우는 stretch 추가
+		layout.addStretch()
 		
 		return layout
 	
