@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 	QMessageBox
 )
 from PySide6.QtCore import Qt, Signal
+import socket
+import requests
 
 class SettingsPopup(QDialog):
 	# 상수 정의
@@ -19,6 +21,7 @@ class SettingsPopup(QDialog):
 	
 	# 시그널 정의
 	path_changed = Signal(str)
+	settings_changed = Signal(dict)  # 모든 설정값을 dictionary로 전달
 	
 	def __init__(self):
 		super().__init__()
@@ -51,27 +54,41 @@ class SettingsPopup(QDialog):
 		
 		self.setLayout(main_layout)
 		self.update_disk_info()
-	
+
+	def get_public_ip(self):
+		try:
+			response = requests.get('https://api64.ipify.org/?format=json')
+			ip = response.json().get('ip')
+			return ip
+		except requests.RequestException as e:
+			print(f"An error occurred: {e}")
+			return None	
+
 	def create_company_section(self):
 		"""회사 정보 섹션 생성"""
-		company_group = QGroupBox('회사 정보')
+		company_group = QGroupBox()
 		layout = QHBoxLayout()
 		
-		fields = [
-			('대표 번호:', QLineEdit()),
-			('AP 서버 IP:', QLineEdit())
-		]
+		# 대표번호 입력필드
+		self.rep_number_input = QLineEdit()
+		self.rep_number_input.setText(self.config['Extension'].get('Rep_number', ''))
 		
-		for label_text, widget in fields:
-			layout.addWidget(QLabel(label_text))
-			layout.addWidget(widget)
+		# AP 서버 IP 입력필드
+		self.ap_ip_input = QLineEdit()
+		self.ap_ip_input.setText(self.get_public_ip())
+		self.ap_ip_input.setReadOnly(True)
+
+		layout.addWidget(QLabel('대표 번호:'))
+		layout.addWidget(self.rep_number_input)
+		layout.addWidget(QLabel('AP 서버 IP:'))
+		layout.addWidget(self.ap_ip_input)
 		
 		company_group.setLayout(layout)
 		return company_group
-	
+
 	def create_record_section(self):
 		"""녹취 정보 섹션 생성"""
-		record_group = QGroupBox('녹취 정보')
+		record_group = QGroupBox()
 		layout = QVBoxLayout()
 		
 		# Record IP
@@ -94,7 +111,13 @@ class SettingsPopup(QDialog):
 		"""Record IP 섹션 생성"""
 		layout = QHBoxLayout()
 		layout.addWidget(QLabel('Record IP:'))
-		layout.addWidget(QLineEdit())
+		
+		# 이더넷 인터페이스 콤보박스
+		self.ip_combo = QComboBox()
+		self.ip_combo.setFixedHeight(24)
+		self.load_network_interfaces()  # 이더넷 인터페이스 로드
+		
+		layout.addWidget(self.ip_combo)
 		return layout
 	
 	def create_path_section(self):
@@ -128,17 +151,19 @@ class SettingsPopup(QDialog):
 	def create_alarm_section(self):
 		"""Alarm 설정 섹션 생성"""
 		layout = QHBoxLayout()
-		layout.setAlignment(Qt.AlignLeft)
+		
+		# Disk 사용률 입력
+		self.disk_percent_input = QLineEdit()
+		self.disk_percent_input.setText(self.config['OtherSettings'].get('disk_persent', '90'))
+		
+		# Alarm 끄기 체크박스
+		self.alarm_checkbox = QCheckBox('Alarm 끄기')
+		self.alarm_checkbox.setChecked(self.config['OtherSettings'].get('disk_alarm', 'true').lower() == 'true')
 		
 		layout.addWidget(QLabel('Disk 사용률:'))
-		
-		usage_input = QLineEdit()
-		usage_input.setFixedWidth(self.BUTTON_SIZES['usage_input'][0])
-		layout.addWidget(usage_input)
-		
+		layout.addWidget(self.disk_percent_input)
 		layout.addWidget(QLabel('% 이상이면 Alarm 발생'))
-		layout.addWidget(QCheckBox('Alarm 끄기'))
-		layout.addStretch()
+		layout.addWidget(self.alarm_checkbox)
 		
 		return layout
 	
@@ -217,7 +242,7 @@ class SettingsPopup(QDialog):
 			
 			# 경로 입력창 업데이트
 			self.path_input.setText(path)
-			# settings.ini 파일 업데이트
+			# settings.ini 파일 업데이트 및 시그널 발생
 			self.update_storage_path(path)
 	
 	def update_storage_path(self, path):
@@ -231,7 +256,7 @@ class SettingsPopup(QDialog):
 			with open('settings.ini', 'w', encoding='utf-8') as configfile:
 				self.config.write(configfile)
 			
-			# 시그널 발생 위치 변경
+			# 시그널 발생
 			self.path_changed.emit(path)
 			
 			# 경로 변경 알림창 표시
@@ -251,19 +276,36 @@ class SettingsPopup(QDialog):
 	
 	def save_settings(self):
 		"""설정 저장"""
-		# 현재 선택된 경로 저장
-		current_path = self.path_input.text()
-		if current_path:
-			self.update_storage_path(current_path)
+		# 설정값 업데이트
+		settings_data = {
+			'Extension': {
+				'Rep_number': self.rep_number_input.text()
+			},
+			'Network': {
+				'ip': self.ip_combo.currentText(),
+				'ap_ip': self.ap_ip_input.text()  # AP 서버 IP 추가
+			},
+			'OtherSettings': {
+				'disk_persent': self.disk_percent_input.text(),
+				'disk_alarm': str(self.alarm_checkbox.isChecked()).lower()
+			}
+		}
 		
-		# 저장 완료 메시지 표시
-		QMessageBox.information(
-			self,
-			"설정 저장",
-			"설정이 성공적으로 저장되었습니다.",
-			QMessageBox.Ok
-		)
+		# settings.ini 파일 업데이트
+		for section, values in settings_data.items():
+			if section not in self.config:
+				self.config[section] = {}
+			for key, value in values.items():
+				self.config[section][key] = value
 		
+		# 파일 저장
+		with open('settings.ini', 'w', encoding='utf-8') as configfile:
+			self.config.write(configfile)
+		
+		# 설정 변경 시그널 발생
+		self.settings_changed.emit(settings_data)
+		
+		QMessageBox.information(self, "설정 저장", "설정이 성공적으로 저장되었습니다.")
 		self.close()
 	
 	def update_disk_info(self):
@@ -281,39 +323,112 @@ class SettingsPopup(QDialog):
 				f'사용률 [{percent}%]'
 			)
 			self.progress_bar.setValue(percent)
-	
+
+	def load_network_interfaces(self):
+		"""이더넷 인터페이스 목록 로드"""
+		# 모든 네트워크 인터페이스 조회
+		interfaces = psutil.net_if_addrs()
+		
+		# 이더넷 인터페이스만 필터링
+		ethernet_ips = []
+		for interface, addrs in interfaces.items():
+			for addr in addrs:
+				if addr.family == socket.AF_INET:  # IPv4 주소만
+					ethernet_ips.append(addr.address)
+		
+		# 콤보박스에 추가
+		self.ip_combo.clear()
+		self.ip_combo.addItems(ethernet_ips)
+		
+		# 현재 설정된 IP 선택
+		current_ip = self.config['Network'].get('ip', '')
+		index = self.ip_combo.findText(current_ip)
+		if index >= 0:
+			self.ip_combo.setCurrentIndex(index)
+
 	def apply_stylesheet(self):
-		"""스타일시트 적용"""
+		"""다크모드 스타일시트 적용"""
 		self.setStyleSheet("""
+			QDialog {
+				background-color: #1e1e1e;
+			}
 			QLabel {
 				font-size: 12px;
-				color: #333;
+				color: #ffffff;
 				margin-top: 4px;
 				padding-right: 15px;
 			}
 			QLineEdit, QComboBox {
 				padding: 5px;
-				border: 1px solid #ccc;
+				border: 1px solid #333333;
+				background-color: #2d2d2d;
+				color: #ffffff;
+			}
+			QLineEdit:disabled {
+				background-color: #383838;
+				color: #808080;
 			}
 			QProgressBar {
 				text-align: center;
-				border: 1px solid #ccc;
+				border: 1px solid #333333;
+				background-color: #2d2d2d;
+				color: #ffffff;
+			}
+			QProgressBar::chunk {
+				background-color: #48c9b0;
 			}
 			QPushButton {
 				padding: 8px 15px;
-				background-color: #09225E;
+				background-color: #48c9b0;
 				color: white;
 				border: none;
+				border-radius: 2px;
 			}
 			QPushButton:hover {
-				background-color: #000000;
-				color: white;
+				background-color: #45b39d;
+			}
+			QPushButton:pressed {
+				background-color: #40a391;
 			}
 			QCheckBox {
 				margin-top: 4px;
+				color: #ffffff;
+			}
+			QCheckBox::indicator {
+				width: 13px;
+				height: 13px;
+				background-color: #2d2d2d;
+				border: 1px solid #333333;
+			}
+			QCheckBox::indicator:checked {
+				background-color: #48c9b0;
 			}
 			QGroupBox {
-				border: 1px solid #ccc;
+				border: 1px solid #333333;
 				margin-top: 10px;
+				color: #ffffff;
+				background-color: #252525;
+			}
+			QComboBox::drop-down {
+				border: none;
+				background-color: #48c9b0;
+				width: 25px;
+			}
+			QComboBox::down-arrow {
+				image: none;
+				border-left: 5px solid transparent;
+				border-right: 5px solid transparent;
+				border-top: 5px solid white;
+				margin-top: 3px;
+			}
+			QComboBox:on {
+				border: 1px solid #48c9b0;
+			}
+			QComboBox QAbstractItemView {
+				background-color: #2d2d2d;
+				color: #ffffff;
+				selection-background-color: #48c9b0;
+				selection-color: #ffffff;
+				border: 1px solid #333333;
 			}
 		""")

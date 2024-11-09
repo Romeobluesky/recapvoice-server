@@ -456,7 +456,7 @@ def determine_stream_direction(packet):
 	
 	return direction, local_num, remote_num
 
-def start_capture(interface, ui_callback=None):
+def capture_packets(interface, ui_callback=None):
 	"""패킷 패킷모니터 시작"""
 	try:
 		loop = asyncio.new_event_loop()
@@ -570,12 +570,13 @@ def start_capture(interface, ui_callback=None):
 		if 'loop' in locals():
 			loop.close()
 
-class VoIPMonitorUI(QMainWindow):
+class PacketMonitor(QMainWindow):
 	def __init__(self):
 		super().__init__()
-		self.setWindowTitle('패킷 모니터')
-		self.setGeometry(100, 100, 1200, 600)
-		
+		#self.setWindowTitle('패킷 모니터')
+		#self.setGeometry(100, 100, 1200, 600)
+		self.setWindowTitle("Packet Monitor")
+		self.resize(1200, 600)
 		# 스타일 설정
 		self.setStyleSheet("""
 			QMainWindow {
@@ -593,12 +594,12 @@ class VoIPMonitorUI(QMainWindow):
 		
 		# 인터페이스 선택 영역
 		interface_layout = QHBoxLayout()
-		interface_layout.addSpacing(20)  # 왼쪽 여백 추가
+		interface_layout.addSpacing(20)		# 왼쪽 여백 추가
 		interface_label = QLabel("네트워크 인터페이스:")
 		self.interface_combo = QComboBox()
 		self.interface_combo.setStyleSheet("QComboBox { min-width: 200px; height: 27px; }")
-		self.start_button = QPushButton("패킷모니터 시작")
-		self.start_button.setStyleSheet("QPushButton { min-width: 150px; height: 22px; }")
+		self.start_button = QPushButton("PACKET MONITOR START")
+		self.start_button.setStyleSheet("QPushButton { min-width: 180px; height: 22px; background-color: #C533BE; }")
 
 		interface_layout.addWidget(interface_label)
 		interface_layout.addWidget(self.interface_combo)
@@ -652,7 +653,7 @@ class VoIPMonitorUI(QMainWindow):
 				
 			# 캡처 스레드 시작
 			self.capture_thread = threading.Thread(
-				target=start_capture,
+				target=capture_packets,
 				args=(selected_interface, self.add_stream_info),  # 콜백 추가
 				daemon=True
 			)
@@ -786,7 +787,7 @@ if __name__ == '__main__':
 
 	# UI 애플리케이션 생성
 	app = QApplication(sys.argv)
-	window = VoIPMonitorUI()
+	window = PacketMonitor()
 	window.show()
 	
 	try:
