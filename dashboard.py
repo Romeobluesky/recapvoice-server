@@ -396,14 +396,7 @@ class Dashboard(QMainWindow):
 		table.verticalHeader().setVisible(False)
 		
 		# 테이블 선택 스타일 설정
-		table.setSelectionBehavior(QTableWidget.SelectRows)
-		table.setSelectionMode(QTableWidget.SingleSelection)
-		table.setStyleSheet("""
-			QTableWidget::item:selected {
-				background-color: #18508F;
-				color: white;
-			}
-		""")
+		self._set_table_style(table)
 		
 		layout.addWidget(table)
 		return group
@@ -477,14 +470,7 @@ class Dashboard(QMainWindow):
 		table.verticalHeader().setVisible(False)
 		
 		# 테이블 선택 스타일 설정
-		table.setSelectionBehavior(QTableWidget.SelectRows)
-		table.setSelectionMode(QTableWidget.SingleSelection)
-		table.setStyleSheet("""
-			QTableWidget::item:selected {
-				background-color: #18508F;
-				color: white;
-			}
-		""")
+		self._set_table_style(table)
 		
 		layout.addWidget(table)
 		return group
@@ -674,6 +660,20 @@ class Dashboard(QMainWindow):
 		except Exception as e:
 			print(f"Error updating storage path: {e}")
 			QMessageBox.warning(self, "오류", "저장 경로 업데이트 중 오류가 발생했습니다.")
+
+	# 클래스 상수로 스타일 정의
+	TABLE_STYLE = """
+		QTableWidget::item:selected {
+			background-color: #18508F;
+			color: white;
+		}
+	"""
+
+	def _set_table_style(self, table: QTableWidget) -> None:
+		"""테이블 선택 스타일 설정을 위한 공통 메서드"""
+		table.setSelectionBehavior(QTableWidget.SelectRows)
+		table.setSelectionMode(QTableWidget.SingleSelection)
+		table.setStyleSheet(self.TABLE_STYLE)
 
 if __name__ == "__main__":
 	app = QApplication([])
