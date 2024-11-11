@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QTableWidget,
 							 QTableWidgetItem, QVBoxLayout, QWidget,
 							 QComboBox, QPushButton, QHBoxLayout, QLabel)
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import *
 import sys
 import threading
 import asyncio
@@ -575,6 +576,7 @@ class PacketMonitor(QMainWindow):
 		super().__init__()
 		#self.setWindowTitle('패킷 모니터')
 		#self.setGeometry(100, 100, 1200, 600)
+		self.setWindowIcon(QIcon("images/logo.png"))
 		self.setWindowTitle("Packet Monitor")
 		self.resize(1200, 600)
 		# 스타일 설정

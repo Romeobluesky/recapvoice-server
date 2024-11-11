@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QTableWidget,
 							 QTableWidgetItem, QVBoxLayout, QWidget,
 							 QComboBox, QPushButton, QHBoxLayout, QLabel)
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import *
 import sys
 import threading
 import asyncio
@@ -293,7 +294,8 @@ class VoipMonitor(QMainWindow):
 	def __init__(self):
 		super().__init__()
 		self.setWindowTitle('VOIP MONITOR')
-		self.resize(1000, 600)
+		self.setWindowIcon(QIcon("images/logo.png"))
+		self.resize(1200, 600)
 		
 		# active_calls를 클래스 변수로 정의
 		self.active_calls = {}
