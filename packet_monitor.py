@@ -17,6 +17,9 @@ import threading
 import asyncio
 import audioop  # 오디오 변환을 위해 추가
 
+# 전역 변수 선언
+active_calls = {}
+
 def setup_logging():
 	"""로깅 설정"""
 	logging.basicConfig(
@@ -163,6 +166,8 @@ def analyze_sdp(packet, call_id):
 def analyze_rtp(packet, call_id):
 	"""RTP 패킷 분석"""
 	try:
+		global active_calls  # 여기서도 전역 변수 사용 선언
+		
 		if not is_rtp_packet(packet):
 			return
 		
@@ -283,21 +288,27 @@ def is_rtp_packet(packet):
 		log_message("에러", f"RTP 패킷 검증 중 오류: {str(e)}")
 		return False
 
-def get_call_id_from_rtp(packet, stream_id):
+def get_call_id_from_rtp(packet):
 	"""RTP 패킷과 관련된 Call-ID 찾기"""
 	try:
+		global active_calls  # 전역 변수 사용 선언
+		
 		src_ip = packet.ip.src
+		dst_ip = packet.ip.dst
+		src_port = int(packet.udp.srcport)
+		dst_port = int(packet.udp.dstport)
 		
 		# active_calls에서 이 RTP 스트림과 매칭되는 Call-ID 찾기
 		for call_id, call_info in active_calls.items():
 			if "media_endpoints" in call_info:
 				for endpoint in call_info["media_endpoints"]:
-					if src_ip == endpoint["ip"]:
+					if (src_ip == endpoint["ip"] and src_port == endpoint["port"]) or \
+					   (dst_ip == endpoint["ip"] and dst_port == endpoint["port"]):
 						return call_id
 		return None
 	
 	except Exception as e:
-		print(f"RTP Call-ID 매칭 오류: {str(e)}")
+		log_message("오류", f"RTP Call-ID 매칭 오류: {str(e)}")
 		return None
 
 def load_sip_codes():
