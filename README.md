@@ -105,5 +105,4 @@
   ● Npcap
   ● ffmpeg
   ● pyside6
-
 ```
