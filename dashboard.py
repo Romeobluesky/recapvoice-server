@@ -212,10 +212,10 @@ class Dashboard(QMainWindow):
 		bottom_layout = QHBoxLayout()
 		bottom_layout.setSpacing(15)
 		
-		# settings.ini에서 Storage 경로 읽기
+		# settings.ini에서 Recording 경로 읽기
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
-		storage_path = config.get('Storage', 'path', fallback='D:\\')
+		storage_path = config.get('Recording', 'save_path', fallback='C:\\')
 		drive_letter = storage_path.split(':')[0]
 		
 		# 디스크정보 섹션 (70%)
@@ -576,10 +576,10 @@ class Dashboard(QMainWindow):
 
 	def update_disk_usage(self):
 		try:
-			# settings.ini에서 Storage 경로 읽기
+			# settings.ini에서 Recording 경로 읽기
 			config = configparser.ConfigParser()
 			config.read('settings.ini', encoding='utf-8')
-			storage_path = config.get('Storage', 'path', fallback='D:\\')
+			storage_path = config.get('Recording', 'save_path', fallback='D:\\')
 			drive_letter = storage_path.replace('\\', '/').split('/')[0].split(':')[0]
 			
 			disk_usage = psutil.disk_usage(f"{drive_letter}:")
@@ -651,14 +651,14 @@ class Dashboard(QMainWindow):
 			# 설정 파일 업데이트
 			config = configparser.ConfigParser()
 			config.read('settings.ini', encoding='utf-8')
-			if 'Storage' not in config:
-				config['Storage'] = {}
-			config['Storage']['path'] = new_path
+			if 'Recording' not in config:
+				config['Recording'] = {}
+			config['Recording']['save_path'] = new_path
 			
 			# 디스크 정보 업데이트
 			self.update_disk_usage()
 			
-			#print(f"Storage path updated to: {new_path}")  # 디버깅용
+			#print(f"Recording path updated to: {new_path}")  # 디버깅용
 			
 		except Exception as e:
 			print(f"Error updating storage path: {e}")
