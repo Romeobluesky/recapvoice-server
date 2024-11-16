@@ -46,21 +46,34 @@ def load_config():
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
 
-		# Recording 섹션 검증
-		if 'Recording' in config:
-			recording_config = {
-				'save_path': config['Recording'].get('save_path', r'C:\\'),
-				'channels': config['Recording'].getint('channels', 1),
-				'sample_rate': config['Recording'].getint('sample_rate', 8000)
-			}
-			log_message("정보", f"녹취 설정 로드: {recording_config}")
-			return recording_config
-		else:
-			log_message("오류", "Recording 섹션을 찾을 수 없습니다")
-			return None
+		# Recording 섹션이 없을 때의 기본값 처리 추가
+		if not config.has_section('Recording'):
+			config.add_section('Recording')
+			config.set('Recording', 'save_path', 'C:\\')
+			config.set('Recording', 'channels', '1')
+			config.set('Recording', 'sample_rate', '8000')
+			
+			# 설정 파일 저장
+			with open('settings.ini', 'w', encoding='utf-8') as f:
+				config.write(f)
+
+		recording_config = {
+			'save_path': config['Recording'].get('save_path', 'C:\\'),
+			'channels': config['Recording'].getint('channels', 1),
+			'sample_rate': config['Recording'].getint('sample_rate', 8000)
+		}
+		
+		log_message("정보", f"녹취 설정 로드: {recording_config}")
+		return recording_config
+
 	except Exception as e:
 		log_message("오류", f"설정 파일 로드 실패: {str(e)}")
-		return None
+		# 기본값 반환
+		return {
+			'save_path': 'C:\\',
+			'channels': 1,
+			'sample_rate': 8000
+		}
 
 def save_audio(call_id, call_info):
 	"""음성 데이터 WAV 파일로 저장"""
@@ -458,11 +471,11 @@ def determine_stream_direction(packet):
 
 	# 일반적으로 SIP 포트는 3000-3999 범위를 사용
 	if 3000 <= src_port <= 3999:
-		direction = "발신"
+		direction = "OUT"
 		local_num = f"{packet.ip.src}:{src_port}"
 		remote_num = f"{packet.ip.dst}:{dst_port}"
 	else:
-		direction = "수신"
+		direction = "IN"
 		local_num = f"{packet.ip.dst}:{dst_port}"
 		remote_num = f"{packet.ip.src}:{src_port}"
 
@@ -527,8 +540,9 @@ def capture_packets(interface, ui_callback=None):
 								}
 
 								# WAV 파일 생성
-								config = load_config()
-								save_dir = config['Recording']['save_path']
+								config = load_config()  # 설정 로드
+								save_dir = config['save_path']  # 직접 접근
+								
 								if not os.path.exists(save_dir):
 									os.makedirs(save_dir)
 
@@ -564,7 +578,7 @@ def capture_packets(interface, ui_callback=None):
 				print(f"패킷 분석 중 오류: {str(e)}")
 
 	except Exception as e:
-		print(f"패킷모니터 시작 중 오류: {str(e)}")
+		log_message("오류", f"패킷모니터 시작 중 오류: {str(e)}")
 	finally:
 		# 모든 스트림 상태를 녹음완료로 변경
 		for stream_key in streams:
@@ -755,7 +769,7 @@ def has_valid_streams(call_info):
 				log_message("디버그", f"유효한 스트림 발견: {stream_id}, 패킷 수: {len(stream['packets'])}")
 				return True
 
-		log_message("디버그", "모든 스트���에 킷이 없습니다")
+		log_message("디버그", "모든 스트림에 킷이 없습니다")
 		return False
 
 	except Exception as e:
