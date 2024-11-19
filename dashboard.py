@@ -451,7 +451,6 @@ class Dashboard(QMainWindow):
 		scroll.setWidgetResizable(True)
 		scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 		scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-		scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 		
 		# 통화 블록들을 담을 컨테이너
 		self.calls_container = QWidget()
@@ -470,55 +469,76 @@ class Dashboard(QMainWindow):
 		block = QWidget()
 		block.setFixedSize(200, 150)
 		block.setObjectName("callBlock")
+		
 		layout = QVBoxLayout(block)
 		layout.setContentsMargins(15, 15, 15, 15)
-		layout.setSpacing(15)
+		layout.setSpacing(0)  # 수직 간격 0으로 설정
+		layout.setAlignment(Qt.AlignTop)  # 전체 내용을 상단에 정렬
 		
-		# 보 표시 레이블들
+		# 상단 컨테이너 (LED와 정보를 포함)
+		top_container = QWidget()
+		top_layout = QVBoxLayout(top_container)
+		top_layout.setContentsMargins(0, 0, 0, 0)
+		top_layout.setSpacing(4)
+		top_layout.setAlignment(Qt.AlignTop)  # 상단 정렬
+		
+		# LED 컨테이너
+		led_container = QWidget()
+		led_layout = QHBoxLayout(led_container)
+		led_layout.setContentsMargins(0, 0, 0, 0)
+		led_layout.setSpacing(4)
+		led_layout.setAlignment(Qt.AlignRight)  # LED를 오른쪽으로 정렬
+		
+		if status != "대기중" and received_number:
+			led_states = ["회선 초기화", "녹취중"]
+		else:
+			led_states = ["회선 Init", "대기중"]
+		
+		for state in led_states:
+			led = self._create_led("", self._get_led_color(state))
+			led_layout.addWidget(led)
+		
+		top_layout.addWidget(led_container)
+		
+		# 정보 레이아웃
 		info_layout = QGridLayout()
-		info_layout.setSpacing(8)
+		info_layout.setSpacing(4)
 		info_layout.setContentsMargins(0, 0, 0, 0)
 		
 		if status != "대기중" and received_number:
 			labels = [
 				("내선:", internal_number),
-				("수신:", received_number),  # 전체 번호 표시
+				("수신:", received_number),
 				("상태:", status),
 				("시간:", duration)
 			]
-			# 통화중일 때의 LED 상태
-			led_states = ["회선 초기화", "취중"]  # 노란색, 초록색
 		else:
 			labels = [
 				("내선:", internal_number),
 				("상태:", status)
 			]
-			# 대기중일 때의 LED 상태
-			led_states = ["회 Init", "대기중"]  # 노란색, 파란색
 		
 		for idx, (title, value) in enumerate(labels):
 			title_label = QLabel(title)
 			title_label.setObjectName("blockTitle")
+			title_label.setStyleSheet("""
+				color: #888888;
+				font-size: 12px;
+			""")
+			
 			value_label = QLabel(value)
 			value_label.setObjectName("blockValue")
+			value_label.setStyleSheet("""
+				color: white;
+				font-size: 12px;
+				font-weight: bold;
+			""")
 			
 			info_layout.addWidget(title_label, idx, 0)
 			info_layout.addWidget(value_label, idx, 1)
 		
-		# LED 상태 표시 영역
-		led_container = QWidget()
-		led_layout = QHBoxLayout(led_container)
-		led_layout.setContentsMargins(0, 0, 0, 0)
-		led_layout.setSpacing(8)
-		led_layout.setAlignment(Qt.AlignRight)
-		
-		# LED 추가
-		for state in led_states:
-			led = self._create_led("", self._get_led_color(state))
-			led_layout.addWidget(led)
-		
-		layout.addLayout(info_layout)
-		layout.addWidget(led_container)
+		top_layout.addLayout(info_layout)
+		layout.addWidget(top_container)
 		
 		# 스타일 설정
 		base_style = """
@@ -979,7 +999,7 @@ class Dashboard(QMainWindow):
 				'status': '시도중',
 				'from_number': from_number,
 				'to_number': to_number,
-				'direction': '수신' if to_number.startswith(('1','2','3','4')) else '���신',
+				'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신',
 				'media_endpoints': []
 			}
 			
@@ -1389,12 +1409,8 @@ class Dashboard(QMainWindow):
 					self.active_calls[call_id]['end_time'] = datetime.datetime.now()
 					extension = self.get_extension_from_call(call_id)
 					if extension:
-						# 통화종료 상태로 변경하고 1초 후 대기중으로 변경
 						self.block_update_signal.emit(extension, "통화종료", self.active_calls[call_id]['to_number'])
-						QTimer.singleShot(2000, lambda: [
-							self.block_update_signal.emit(extension, "대기중", ""),
-							self.active_calls.pop(call_id, None)  # active_calls에서 제거
-						])
+
 				else:
 					extension = self.get_extension_from_call(call_id)
 					if extension:
@@ -1407,7 +1423,7 @@ class Dashboard(QMainWindow):
 			print(f"통화 상태 업데이트 - Call-ID: {call_id}, Status: {new_status}, Result: {result}")
 			
 		except Exception as e:
-			print(f"통화 상태 ���데이트 중 오류: {e}")
+			print(f"통화 상태 업데이트 중 오류: {e}")
 
 	@Slot()
 	def handle_first_registration(self):
@@ -1431,7 +1447,7 @@ class Dashboard(QMainWindow):
 				display_filter='sip'
 			)
 			
-			print(f"패킷 캡처 시작 - Interface: {interface}")
+			print(f"패킷 캡처 시 - Interface: {interface}")
 			
 			# 패킷 캡처 시작 전에 인터페이스 확인
 			if not interface:
@@ -1466,7 +1482,7 @@ class Dashboard(QMainWindow):
 					extension = self.get_extension_from_call(call_id)
 					if extension:
 						duration = self.calculate_duration(call_info)
-						# 블록 업데이트 (통화중 상태와 시간 표시)
+						# 블록 업데이트 (통화�� 상태와 시간 표���)
 						self.block_update_signal.emit(extension, "통화중", call_info['to_number'])
 						
 						# 블록의 시간 레이블 업데이트
