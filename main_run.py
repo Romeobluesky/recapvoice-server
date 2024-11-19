@@ -8,7 +8,7 @@ def main():
 	try:
 		# 설정 파일 로드
 		config = load_config()
-		save_path = config["Recording"]["save_path"]
+		save_path = config["Recording"]["save_path"]	# 저장 경로
 
 		# RTP 데이터 예제
 		rtp_data = [
