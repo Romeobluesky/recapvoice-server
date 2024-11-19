@@ -11,6 +11,43 @@ from voip_monitor import VoipMonitor
 from packet_monitor import PacketMonitor
 from settings_popup import SettingsPopup
 
+class PacketFlowWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(100)  # 최소 높이 설정
+        self.packets = []
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update)
+        self.timer.start(1000)
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 배경 그리기
+        painter.fillRect(self.rect(), QColor("#2d2d2d"))
+        
+        # 패킷 플로우 그리기
+        y_offset = 10  # 시작 위치를 10으로 변경
+        for packet in self.packets:
+            if y_offset >= self.height() - 10:  # 위젯 높이를 넘어가지 않도록 체크
+                break
+                
+            # 시간 표시
+            painter.setPen(Qt.white)
+            painter.drawText(10, y_offset + 15, packet["time"])  # y_offset 조정
+            
+            # 패킷 라인 그리기
+            painter.setPen(QPen(QColor("#18508F"), 2))
+            painter.drawLine(200, y_offset + 15, self.width() - 200, y_offset + 15)  # y_offset 조정
+            
+            # 패킷 타입 표시
+            painter.setPen(Qt.white)
+            painter.drawText(self.width() // 2 - 50, y_offset + 10, packet["type"])  # y_offset 조정
+            
+            y_offset += 30
+
 class Dashboard(QMainWindow):
 	def __init__(self):
 		super().__init__()
@@ -46,16 +83,16 @@ class Dashboard(QMainWindow):
 		status_section = self._create_status_section()
 		content_layout.addLayout(status_section)
 		
-		# LINE LIST와 LOG LIST
+		# LINE LIST와 LOG LIST의 비율 조정
 		line_list = self._create_line_list()
 		log_list = self._create_log_list()
-		content_layout.addWidget(line_list)
-		content_layout.addWidget(log_list)
+		content_layout.addWidget(line_list, 60)  # 65% 비율
+		content_layout.addWidget(log_list, 40)   # 35% 비율
 		
 		self._apply_styles()
 		
 		# 초기 크기 설정
-		self.resize(1200, 800)
+		self.resize(1400, 1000)  # 높이를 1000으로 증가
 		
 		# 설정 변경 시그널 연결
 		self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
@@ -110,7 +147,7 @@ class Dashboard(QMainWindow):
 		layout.setContentsMargins(0, 0, 0, 0)
 		layout.setSpacing(0)
 		
-		# 로고 영역
+		# 로고 영
 		logo_label = QLabel()
 		logo_label.setFixedHeight(100)
 		logo_label.setAlignment(Qt.AlignCenter)
@@ -191,7 +228,7 @@ class Dashboard(QMainWindow):
 		network_group = self._create_info_group("NETWORK IP", self.get_public_ip())
 		top_layout.addWidget(network_group, 25)
 		
-		# PORT MIRRORING IP (1/4 비율) 내부아이피
+		# PORT MIRRORING IP (1/4 비율) 내부이피
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
 		port_mirror_ip = config.get('Network', 'ip', fallback='127.0.0.1')
@@ -208,7 +245,7 @@ class Dashboard(QMainWindow):
 		
 		layout.addLayout(top_layout)
 		
-		# 하단 상태 정보 섹션
+		# �� 상태 정보 섹션
 		bottom_layout = QHBoxLayout()
 		bottom_layout.setSpacing(15)
 		
@@ -250,10 +287,10 @@ class Dashboard(QMainWindow):
 		# 회선상태 섹션 (30%)
 		led_group = QGroupBox('회선 상태')
 		led_layout = QHBoxLayout()
-		led_layout.addWidget(self._create_led('회선 Init ', 'yellow'))
-		led_layout.addWidget(self._create_led('대 기 중 ', 'blue'))
-		led_layout.addWidget(self._create_led('녹 취 중 ', 'green'))
-		led_layout.addWidget(self._create_led('녹취안됨 ', 'red'))
+		led_layout.addWidget(self._create_led_with_text('회선 Init ', 'yellow'))
+		led_layout.addWidget(self._create_led_with_text('대 기 중 ', 'blue'))
+		led_layout.addWidget(self._create_led_with_text('녹 취 중 ', 'green'))
+		led_layout.addWidget(self._create_led_with_text('녹취안됨 ', 'red'))
 		led_group.setLayout(led_layout)
 		bottom_layout.addWidget(led_group, 30)
 		
@@ -320,92 +357,207 @@ class Dashboard(QMainWindow):
 		return group
 
 	def _create_line_list(self):
-		group = QGroupBox("LINE LIST")
+		group = QGroupBox("전화연결 상태")
+		group.setStyleSheet("""
+			QGroupBox {
+				background-color: #2d2d2d;
+				border: 1px solid #3a3a3a;
+				border-radius: 4px;
+				margin-top: 10px;
+				padding: 10px;
+				color: white;
+				font-weight: bold;
+			}
+		""")
 		layout = QVBoxLayout(group)
 		layout.setContentsMargins(15, 15, 15, 15)
+		layout.setSpacing(0)
 		
-		table = QTableWidget()
-		table.setColumnCount(9)
-		table.setHorizontalHeaderLabels(["LED", "NO", "회선번호", "전화기 IP", "사용자명", "사용자ID", "내용", "기타", "상태"])
-		table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-		table.setMaximumHeight(700)
-		# 예제 데이터 추가
-		example_data = [
-			["●", "1", "회선-001", "192.168.0.101", "홍길동", "USER001", "정상 연결됨", "", "로그인"],
-			["●", "2", "회선-002", "192.168.0.102", "김철수", "USER002", "정상 연결됨", "", "로그인"],
-			["○", "3", "회선-003", "192.168.0.103", "이영희", "USER003", "연결 끊김", "확인 필요", "로그아웃"],
-			["●", "4", "회선-004", "192.168.0.104", "박민수", "USER004", "정상 연결됨", "", "로그인"],
-			["●", "5", "회선-005", "192.168.0.105", "최영식", "USER005", "정상 연결됨", "", "로그인"],
-			["○", "6", "회선-006", "192.168.0.106", "정미영", "USER006", "연결 끊김", "점검 중", "로그아웃"],
-			["●", "7", "회선-007", "192.168.0.107", "강동원", "USER007", "정상 연결됨", "", "로그인"],
-			["●", "8", "회선-008", "192.168.0.108", "윤서연", "USER008", "정상 연결됨", "", "로그인"],
-			["●", "9", "회선-001", "192.168.0.101", "홍길동", "USER001", "정상 연결됨", "", "로그인"],
-			["●", "10", "회선-002", "192.168.0.102", "김철수", "USER002", "정상 연결됨", "", "로그인"],
-			["○", "11", "회선-003", "192.168.0.103", "이영희", "USER003", "연결 끊김", "확인 필요","로그아웃"],
-			["●", "12", "회선-004", "192.168.0.104", "박민수", "USER004", "정상 연결됨", "", "로그인"],
-			["●", "13", "회선-005", "192.168.0.105", "최영식", "USER005", "정상 연결됨", "", "로그인"],
-			["○", "14", "회선-006", "192.168.0.106", "정미영", "USER006", "연결 끊김", "점검 중", "로그아웃"],
-			["●", "15", "회선-007", "192.168.0.107", "강동원", "USER007", "정상 연결됨", "", "로그인"],
-			["●", "16", "회선-008", "192.168.0.108", "윤서연", "USER008", "정상 연결됨", "", "로그인"]
-		]
+		# 스크롤 영역 생성
+		scroll = QScrollArea()
+		scroll.setWidgetResizable(True)
+		scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+		scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+		scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 크기 정책 설정
 		
-		table.setRowCount(len(example_data))
-		# 데이터 입력 및 스타일 적용
-		for row, data in enumerate(example_data):
-			for col, value in enumerate(data):
-				item = QTableWidgetItem(value)
-				item.setTextAlignment(Qt.AlignCenter)
-				
-				# LED 상태에 따른 색상 설정
-				if col == 0:  # LED 열
-					if value == "●":
-						item.setForeground(QColor("#48c9b0"))  # 연결됨 - 민트색
-					else:
-						item.setForeground(QColor("#e74c3c"))  # 연결 끊김 - 빨간색
-
-				if col == 8:  # 상태 열
-					if value == "로그인":
-						item.setForeground(QColor("#48c9b0"))  # 연결됨 - 민트색
-					else:
-						item.setForeground(QColor("#e74c3c"))  # 연결 끊김 - 빨간색
-
-				if col == 6:  # 내용 열
-					item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-				else:
-					# 편집 불가능하게 설정
-					item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-				
-				table.setItem(row, col, item)
+		# 통화 블록들을 담을 컨테이너
+		calls_container = QWidget()
+		calls_container.setObjectName("scrollContents")
+		calls_layout = FlowLayout(calls_container, margin=0, spacing=20)
 		
-		# 열 너비 조정
-		# 고정 너비 컬럼 설정
-		fixed_widths = {
-			0: 50,   # LED
-			1: 50,   # NO
-			2: 200,  # 회선번호
-			3: 120,  # 전화기 IP
-			4: 100,  # 사용자명
-			5: 100,  # 사용자ID
-			7: 200,  # 기타
-			8: 80    # 상태 - 고정 너비 설정
-		}
+		# 20개의 블록 생성
+		for i in range(16):
+			if i % 2 == 0:
+				block = self._create_call_block(
+					internal_number=f"100{i}",
+					received_number="01012345678",
+					duration="00:00:00",
+					status="대기중"
+				)
+			else:
+				block = self._create_call_block(
+					internal_number=f"100{i}",
+					received_number="01077141436",
+					duration=f"00:{i:02d}:22",
+					status="통화중"
+				)
+			calls_layout.addWidget(block)
 		
-		# 고정 너비 적용
-		for col, width in fixed_widths.items():
-			table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Fixed)
-			table.setColumnWidth(col, width)
-
-		# 자동 조절 컬럼 설정 (내용)
-		table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+		scroll.setWidget(calls_container)
 		
-		table.verticalHeader().setVisible(False)
+		# 패킷 플로우를 표시할 하단 위젯
+		packet_flow = PacketFlowWidget()
+		packet_flow.setFixedHeight(0)
 		
-		# 테이블 선택 스타일 설정
-		self._set_table_style(table)
+		# 레이아웃에 위젯 추가 및 비율 설정
+		layout.addWidget(scroll, 1)  # stretch factor 1 설정
+		layout.addWidget(packet_flow)
 		
-		layout.addWidget(table)
+		# 스크롤바 스타일 설정
+		scroll.setStyleSheet("""
+			QScrollArea {
+				border: none;
+				background-color: #2d2d2d;
+			}
+			QWidget#scrollContents {
+				background-color: #2d2d2d;  /* 블록들이 있는 영역의 배경색만 변경 */
+			}
+			QScrollBar:vertical {
+				width: 8px;
+				background: #2d2d2d;
+				border-radius: 2px;
+				margin: 0px;
+			}
+			QScrollBar::handle:vertical {
+				background: #666666;
+				border-radius: 4px;
+				min-height: 20px;
+			}
+			QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+				height: 0px;
+			}
+			QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+				background: none;
+			}
+		""")
+		
 		return group
+
+	def _create_call_block(self, internal_number, received_number, duration, status):
+		block = QWidget()
+		block.setFixedSize(200, 150)
+		block.setObjectName("callBlock")
+		layout = QVBoxLayout(block)
+		layout.setContentsMargins(15, 15, 15, 15)
+		layout.setSpacing(15)
+		
+		# 정보 표시 레이블들
+		info_layout = QGridLayout()
+		info_layout.setSpacing(8)
+		info_layout.setContentsMargins(0, 0, 0, 0)
+		
+		if status == "대기중":
+			# 대기중일 때는 내선과 상태만 표시
+			labels = [
+				("내선:", internal_number),
+				("상태:", status)
+			]
+			# 대기중일 때의 LED 상태
+			led_states = ["회선 Init", "대기중"]  # 노란색, 파란색
+		else:
+			# 통화중일 때는 모든 정보 표시
+			labels = [
+				("내선:", internal_number),
+				("수신:", received_number),
+				("상태:", status),
+				("시간:", duration)
+			]
+			# 통화중일 때의 LED 상태
+			led_states = ["회선 Init", "녹취중"]  # 노란색, 초록색
+		
+		for idx, (title, value) in enumerate(labels):
+			title_label = QLabel(title)
+			title_label.setObjectName("blockTitle")
+			value_label = QLabel(value)
+			value_label.setObjectName("blockValue")
+			
+			info_layout.addWidget(title_label, idx, 0)
+			info_layout.addWidget(value_label, idx, 1)
+		
+		# LED 상태 표시 영역
+		led_container = QWidget()
+		led_layout = QHBoxLayout(led_container)
+		led_layout.setContentsMargins(0, 0, 0, 0)
+		led_layout.setSpacing(8)
+		led_layout.setAlignment(Qt.AlignRight)
+		
+		# LED 추가 (상태에 따라 다른 LED 표시)
+		for state in led_states:
+			led = self._create_led("", self._get_led_color(state))
+			led_layout.addWidget(led)
+		
+		layout.addLayout(info_layout)
+		layout.addWidget(led_container)
+		
+		# 나머지 스타일 코드는 동일
+		base_style = """
+			QWidget#callBlock {
+				border-radius: 4px;
+				background-color: #2A2A2A;
+				border: 1px solid #383838;
+			}
+			QLabel#blockTitle {
+				color: #888888;
+				font-size: 12px;
+				font-weight: normal;
+			}
+			QLabel#blockValue {
+				font-size: 12px;
+				font-weight: bold;
+				margin-left: 4px;
+			}
+		"""
+		
+		if status == "대기중":
+			block.setStyleSheet(base_style + """
+				QWidget#callBlock {
+					background-color: #2A2A2A;
+					border: 1px solid #383838;
+				}
+				QLabel#blockValue {
+					color: #888888;
+				}
+			""")
+			effect = QGraphicsOpacityEffect()
+			effect.setOpacity(0.6)
+			block.setGraphicsEffect(effect)
+		else:  # 통화중
+			block.setStyleSheet(base_style + """
+				QWidget#callBlock {
+					background-color: #2D3436;
+					border: 2px solid #18508F;
+				}
+				QLabel#blockValue {
+					color: #FFFFFF;
+				}
+			""")
+			shadow = QGraphicsDropShadowEffect()
+			shadow.setBlurRadius(10)
+			shadow.setColor(QColor("#18508F"))
+			shadow.setOffset(0, 0)
+			block.setGraphicsEffect(shadow)
+		
+		return block
+
+	def _get_led_color(self, state):
+		"""LED 상태별 색상 반환"""
+		colors = {
+			"회선 Init": "#FFB800",  # 노란색
+			"대기중": "#18508F",     # 파란색
+			"녹취중": "#00FF00",     # 초록색
+			"녹취안됨": "#FFB800",   # 노란색
+		}
+		return colors.get(state, "#666666")  # 기본값은 회색
 
 	def _create_log_list(self):
 		group = QGroupBox("LOG LIST")
@@ -413,69 +565,31 @@ class Dashboard(QMainWindow):
 		layout.setContentsMargins(15, 15, 15, 15)
 		
 		table = QTableWidget()
-		table.setColumnCount(6)
-		table.setHorizontalHeaderLabels(["NO", "시간", "구분", "구분", "내용", "기타"])
+		table.setMinimumHeight(150)
+		table.setColumnCount(4)
+		table.setHorizontalHeaderLabels(["발신번호", "수신번호", "패킷플로우", "상태"])
 		
-		# 예제 데이터 추가
-		example_data = [
-			["1", "2024-03-19 14:30:22", "알림", "시스템", "시스템 시작됨", ""],
-			["2", "2024-03-19 14:31:05", "경고", "연결", "회선-003 연결 끊김", "재연결 시도 중"],
-			["3", "2024-03-19 14:32:15", "정보", "연결", "회선-001 정상 연결", ""],
-			["4", "2024-03-19 14:33:00", "오류", "패킷", "패킷 손실 발생", "조치 필요"],
-			["5", "2024-03-19 14:34:12", "정보", "연결", "회선-002 정상 연결", ""],
-			["6", "2024-03-19 14:35:30", "경고", "시스템", "메모리 사용량 증가", "모니터링 필요"],
-			["7", "2024-03-19 14:36:45", "정보", "업데이트", "시스템 업데이트 완료", ""],
-			["8", "2024-03-19 14:37:20", "경고", "연결", "회선-006 연결 불안정", "점검 중"],
+		# 테스트 데이터 추가
+		table.setRowCount(5)  # 기본 5행 표시
+		test_data = [
+			("1001", "01012345678", "패킷 데이터...", "통화중"),
+			("1002", "01077141436", "패킷 데이터...", "대기중"),
+			("1003", "01012345678", "패킷 데이터...", "통화중"),
+			("1004", "01077141436", "패킷 데이터...", "대기중"),
+			("1005", "01012345678", "패킷 데이터...", "통화중"),
 		]
 		
-		table.setRowCount(len(example_data))
-		
-		# 데이터 입력 및 스타일 적용
-		for row, data in enumerate(example_data):
-			for col, value in enumerate(data):
-				item = QTableWidgetItem(value)
-				item.setTextAlignment(Qt.AlignCenter)
-				
-				# 구분에 따른 색상 설정
-				if col == 2:  # 구분 열
-					if value == "경고":
-						item.setForeground(QColor("#f1c40f"))  # 노란색
-					elif value == "오류":
-						item.setForeground(QColor("#e74c3c"))  # 빨간색
-					elif value == "정보":
-						item.setForeground(QColor("#48c9b0"))  # 민트색
-				
-				if col == 4:  # 내용 열
-					item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-				else:
-					# 편집 불가능하게 설정
-					item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-
-				table.setItem(row, col, item)
+		for row, (caller, receiver, packet, status) in enumerate(test_data):
+			table.setItem(row, 0, QTableWidgetItem(caller))
+			table.setItem(row, 1, QTableWidgetItem(receiver))
+			table.setItem(row, 2, QTableWidgetItem(packet))
+			table.setItem(row, 3, QTableWidgetItem(status))
 		
 		# 열 너비 조정
-		# 고정 너비 컬럼 설정
-		fixed_widths = {
-			0: 50,   # NO
-			1: 150,  # 시간
-			2: 100,  # 구분
-			3: 100,  # 상태
-			5: 200  # 기타
-		}
-
-		# 고정 너비 적용
-		for col, width in fixed_widths.items():
-			table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Fixed)
-			table.setColumnWidth(col, width)
-
-		# 자동 조절 컬럼 설정 (내용)
-		table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-
-		table.verticalHeader().setVisible(False)
-		
-		# 테이블 선택 스타일 설정
-		self._set_table_style(table)
+		table.setColumnWidth(0, 100)  # 발신번호
+		table.setColumnWidth(1, 100)  # 수신번호
+		table.setColumnWidth(3, 100)  # 상태
+		table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)  # 패킷플로우
 		
 		layout.addWidget(table)
 		return group
@@ -550,9 +664,51 @@ class Dashboard(QMainWindow):
 				padding: 5px;
 				border: none;
 			}
+			QWidget#callBlock {
+				color: white;
+				padding: 10px;
+			}
+			QWidget#callBlock QLabel {
+				color: white;
+				font-size: 12px;
+			}
 		""")
 
+	def _create_led_with_text(self, text, color):
+		"""회선상태 섹션용 LED (텍스트 포함)"""
+		widget = QWidget()
+		layout = QHBoxLayout()
+		layout.setAlignment(Qt.AlignLeft)
+		layout.setContentsMargins(0, 0, 0, 0)
+		
+		led = QLabel()
+		led.setObjectName("led_indicator")
+		led.setFixedSize(8, 8)
+		led.setStyleSheet(
+			f'#led_indicator {{ '
+			f'background-color: {color}; '
+			f'border-radius: 4px; '
+			f'border: 1px solid rgba(0, 0, 0, 0.2); '
+			f'}}'
+		)
+		
+		# 그림자 효과 추가
+		shadow = QGraphicsDropShadowEffect()
+		shadow.setBlurRadius(3)
+		shadow.setColor(QColor(color))
+		shadow.setOffset(0, 0)
+		led.setGraphicsEffect(shadow)
+		
+		text_label = QLabel(text)
+		text_label.setStyleSheet("color: white; font-size: 12px;")
+		
+		layout.addWidget(led)
+		layout.addWidget(text_label)
+		widget.setLayout(layout)
+		return widget
+
 	def _create_led(self, label, color):
+		"""전화연결상태 블록용 LED (텍스트 없음)"""
 		widget = QWidget()
 		layout = QHBoxLayout()
 		layout.setAlignment(Qt.AlignCenter)
@@ -560,17 +716,23 @@ class Dashboard(QMainWindow):
 		
 		led = QLabel()
 		led.setObjectName("led_indicator")
-		led.setFixedSize(10, 10)
+		led.setFixedSize(8, 8)
 		led.setStyleSheet(
 			f'#led_indicator {{ '
 			f'background-color: {color}; '
+			f'border-radius: 4px; '
+			f'border: 1px solid rgba(0, 0, 0, 0.2); '
 			f'}}'
 		)
 		
-		layout.addWidget(led)
-		if label:
-			layout.addWidget(QLabel(label))
+		# 그림자 효과 추가
+		shadow = QGraphicsDropShadowEffect()
+		shadow.setBlurRadius(3)
+		shadow.setColor(QColor(color))
+		shadow.setOffset(0, 0)
+		led.setGraphicsEffect(shadow)
 		
+		layout.addWidget(led)
 		widget.setLayout(layout)
 		return widget
 
@@ -646,7 +808,7 @@ class Dashboard(QMainWindow):
 			QMessageBox.warning(self, "오류", "대시보드 업데이트 중 오류가 발생했습니다.")
 
 	def update_storage_path(self, new_path):
-		"""저장 경로 변경 시 디스크 정보 업데이트"""
+		"""저장 경 변경 시 디스크 정보 업데이트"""
 		try:
 			# 설정 파일 업데이트
 			config = configparser.ConfigParser()
@@ -677,6 +839,80 @@ class Dashboard(QMainWindow):
 		table.setSelectionBehavior(QTableWidget.SelectRows)
 		table.setSelectionMode(QTableWidget.SingleSelection)
 		table.setStyleSheet(self.TABLE_STYLE)
+
+# FlowLayout 클래스 추가 (Qt의 유동적 그리드 레이아웃 구현)
+class FlowLayout(QLayout):
+	def __init__(self, parent=None, margin=0, spacing=-1):
+		super().__init__(parent)
+		self._items = []
+		self.setContentsMargins(margin, margin, margin, margin)
+		self.setSpacing(spacing)
+		
+	def addItem(self, item):
+		self._items.append(item)
+		
+	def count(self):
+		return len(self._items)
+		
+	def itemAt(self, index):
+		if 0 <= index < len(self._items):
+			return self._items[index]
+		return None
+		
+	def takeAt(self, index):
+		if 0 <= index < len(self._items):
+			return self._items.pop(index)
+		return None
+		
+	def expandingDirections(self):
+		return Qt.Orientations()
+		
+	def hasHeightForWidth(self):
+		return True
+		
+	def heightForWidth(self, width):
+		height = self._doLayout(QRect(0, 0, width, 0), True)
+		return height
+		
+	def setGeometry(self, rect):
+		super().setGeometry(rect)
+		self._doLayout(rect, False)
+		
+	def sizeHint(self):
+		return self.minimumSize()
+		
+	def minimumSize(self):
+		size = QSize()
+		for item in self._items:
+			size = size.expandedTo(item.minimumSize())
+		margin = self.contentsMargins()
+		size += QSize(2 * margin.top(), 2 * margin.bottom())
+		return size
+		
+	def _doLayout(self, rect, testOnly):
+		x = rect.x()
+		y = rect.y()
+		lineHeight = 0
+		spacing = self.spacing()
+		
+		for item in self._items:
+			widget = item.widget()
+			spaceX = spacing
+			spaceY = spacing
+			nextX = x + item.sizeHint().width() + spaceX
+			if nextX - spaceX > rect.right() and lineHeight > 0:
+				x = rect.x()
+				y = y + lineHeight + spaceY
+				nextX = x + item.sizeHint().width() + spaceX
+				lineHeight = 0
+			
+			if not testOnly:
+				item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+			
+			x = nextX
+			lineHeight = max(lineHeight, item.sizeHint().height())
+		
+		return y + lineHeight - rect.y()
 
 if __name__ == "__main__":
 	app = QApplication([])
