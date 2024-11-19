@@ -140,7 +140,7 @@ class Dashboard(QMainWindow):
 		self._apply_styles()
 		
 		# 초기 크기 설정
-		self.resize(1400, 1000)
+		self.resize(1400, 900)
 		
 		# 설정 변경 시그널 연결
 		self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
@@ -945,14 +945,20 @@ class Dashboard(QMainWindow):
 				# 나머지 상태 코드 처리
 				if call_id in self.active_calls:
 					if status_code == '183':  # Session Progress (벨울림)
-						print("벨울림 상태 감지")
+						print("Ringing 상태 감지")
 						self.update_call_status(call_id, '벨울림')
 					
 					elif status_code == '200':  # OK
 						print("통화 연결됨")
 						if self.active_calls[call_id]['status'] != '통화종료':
 							self.update_call_status(call_id, '통화중')
-					
+						
+						# 통화 시간 업데이트 타이머 시작
+						if not hasattr(self, 'duration_timer') or not self.duration_timer.isActive():
+							self.duration_timer = QTimer()
+							self.duration_timer.timeout.connect(self.update_call_duration)
+							self.duration_timer.start(1000)  # 1초마다 업데이트
+
 					elif status_code in ['486', '603']:  # Busy, Decline
 						print("통화 거절됨")
 						self.update_call_status(call_id, '통화종료', '수신거부')
@@ -977,6 +983,11 @@ class Dashboard(QMainWindow):
 				elif 'BYE' in sip_layer.request_line:
 					if call_id in self.active_calls:
 						self.update_call_status(call_id, '통화종료', '정상종료')
+
+				# CANCEL 요청 처리
+				elif 'CANCEL' in sip_layer.request_line:
+					if call_id in self.active_calls:
+						self.update_call_status(call_id, '통화종료', '발신취소')
 
 		except Exception as e:
 			print(f"SIP 패킷 분석 중 오류: {e}")
@@ -1482,7 +1493,7 @@ class Dashboard(QMainWindow):
 					extension = self.get_extension_from_call(call_id)
 					if extension:
 						duration = self.calculate_duration(call_info)
-						# 블록 업데이트 (통화�� 상태와 시간 표���)
+						 # 블록 업데이트 (통화중 상태와 시간 표시)
 						self.block_update_signal.emit(extension, "통화중", call_info['to_number'])
 						
 						# 블록의 시간 레이블 업데이트
