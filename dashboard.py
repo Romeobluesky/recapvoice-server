@@ -494,7 +494,7 @@ class Dashboard(QMainWindow):
 				("상태:", status)
 			]
 			# 대기중일 때의 LED 상태
-			led_states = ["회�� Init", "대기중"]  # 노란색, 파란색
+			led_states = ["회 Init", "대기중"]  # 노란색, 파란색
 		
 		for idx, (title, value) in enumerate(labels):
 			title_label = QLabel(title)
@@ -979,7 +979,7 @@ class Dashboard(QMainWindow):
 				'status': '시도중',
 				'from_number': from_number,
 				'to_number': to_number,
-				'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신',
+				'direction': '수신' if to_number.startswith(('1','2','3','4')) else '���신',
 				'media_endpoints': []
 			}
 			
@@ -1039,19 +1039,19 @@ class Dashboard(QMainWindow):
 			if not table:
 				return
 			
-			# 테이블 정렬 상태 저장
-			current_sort_column = table.horizontalHeader().sortIndicatorSection()
-			current_sort_order = table.horizontalHeader().sortIndicatorOrder()
-			
-			# 현재 선택된 항목 저장
-			current_row = table.currentRow()
+			# active_calls를 시간 기준으로 정렬 (최신순)
+			sorted_calls = sorted(
+				self.active_calls.items(),
+				key=lambda x: x[1]['start_time'],
+				reverse=True  # 최신 항목이 위로 오도록 reverse=True 설정
+			)
 			
 			# 테이블 내용 초기화
 			table.setRowCount(0)
-			table.setRowCount(len(self.active_calls))
+			table.setRowCount(len(sorted_calls))
 			
-			for row, (call_id, call_info) in enumerate(self.active_calls.items()):
-				# LOG LIST 업데이트
+			# 정렬된 순서대로 테이블에 추가
+			for row, (call_id, call_info) in enumerate(sorted_calls):
 				time_item = QTableWidgetItem(call_info['start_time'].strftime('%Y-%m-%d %H:%M:%S'))
 				direction_item = QTableWidgetItem(call_info.get('direction', ''))
 				from_item = QTableWidgetItem(str(call_info.get('from_number', '')))
@@ -1066,13 +1066,6 @@ class Dashboard(QMainWindow):
 				for col, item in enumerate(items):
 					item.setTextAlignment(Qt.AlignCenter)
 					table.setItem(row, col, item)
-			
-			# 정렬 상태 복원
-			table.sortItems(current_sort_column, current_sort_order)
-			
-			# 선택 상태 복원
-			if current_row >= 0 and current_row < table.rowCount():
-				table.setCurrentCell(current_row, 0)
 			
 			# 테이블 즉시 업데이트
 			table.viewport().update()
@@ -1414,7 +1407,7 @@ class Dashboard(QMainWindow):
 			print(f"통화 상태 업데이트 - Call-ID: {call_id}, Status: {new_status}, Result: {result}")
 			
 		except Exception as e:
-			print(f"통화 상태 업데이트 중 오류: {e}")
+			print(f"통화 상태 ���데이트 중 오류: {e}")
 
 	@Slot()
 	def handle_first_registration(self):
