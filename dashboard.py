@@ -962,6 +962,9 @@ class Dashboard(QMainWindow):
 					elif status_code in ['486', '603']:  # Busy, Decline
 						print("통화 거절됨")
 						self.update_call_status(call_id, '통화종료', '수신거부')
+						# 대기중 록 생성
+						self.block_update_signal.emit(extension, "대기중", "")
+						print(f"대기중 블록 생성 요청: {extension}")
 
 			elif hasattr(sip_layer, 'request_line'):
 				print(f"Request Line: {sip_layer.request_line}")
@@ -983,11 +986,17 @@ class Dashboard(QMainWindow):
 				elif 'BYE' in sip_layer.request_line:
 					if call_id in self.active_calls:
 						self.update_call_status(call_id, '통화종료', '정상종료')
+						# 대기중 록 생성
+						self.block_update_signal.emit(extension, "대기중", "")
+						print(f"대기중 블록 생성 요청: {extension}")						
 
 				# CANCEL 요청 처리
 				elif 'CANCEL' in sip_layer.request_line:
 					if call_id in self.active_calls:
 						self.update_call_status(call_id, '통화종료', '발신취소')
+						# 대기중 록 생성
+						self.block_update_signal.emit(extension, "대기중", "")
+						print(f"대기중 블록 생성 요청: {extension}")						
 
 		except Exception as e:
 			print(f"SIP 패킷 분석 중 오류: {e}")
