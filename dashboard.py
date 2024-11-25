@@ -22,36 +22,36 @@ class PacketFlowWidget(QWidget):
 		super().__init__()
 		self.setMinimumHeight(100)  # 최소 높이 설정
 		self.packets = []
-		
+
 		self.timer = QTimer(self)
 		self.timer.timeout.connect(self.update)
 		self.timer.start(1000)
-	
+
 	def paintEvent(self, event):
 		painter = QPainter(self)
 		painter.setRenderHint(QPainter.Antialiasing)
-		
+
 		# 배경 그리기
 		painter.fillRect(self.rect(), QColor("#2d2d2d"))
-		
+
 		# 패킷 플로우 그리기
 		y_offset = 10  # 시작 위치를 10으로 변경
 		for packet in self.packets:
 			if y_offset >= self.height() - 10:  # 젯 높이를 넘어가 않도록 체크
 				break
-				
+
 			# 시간 표시
 			painter.setPen(Qt.white)
 			painter.drawText(10, y_offset + 15, packet["time"])  # y_offset 조정
-			
+
 			# 패킷 라인 그리기
 			painter.setPen(QPen(QColor("#18508F"), 2))
 			painter.drawLine(200, y_offset + 15, self.width() - 200, y_offset + 15)  # y_offset 조정
-			
+
 			# 패킷 타입 표시
 			painter.setPen(Qt.white)
 			painter.drawText(self.width() // 2 - 50, y_offset + 10, packet["type"])  # y_offset 조정
-			
+
 			y_offset += 30
 
 class Dashboard(QMainWindow):
@@ -63,41 +63,41 @@ class Dashboard(QMainWindow):
 		super().__init__()
 		self.setWindowIcon(QIcon("images/logo.png"))
 		self.setWindowTitle("Packet Wave")
-		
+
 		# Signal 연결
 		self.block_creation_signal.connect(self.create_block_in_main_thread)
 		self.block_update_signal.connect(self.update_block_in_main_thread)
-		
+
 		# SettingsPopup 인스턴스 생성
 		self.settings_popup = SettingsPopup()
-		
+
 		# VoIP 모니터링 관련 변수 추가
 		self.active_calls = {}
 		self.capture_thread = None
 		self.voip_timer = QTimer()
 		self.voip_timer.timeout.connect(self.update_voip_status)
 		self.voip_timer.start(1000)
-		
+
 		# 패킷 모니터링 관련 변수 추가
 		self.streams = {}
 		self.packet_timer = QTimer()
 		self.packet_timer.timeout.connect(self.update_packet_status)
 		self.packet_timer.start(1000)
-		
+
 		# SIP 등록 상태 추적
 		self.sip_registrations = {}
 		self.first_registration = False  # 변수 추가
-		
+
 		# UI 초기화
 		self._init_ui()
-		
+
 		# 네트워크 인터페이스 초기화 및 패킷 캡처 시작
 		self.selected_interface = None
 		self.load_network_interfaces()
-		
+
 		# 패킷 캡처 자동 시작
 		QTimer.singleShot(1000, self.start_packet_capture)
-		
+
 		# 통화 시간 업데이트 타이머 추가
 		self.duration_timer = QTimer()
 		self.duration_timer.timeout.connect(self.update_call_duration)
@@ -110,38 +110,38 @@ class Dashboard(QMainWindow):
 		layout = QHBoxLayout(main_widget)
 		layout.setContentsMargins(0, 0, 0, 0)
 		layout.setSpacing(0)
-		
+
 		# 사이드바를 클래스 멤버 변수로 저장
 		self.sidebar = self._create_sidebar()
 		layout.addWidget(self.sidebar)
-		
+
 		# 메인 컨텐츠 영역
 		content = QWidget()
 		content_layout = QVBoxLayout(content)
 		content_layout.setContentsMargins(20, 20, 20, 20)
 		content_layout.setSpacing(20)
 		layout.addWidget(content)
-		
+
 		# 상단 헤더 섹션
 		header = self._create_header()
 		content_layout.addWidget(header)
-		
+
 		# 태 정보 섹션
 		status_section = self._create_status_section()
 		content_layout.addLayout(status_section)
-		
+
 		# LINE LIST와 LOG LIST의 비율 조정
 		line_list = self._create_line_list()
 		log_list = self._create_log_list()
 		content_layout.addWidget(line_list, 60)  # 60% 비율
 		content_layout.addWidget(log_list, 40)   # 40% 비율
-		
+
 		# 스타일 적용
 		self._apply_styles()
-		
+
 		# 초기 크기 설정
 		self.resize(1400, 900)
-		
+
 		# 설정 변경 시그널 연결
 		self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
 		self.settings_popup.path_changed.connect(self.update_storage_path)
@@ -154,10 +154,10 @@ class Dashboard(QMainWindow):
 			config = load_config()
 			default_interface = config.get('Network', 'interface', fallback=interfaces[0])
 			self.selected_interface = default_interface
-			
+
 		except Exception as e:
 			print(f"네트워 인터페이스 로드 패: {e}")
-	
+
 	def start_packet_capture(self):
 		"""패킷 캡처 시작"""
 		if not self.capture_thread or not self.capture_thread.is_alive():
@@ -167,57 +167,57 @@ class Dashboard(QMainWindow):
 				daemon=True
 			)
 			self.capture_thread.start()
-	
+
 	def _create_header(self):
 		header = QWidget()
 		header_layout = QHBoxLayout(header)
 		header_layout.setContentsMargins(10, 5, 10, 5)
-		
+
 		# 대표번호 섹션
 		phone_section = QWidget()
 		phone_layout = QHBoxLayout(phone_section)
 		phone_layout.setAlignment(Qt.AlignLeft)
 		phone_layout.setContentsMargins(0, 0, 0, 0)
-		
+
 		phone_text = QLabel("대표번호 | ")
 		self.phone_number = QLabel()  # 클래스 멤버로 변경
-		
+
 		# settings.ini에서 대표번호 읽기
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
 		self.phone_number.setText(config.get('Extension', 'Rep_number', fallback=''))
-		
+
 		phone_layout.addWidget(phone_text)
 		phone_layout.addWidget(self.phone_number)
-		
+
 		# ID CODE 섹션
 		id_section = QWidget()
 		id_layout = QHBoxLayout(id_section)
 		id_layout.setAlignment(Qt.AlignRight)
 		id_layout.setContentsMargins(0, 0, 0, 0)
-		
+
 		id_text = QLabel("ID CODE | ")
 		self.id_code = QLabel()
 		self.id_code.setText(config.get('Extension', 'Id_code', fallback=''))
-		
+
 		id_layout.addWidget(id_text)
 		id_layout.addWidget(self.id_code)
-		
+
 		header_layout.addWidget(phone_section, 1)
 		header_layout.addWidget(id_section, 1)
-		
+
 		return header
 
 	def _create_sidebar(self):
 		sidebar = QWidget()
 		sidebar.setObjectName("sidebar")
 		sidebar.setFixedWidth(200)
-		
-		
+
+
 		layout = QVBoxLayout(sidebar)
 		layout.setContentsMargins(0, 0, 0, 0)
 		layout.setSpacing(0)
-		
+
 		# 로고 영
 		logo_label = QLabel()
 		logo_label.setFixedHeight(100)
@@ -227,31 +227,31 @@ class Dashboard(QMainWindow):
 			scaled_logo = logo_pixmap.scaled(50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 			logo_label.setPixmap(scaled_logo)
 		layout.addWidget(logo_label)
-		
+
 		# 메뉴 버들을 담을 컨테이너
 		menu_container = QWidget()
 		menu_layout = QVBoxLayout(menu_container)
 		menu_layout.setContentsMargins(0, 0, 0, 0)
 		menu_layout.setSpacing(5)
-		
+
 		# 버튼 생성 및 클릭 이벤트 연결
 		voip_btn = self._create_menu_button("VOIP MONITOR", "images/voip_icon.png")
 		voip_btn.clicked.connect(self.show_voip_monitor)
-		
+
 		packet_btn = self._create_menu_button("PACKET MONITOR", "images/packet_icon.png")
 		packet_btn.clicked.connect(self.show_packet_monitor)
-		
+
 		setting_btn = self._create_menu_button("SETTING", "images/setting_icon.png")
 		setting_btn.clicked.connect(self.show_settings)
-		
+
 		menu_layout.addWidget(voip_btn)
 		menu_layout.addWidget(packet_btn)
 		menu_layout.addStretch()
-		
+
 		menu_layout.addWidget(setting_btn)
-		
+
 		layout.addWidget(menu_container)
-		
+
 		return sidebar
 
 	def _create_menu_button(self, text, icon_path):
@@ -259,11 +259,11 @@ class Dashboard(QMainWindow):
 		btn.setObjectName("menu_button")
 		btn.setFixedHeight(40)
 		btn.setCursor(Qt.PointingHandCursor)
-		
+
 		layout = QHBoxLayout(btn)
 		layout.setContentsMargins(15, 0, 15, 0)
 		layout.setSpacing(0)
-		
+
 		icon_label = QLabel()
 		icon_label.setFixedSize(24, 24)
 		icon_pixmap = QPixmap(icon_path)
@@ -271,12 +271,12 @@ class Dashboard(QMainWindow):
 			scaled_icon = icon_pixmap.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 			icon_label.setPixmap(scaled_icon)
 		layout.addWidget(icon_label)
-		
+
 		text_label = QLabel(text)
 		text_label.setStyleSheet("color: #2d2d2d;")
 		layout.addWidget(text_label)
 		layout.addStretch()
-		
+
 		return btn
 
 	def get_public_ip(self):
@@ -290,46 +290,46 @@ class Dashboard(QMainWindow):
 
 	def _create_status_section(self):
 		layout = QVBoxLayout()
-		
+
 		# 상단 IP 정보 섹션
 		top_layout = QHBoxLayout()
 		top_layout.setSpacing(15)
-		
+
 		# Network IP (1/4 비율) 공인아이피
 		network_group = self._create_info_group("NETWORK IP", self.get_public_ip())
 		top_layout.addWidget(network_group, 25)
-		
+
 		# PORT MIRRORING IP (1/4 비율) 내부이피
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
 		port_mirror_ip = config.get('Network', 'ip', fallback='127.0.0.1')
 		port_group = self._create_info_group("PORT MIRRORING IP", port_mirror_ip)
 		top_layout.addWidget(port_group, 25)
-		
+
 		# Auto Record (1/4 비율)
 		auto_record = self._create_toggle_group("AUTO RECORD")
 		top_layout.addWidget(auto_record, 25)
-		
+
 		# Record Start (1/4 비율)
 		record_start = self._create_toggle_group("RECORD START")
 		top_layout.addWidget(record_start, 25)
-		
+
 		layout.addLayout(top_layout)
-		
+
 		#  상태 정보 섹션
 		bottom_layout = QHBoxLayout()
 		bottom_layout.setSpacing(15)
-		
+
 		# settings.ini에서 Recording 경로 읽기
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
 		storage_path = config.get('Recording', 'save_path', fallback='C:\\')
 		drive_letter = storage_path.split(':')[0]
-		
+
 		# 디스크정보 섹션 (70%)
 		disk_group = QGroupBox('디스크 정보')
 		disk_layout = QHBoxLayout()
-		
+
 		self.disk_label = QLabel(f'녹취드라이버 ( {drive_letter} : ) 사용률:')
 		self.progress_bar = QProgressBar()
 		self.progress_bar.setFixedHeight(18)  # 프로그레스 높이 18로 설정
@@ -347,14 +347,14 @@ class Dashboard(QMainWindow):
 		self.progress_bar.setMinimum(0)
 		self.progress_bar.setMaximum(100)
 		self.disk_usage_label = QLabel()
-		
+
 		disk_layout.addWidget(self.disk_label)
 		disk_layout.addWidget(self.progress_bar)
 		disk_layout.addWidget(self.disk_usage_label)
-		
+
 		disk_group.setLayout(disk_layout)
 		bottom_layout.addWidget(disk_group, 70)
-		
+
 		# 회선상태 섹션 (30%)
 		led_group = QGroupBox('회선 상태')
 		led_layout = QHBoxLayout()
@@ -364,22 +364,22 @@ class Dashboard(QMainWindow):
 		led_layout.addWidget(self._create_led_with_text('녹취안됨 ', 'red'))
 		led_group.setLayout(led_layout)
 		bottom_layout.addWidget(led_group, 30)
-		
+
 		layout.addLayout(bottom_layout)
-		
+
 		# 타이머 설정
 		self.timer = QTimer(self)
 		self.timer.timeout.connect(self.update_disk_usage)
 		self.timer.start(600000)  # 10분
 		self.update_disk_usage()  # 초기 디스크 용량 표시
-		
+
 		return layout
 
 	def _create_info_group(self, title, value):
 		group = QGroupBox(title)
 		layout = QVBoxLayout(group)
 		layout.setContentsMargins(15, 20, 15, 15)
-		
+
 		# 레이블을 클래스 멤버 변수로 저장
 		if title == "NETWORK IP":
 			self.ip_value = QLabel(value)
@@ -389,7 +389,7 @@ class Dashboard(QMainWindow):
 			value_label = self.mirror_ip_value
 		else:
 			value_label = QLabel(value)
-		
+
 		value_label.setObjectName("statusLabel")
 		value_label.setAlignment(Qt.AlignCenter)
 		value_label.setStyleSheet("""
@@ -398,7 +398,7 @@ class Dashboard(QMainWindow):
 			font-weight: bold;
 		""")
 		layout.addWidget(value_label)
-		
+
 		return group
 
 	def _create_toggle_group(self, title):
@@ -406,25 +406,25 @@ class Dashboard(QMainWindow):
 		layout = QHBoxLayout(group)
 		layout.setContentsMargins(15, 15, 15, 15)
 		layout.setSpacing(2)
-		
+
 		button_container = QWidget()
 		button_layout = QHBoxLayout(button_container)
 		button_layout.setContentsMargins(0, 0, 0, 0)
 		button_layout.setSpacing(2)
-		
+
 		off_btn = QPushButton("OFF")
 		off_btn.setObjectName("toggleOff")
 		off_btn.setCursor(Qt.PointingHandCursor)
-		
+
 		on_btn = QPushButton("ON")
 		on_btn.setObjectName("toggleOn")
 		on_btn.setCursor(Qt.PointingHandCursor)
-		
+
 		button_layout.addWidget(off_btn, 1)
 		button_layout.addWidget(on_btn, 1)
-		
+
 		layout.addWidget(button_container)
-		
+
 		return group
 
 	def _create_line_list(self):
@@ -441,70 +441,70 @@ class Dashboard(QMainWindow):
 				font-weight: bold;
 			}
 		""")
-		
+
 		layout = QVBoxLayout(group)
 		layout.setContentsMargins(15, 15, 15, 15)
 		layout.setSpacing(0)
-		
+
 		# 스크롤 영역 생성
 		scroll = QScrollArea()
 		scroll.setWidgetResizable(True)
 		scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 		scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-		
+
 		# 통화 블록들을 담을 컨테이너
 		self.calls_container = QWidget()
 		self.calls_container.setObjectName("scrollContents")
 		self.calls_layout = FlowLayout(self.calls_container, margin=0, spacing=20)
-		
+
 		scroll.setWidget(self.calls_container)
 		layout.addWidget(scroll)
-		
+
 		# active_extensions 셔너리 추가 (내선번호 관리용)
 		self.active_extensions = {}
-		
+
 		return group
 
 	def _create_call_block(self, internal_number, received_number, duration, status):
 		block = QWidget()
 		block.setFixedSize(200, 150)
 		block.setObjectName("callBlock")
-		
+
 		layout = QVBoxLayout(block)
 		layout.setContentsMargins(15, 15, 15, 15)
 		layout.setSpacing(0)  # 수직 간격 0으로 설정
 		layout.setAlignment(Qt.AlignTop)  # 전체 내용을 상단에 정렬
-		
+
 		# 상단 컨테이너 (LED와 정보를 포함)
 		top_container = QWidget()
 		top_layout = QVBoxLayout(top_container)
 		top_layout.setContentsMargins(0, 0, 0, 0)
 		top_layout.setSpacing(4)
 		top_layout.setAlignment(Qt.AlignTop)  # 상단 정렬
-		
+
 		# LED 컨테이너
 		led_container = QWidget()
 		led_layout = QHBoxLayout(led_container)
 		led_layout.setContentsMargins(0, 0, 0, 0)
 		led_layout.setSpacing(4)
 		led_layout.setAlignment(Qt.AlignRight)  # LED를 오른쪽으로 정렬
-		
+
 		if status != "대기중" and received_number:
 			led_states = ["회선 초기화", "녹취중"]
 		else:
 			led_states = ["회선 Init", "대기중"]
-		
+
 		for state in led_states:
 			led = self._create_led("", self._get_led_color(state))
 			led_layout.addWidget(led)
-		
+
 		top_layout.addWidget(led_container)
-		
+
 		# 정보 레이아웃
 		info_layout = QGridLayout()
 		info_layout.setSpacing(4)
 		info_layout.setContentsMargins(0, 0, 0, 0)
-		
+
 		if status != "대기중" and received_number:
 			labels = [
 				("내선:", internal_number),
@@ -517,7 +517,7 @@ class Dashboard(QMainWindow):
 				("내선:", internal_number),
 				("상태:", status)
 			]
-		
+
 		for idx, (title, value) in enumerate(labels):
 			title_label = QLabel(title)
 			title_label.setObjectName("blockTitle")
@@ -525,7 +525,7 @@ class Dashboard(QMainWindow):
 				color: #888888;
 				font-size: 12px;
 			""")
-			
+
 			value_label = QLabel(value)
 			value_label.setObjectName("blockValue")
 			value_label.setStyleSheet("""
@@ -533,13 +533,13 @@ class Dashboard(QMainWindow):
 				font-size: 12px;
 				font-weight: bold;
 			""")
-			
+
 			info_layout.addWidget(title_label, idx, 0)
 			info_layout.addWidget(value_label, idx, 1)
-		
+
 		top_layout.addLayout(info_layout)
 		layout.addWidget(top_container)
-		
+
 		# 스타일 설정
 		base_style = """
 			QWidget#callBlock {
@@ -558,7 +558,7 @@ class Dashboard(QMainWindow):
 				margin-left: 4px;
 			}
 		"""
-		
+
 		if status == "대기중":
 			block.setStyleSheet(base_style + """
 				QWidget#callBlock {
@@ -587,7 +587,7 @@ class Dashboard(QMainWindow):
 			shadow.setColor(QColor("#18508F"))
 			shadow.setOffset(0, 0)
 			block.setGraphicsEffect(shadow)
-		
+
 		return block
 
 	def _get_led_color(self, state):
@@ -605,7 +605,7 @@ class Dashboard(QMainWindow):
 		group = QGroupBox("LOG LIST")
 		layout = QVBoxLayout(group)
 		layout.setContentsMargins(15, 15, 15, 15)
-		
+
 		# 테이블 위젯 설정
 		table = QTableWidget()
 		table.setObjectName("log_list_table")  # 업데이트를 위한 객체 이름 설정
@@ -613,7 +613,7 @@ class Dashboard(QMainWindow):
 		table.setHorizontalHeaderLabels([
 			'시간', '통화 방', '발신번호', '수신번호', '상태', '결과', 'Call-ID'
 		])
-		
+
 		# 테이블 스타일 설정
 		table.setStyleSheet("""
 			QTableWidget {
@@ -633,9 +633,9 @@ class Dashboard(QMainWindow):
 			QTableWidget::item:selected {
 				background-color: #4A90E2;
 				color: white;
-			}                       
+			}
 		""")
-		
+
 		# 컬럼 너비 설정
 		table.setColumnWidth(0, 150)  # 시간
 		table.setColumnWidth(1, 80)   # 통화 방향
@@ -644,13 +644,13 @@ class Dashboard(QMainWindow):
 		table.setColumnWidth(4, 80)   # 상태
 		table.setColumnWidth(5, 80)   # 결과
 		table.setColumnWidth(6, 400)  # Call-ID
-		
+
 		# 테이블 설정
 		table.setSelectionBehavior(QTableWidget.SelectRows)
 		table.setSelectionMode(QTableWidget.SingleSelection)
 		table.setSortingEnabled(True)
 		table.horizontalHeader().setStretchLastSection(True)
-		
+
 		layout.addWidget(table)
 		return group
 
@@ -740,7 +740,7 @@ class Dashboard(QMainWindow):
 		layout = QHBoxLayout()
 		layout.setAlignment(Qt.AlignLeft)
 		layout.setContentsMargins(0, 0, 0, 0)
-		
+
 		led = QLabel()
 		led.setObjectName("led_indicator")
 		led.setFixedSize(8, 8)
@@ -751,17 +751,17 @@ class Dashboard(QMainWindow):
 			f'border: 1px solid rgba(0, 0, 0, 0.2); '
 			f'}}'
 		)
-		
+
 		# 그림자 효과 추가
 		shadow = QGraphicsDropShadowEffect()
 		shadow.setBlurRadius(3)
 		shadow.setColor(QColor(color))
 		shadow.setOffset(0, 0)
 		led.setGraphicsEffect(shadow)
-		
+
 		text_label = QLabel(text)
 		text_label.setStyleSheet("color: white; font-size: 12px;")
-		
+
 		layout.addWidget(led)
 		layout.addWidget(text_label)
 		widget.setLayout(layout)
@@ -773,7 +773,7 @@ class Dashboard(QMainWindow):
 		layout = QHBoxLayout()
 		layout.setAlignment(Qt.AlignCenter)
 		layout.setContentsMargins(0, 0, 0, 0)
-		
+
 		led = QLabel()
 		led.setObjectName("led_indicator")
 		led.setFixedSize(8, 8)
@@ -784,14 +784,14 @@ class Dashboard(QMainWindow):
 			f'border: 1px solid rgba(0, 0, 0, 0.2); '
 			f'}}'
 		)
-		
+
 		# 그자 과 추가
 		shadow = QGraphicsDropShadowEffect()
 		shadow.setBlurRadius(3)
 		shadow.setColor(QColor(color))
 		shadow.setOffset(0, 0)
 		led.setGraphicsEffect(shadow)
-		
+
 		layout.addWidget(led)
 		widget.setLayout(layout)
 		return widget
@@ -803,20 +803,20 @@ class Dashboard(QMainWindow):
 			config.read('settings.ini', encoding='utf-8')
 			storage_path = config.get('Recording', 'save_path', fallback='D:\\')
 			drive_letter = storage_path.replace('\\', '/').split('/')[0].split(':')[0]
-			
+
 			disk_usage = psutil.disk_usage(f"{drive_letter}:")
-			
+
 			total_gb = disk_usage.total / (1024**3)
 			used_gb = disk_usage.used / (1024**3)
 			free_gb = disk_usage.free / (1024**3)
 			percent = int(disk_usage.percent)
-			
+
 			self.disk_label.setText(f'녹취드라이버( {drive_letter}: )')
 			self.progress_bar.setValue(percent)
 			self.disk_usage_label.setText(f'전체: {total_gb:.1f}GB | 사용중: {used_gb:.1f}GB | 남은용량: {free_gb:.1f}GB')
-			
+
 			#print(f"Disk usage updated for drive {drive_letter}")  # 디버깅용
-			
+
 		except Exception as e:
 			print(f"Error updating disk info: {e}")
 			self.disk_usage_label.setText(f'{drive_letter}드라이브 정보를 읽을 수 없습니다')
@@ -852,18 +852,18 @@ class Dashboard(QMainWindow):
 			# 대표번호 업데이트
 			if 'Extension' in settings_data:
 				self.phone_number.setText(settings_data['Extension']['Rep_number'])
-			
+
 			# NETWORK IP 업데이트
 			if 'Network' in settings_data:
 				self.ip_value.setText(settings_data['Network']['ap_ip'])
-			
+
 			# PORT MIRRORING IP 업데이트
 			if 'Network' in settings_data:
 				self.mirror_ip_value.setText(settings_data['Network']['ip'])
-			
+
 			# 디스 정보 업데이트
 			self.update_disk_usage()
-			
+
 		except Exception as e:
 			print(f"Error updating dashboard settings: {e}")
 			QMessageBox.warning(self, "오류", "대보드 업데이트 중 오류가 발생했습니다.")
@@ -877,12 +877,12 @@ class Dashboard(QMainWindow):
 			if 'Recording' not in config:
 				config['Recording'] = {}
 			config['Recording']['save_path'] = new_path
-			
+
 			# 디스크 보 업이트
 			self.update_disk_usage()
-			
+
 			#print(f"Recording path updated to: {new_path}")  # 디깅용
-			
+
 		except Exception as e:
 			print(f"Error updating storage path: {e}")
 			QMessageBox.warning(self, "오류", "저장 경로 업데이트 중 오류가 발생했습니다.")
@@ -901,7 +901,7 @@ class Dashboard(QMainWindow):
 		table.setSelectionMode(QTableWidget.SingleSelection)
 		table.setStyleSheet(self.TABLE_STYLE)
 
-	
+
 
 	@Slot(str)
 	def create_waiting_block(self, extension):
@@ -931,7 +931,7 @@ class Dashboard(QMainWindow):
 				status_code = sip_layer.status_code
 				print(f"Status Line: {sip_layer.status_line}")
 				print(f"Status Code: {status_code}")
-				
+
 				# 100 Trying 감지 시 즉시 블록 생성
 				if status_code == '100':
 					print("100 Trying 감지")
@@ -941,18 +941,18 @@ class Dashboard(QMainWindow):
 						# 대기중 록 생성
 						self.block_update_signal.emit(extension, "대기중", "")
 						print(f"대기중 블록 생성 요청: {extension}")
-				
+
 				# 나머지 상태 코드 처리
 				if call_id in self.active_calls:
 					if status_code == '183':  # Session Progress (벨울림)
 						print("Ringing 상태 감지")
 						self.update_call_status(call_id, '벨울림')
-					
+
 					elif status_code == '200':  # OK
 						print("통화 연결됨")
 						if self.active_calls[call_id]['status'] != '통화종료':
 							self.update_call_status(call_id, '통화중')
-						
+
 						# 통화 시간 업데이트 타이머 시작
 						if not hasattr(self, 'duration_timer') or not self.duration_timer.isActive():
 							self.duration_timer = QTimer()
@@ -968,12 +968,12 @@ class Dashboard(QMainWindow):
 
 			elif hasattr(sip_layer, 'request_line'):
 				print(f"Request Line: {sip_layer.request_line}")
-				
+
 				if 'INVITE' in sip_layer.request_line:
 					print("INVITE 요청 감지")
 					from_number = self.extract_number(sip_layer.from_user)
 					to_number = self.extract_number(sip_layer.to_user)
-					
+
 					self.active_calls[call_id] = {
 						'start_time': datetime.datetime.now(),
 						'status': '시도중',
@@ -982,13 +982,13 @@ class Dashboard(QMainWindow):
 						'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신'
 					}
 					self.update_call_status(call_id, '시도중')
-				
+
 				elif 'BYE' in sip_layer.request_line:
 					if call_id in self.active_calls:
 						self.update_call_status(call_id, '통화종료', '정상종료')
 						# 대기중 록 생성
 						self.block_update_signal.emit(extension, "대기중", "")
-						print(f"대기중 블록 생성 요청: {extension}")						
+						print(f"대기중 블록 생성 요청: {extension}")
 
 				# CANCEL 요청 처리
 				elif 'CANCEL' in sip_layer.request_line:
@@ -996,7 +996,7 @@ class Dashboard(QMainWindow):
 						self.update_call_status(call_id, '통화종료', '발신취소')
 						# 대기중 록 생성
 						self.block_update_signal.emit(extension, "대기중", "")
-						print(f"대기중 블록 생성 요청: {extension}")						
+						print(f"대기중 블록 생성 요청: {extension}")
 
 		except Exception as e:
 			print(f"SIP 패킷 분석 중 오류: {e}")
@@ -1007,13 +1007,13 @@ class Dashboard(QMainWindow):
 		"""새로운 통화 처리"""
 		try:
 			print(f"새로운 통화 처리 시작 - Call-ID: {call_id}")  # 디버그 로그
-			
+
 			from_number = self.extract_number(sip_layer.from_user)
 			to_number = self.extract_number(sip_layer.to_user)
-			
+
 			print(f"발신번호: {from_number}")  # 디버그 로그
 			print(f"수신번호: {to_number}")  # 디버그 로그
-			
+
 			self.active_calls[call_id] = {
 				'start_time': datetime.datetime.now(),
 				'status': '시도중',
@@ -1022,9 +1022,9 @@ class Dashboard(QMainWindow):
 				'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신',
 				'media_endpoints': []
 			}
-			
+
 			print(f"통화 정보 저장 완료: {self.active_calls[call_id]}")  # 디버그 로그
-			
+
 		except Exception as e:
 			print(f"새 통화 처리 중 오류: {e}")
 
@@ -1037,15 +1037,15 @@ class Dashboard(QMainWindow):
 				'end_time': datetime.datetime.now(),
 				'result': '정상종료'
 			})
-			
+
 			# LOG LIST 즉시 데이트
 			self.update_voip_status()
-			
+
 			# 내선번호 찾기
 			extension = self.get_extension_from_call(call_id)
 			if extension:
 				# 대기중 상태의 블록으로 강제 업데이트
-				QMetaObject.invokeMethod(self, 
+				QMetaObject.invokeMethod(self,
 					"update_block_to_waiting",
 					Qt.QueuedConnection,
 					Q_ARG(str, extension))
@@ -1057,7 +1057,7 @@ class Dashboard(QMainWindow):
 			call_info = self.active_calls[call_id]
 			from_number = call_info['from_number']
 			to_number = call_info['to_number']
-			
+
 			# 내선번호 확인
 			is_extension = lambda num: num.startswith(('1', '2', '3', '4')) and len(num) == 4
 			return from_number if is_extension(from_number) else to_number if is_extension(to_number) else None
@@ -1078,18 +1078,18 @@ class Dashboard(QMainWindow):
 			table = self.findChild(QTableWidget, "log_list_table")
 			if not table:
 				return
-			
+
 			# active_calls를 시간 기준으로 정렬 (최신순)
 			sorted_calls = sorted(
 				self.active_calls.items(),
 				key=lambda x: x[1]['start_time'],
 				reverse=True  # 최신 항목이 위로 오도록 reverse=True 설정
 			)
-			
+
 			# 테이블 내용 초기화
 			table.setRowCount(0)
 			table.setRowCount(len(sorted_calls))
-			
+
 			# 정렬된 순서대로 테이블에 추가
 			for row, (call_id, call_info) in enumerate(sorted_calls):
 				time_item = QTableWidgetItem(call_info['start_time'].strftime('%Y-%m-%d %H:%M:%S'))
@@ -1099,17 +1099,17 @@ class Dashboard(QMainWindow):
 				status_item = QTableWidgetItem(call_info.get('status', ''))
 				result_item = QTableWidgetItem(call_info.get('result', ''))
 				callid_item = QTableWidgetItem(call_id)
-				
-				items = [time_item, direction_item, from_item, to_item, 
+
+				items = [time_item, direction_item, from_item, to_item,
 						status_item, result_item, callid_item]
-				
+
 				for col, item in enumerate(items):
 					item.setTextAlignment(Qt.AlignCenter)
 					table.setItem(row, col, item)
-			
+
 			# 테이블 즉시 업데이트
 			table.viewport().update()
-			
+
 		except Exception as e:
 			print(f"VoIP 상태 업데이트 중 오류: {e}")
 
@@ -1141,19 +1141,19 @@ class Dashboard(QMainWindow):
 		try:
 			if 'UDP' not in packet:
 				return False
-				
+
 			# payload를 hex string으로 변
 			payload_hex = packet.udp.payload.replace(':', '')
 			payload = bytes.fromhex(payload_hex)
-			
+
 			if len(payload) < 12:
 				return False
-				
+
 			version = (payload[0] >> 6) & 0x03
 			payload_type = payload[1] & 0x7F
-			
+
 			return version == 2 and payload_type in [0, 8]  # PCMU=0, PCMA=8
-			
+
 		except Exception as e:
 			print(f"RTP 패킷 검증 중 오류: {e}")
 			return False
@@ -1162,7 +1162,7 @@ class Dashboard(QMainWindow):
 		"""RTP 스트 향 결정"""
 		src_port = int(packet.udp.srcport)
 		dst_port = int(packet.udp.dstport)
-		
+
 		if 3000 <= src_port <= 3999:  # SIP 포트 범위
 			return "발신"
 		else:
@@ -1173,21 +1173,21 @@ class Dashboard(QMainWindow):
 		try:
 			if not sip_user:
 				return ''
-			
+
 			sip_user = str(sip_user)
-			
+
 			# sip: 제거 및 전체 번호 추
 			if 'sip:' in sip_user:
 				number = sip_user.split('sip:')[1].split('@')[0]
 				return ''.join(c for c in number if c.isdigit())
-			
+
 			# Q 문자로 분리된 경우 처리
 			if 'Q' in sip_user:
 				return sip_user.split('Q')[1]
-			
+
 			# 그 외의 경우 숫자만 추출하여 반환
 			return ''.join(c for c in sip_user if c.isdigit())
-			
+
 		except Exception as e:
 			print(f"전화번호 추출 중 오류: {e}")
 			return ''
@@ -1220,37 +1220,37 @@ class Dashboard(QMainWindow):
 				ip = None
 				if '@' in call_id:
 					ip = call_id.split('@')[1]
-				
+
 				if ip:
 					extension = self.extract_number(sip_layer.from_user)
-					
+
 					if ip not in self.sip_registrations:
 						self.sip_registrations[ip] = {
 							'status': [],
 							'extension': extension
 						}
-						
+
 					# 상태 코드 추가
 					self.sip_registrations[ip]['status'].append(status_code)
-					
+
 					# 100->401->200 시퀀스 확인
 					if len(self.sip_registrations[ip]['status']) >= 3:
 						recent_status = self.sip_registrations[ip]['status'][-3:]
 						if '100' in recent_status and '401' in recent_status and '200' in recent_status:
 							# 대기중 블록 생성
-							QMetaObject.invokeMethod(self, 
+							QMetaObject.invokeMethod(self,
 								"create_waiting_block",
 								Qt.QueuedConnection,
 								Q_ARG(str, extension))
 							self.handle_first_registration()
-			
+
 			# 통화 상태 업데이트
 			if call_id in self.active_calls:
 				if status_code == '200':  # OK
 					self.active_calls[call_id]['status'] = '통화중'
 				elif status_code == '180':  # Ringing
 					self.active_calls[call_id]['status'] = '벨울림'
-					
+
 		except Exception as e:
 			print(f"SIP 응답 처리 중 오류: {e}")
 
@@ -1285,7 +1285,7 @@ class Dashboard(QMainWindow):
 				)
 				self.calls_layout.addWidget(block)
 				print(f"블록 생성됨 (메인 스레드): {extension}")
-				
+
 				# 레이아웃 업데이트
 				self.calls_layout.update()
 				self.calls_container.update()
@@ -1303,7 +1303,7 @@ class Dashboard(QMainWindow):
 						if child.objectName() == "blockValue" and child.text() == extension:
 							self.calls_layout.removeWidget(block)
 							block.deleteLater()
-			
+
 			# 새로운 대기중 블록 생성
 			new_block = self._create_call_block(
 				internal_number=extension,
@@ -1312,15 +1312,15 @@ class Dashboard(QMainWindow):
 				status="대기중"
 			)
 			self.calls_layout.addWidget(new_block)
-			
+
 			# 레이아웃 강제 업데이트
 			self.calls_layout.update()
 			self.calls_container.update()
 			print(f"블록 강제 업데이트 완료: {extension} -> 대기중")
-			
+
 			# LOG LIST 업데이트 강제 실행
 			self.update_voip_status()
-			
+
 		except Exception as e:
 			print(f"블록 강제 업데이트  오류: {e}")
 
@@ -1354,7 +1354,7 @@ class Dashboard(QMainWindow):
 						if child.objectName() == "blockValue" and child.text() == extension:
 							self.calls_layout.removeWidget(block)
 							block.deleteLater()
-			
+
 			# 새로운 대기중 블록 생성
 			new_block = self._create_call_block(
 				internal_number=extension,
@@ -1363,15 +1363,15 @@ class Dashboard(QMainWindow):
 				status="대기중"
 			)
 			self.calls_layout.addWidget(new_block)
-			
+
 			# 레이아웃 강제 업데이트
 			self.calls_layout.update()
 			self.calls_container.update()
 			print(f"블록 강제 업데이트 완료: {extension} -> 대기중")
-			
+
 			# LOG LIST 업데이트 강제 실행
 			self.update_voip_status()
-			
+
 		except Exception as e:
 			print(f"블록 강제 업데이트  오류: {e}")
 
@@ -1386,19 +1386,19 @@ class Dashboard(QMainWindow):
 						if child.objectName() == "blockValue" and child.text() == extension:
 							self.calls_layout.removeWidget(block)
 							block.deleteLater()
-			
+
 			# active_calls에서 해당 extension의 call_id 찾기
 			call_id = None
 			for cid, call_info in self.active_calls.items():
 				if self.get_extension_from_call(cid) == extension:
 					call_id = cid
 					break
-			
+
 			# 통화 시간 계산
 			duration = "00:00:00"
 			if call_id and status == "통화중":
 				duration = self.calculate_duration(self.active_calls[call_id])
-			
+
 			# 새 블록 생성
 			new_block = self._create_call_block(
 				internal_number=extension,
@@ -1407,11 +1407,11 @@ class Dashboard(QMainWindow):
 				status=status
 			)
 			self.calls_layout.addWidget(new_block)
-			
+
 			# 레이아웃 업데이트
 			self.calls_layout.update()
 			self.calls_container.update()
-			
+
 		except Exception as e:
 			print(f"블록 업데이트 중 오류: {e}")
 
@@ -1424,7 +1424,7 @@ class Dashboard(QMainWindow):
 					'status': new_status,
 					'result': result
 				})
-				
+
 				if new_status == '통화종료':
 					self.active_calls[call_id]['end_time'] = datetime.datetime.now()
 					extension = self.get_extension_from_call(call_id)
@@ -1436,12 +1436,12 @@ class Dashboard(QMainWindow):
 					if extension:
 						received_number = self.active_calls[call_id]['to_number']
 						self.block_update_signal.emit(extension, new_status, received_number)
-			
+
 			# LOG LIST 업데이트
 			self.update_voip_status()
-			
+
 			print(f"통화 상태 업데이트 - Call-ID: {call_id}, Status: {new_status}, Result: {result}")
-			
+
 		except Exception as e:
 			print(f"통화 상태 업데이트 중 오류: {e}")
 
@@ -1460,30 +1460,30 @@ class Dashboard(QMainWindow):
 		try:
 			loop = asyncio.new_event_loop()
 			asyncio.set_event_loop(loop)
-			
+
 			# SIP 패킷만 캡처하도록 필터 설정
 			capture = pyshark.LiveCapture(
 				interface=interface,
 				display_filter='sip'
 			)
-			
-			print(f"패킷 캡처 시 - Interface: {interface}")
-			
+
+			print(f"패킷 캡처 감시 - Interface: {interface}")
+
 			# 패킷 캡처 시작 전에 인터페이스 확인
 			if not interface:
 				print("Error: No interface selected")
 				return
-				
+
 			for packet in capture.sniff_continuously():
 				try:
 					if 'SIP' in packet:
 						# SIP 패킷 분석
 						self.analyze_sip_packet(packet)
-						
+
 				except Exception as packet_error:
 					print(f"개별 패킷 처리 중 오류: {packet_error}")
 					continue
-					
+
 		except Exception as e:
 			print(f"패킷 캡처 중 오류: {e}")
 			import traceback
@@ -1504,7 +1504,7 @@ class Dashboard(QMainWindow):
 						duration = self.calculate_duration(call_info)
 						 # 블록 업데이트 (통화중 상태와 시간 표시)
 						self.block_update_signal.emit(extension, "통화중", call_info['to_number'])
-						
+
 						# 블록의 시간 레이블 업데이트
 						for i in range(self.calls_layout.count()):
 							block = self.calls_layout.itemAt(i).widget()
@@ -1527,40 +1527,40 @@ class FlowLayout(QLayout):
 		self._items = []
 		self.setContentsMargins(margin, margin, margin, margin)
 		self.setSpacing(spacing)
-		
+
 	def addItem(self, item):
 		self._items.append(item)
-		
+
 	def count(self):
 		return len(self._items)
-		
+
 	def itemAt(self, index):
 		if 0 <= index < len(self._items):
 			return self._items[index]
 		return None
-		
+
 	def takeAt(self, index):
 		if 0 <= index < len(self._items):
 			return self._items.pop(index)
 		return None
-		
+
 	def expandingDirections(self):
 		return Qt.Orientations()
-		
+
 	def hasHeightForWidth(self):
 		return True
-		
+
 	def heightForWidth(self, width):
 		height = self._doLayout(QRect(0, 0, width, 0), True)
 		return height
-		
+
 	def setGeometry(self, rect):
 		super().setGeometry(rect)
 		self._doLayout(rect, False)
-		
+
 	def sizeHint(self):
 		return self.minimumSize()
-		
+
 	def minimumSize(self):
 		size = QSize()
 		for item in self._items:
@@ -1568,13 +1568,13 @@ class FlowLayout(QLayout):
 		margin = self.contentsMargins()
 		size += QSize(2 * margin.top(), 2 * margin.bottom())
 		return size
-		
+
 	def _doLayout(self, rect, testOnly):
 		x = rect.x()
 		y = rect.y()
 		lineHeight = 0
 		spacing = self.spacing()
-		
+
 		for item in self._items:
 			widget = item.widget()
 			spaceX = spacing
@@ -1585,13 +1585,13 @@ class FlowLayout(QLayout):
 				y = y + lineHeight + spaceY
 				nextX = x + item.sizeHint().width() + spaceX
 				lineHeight = 0
-			
+
 			if not testOnly:
 				item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
-			
+
 			x = nextX
 			lineHeight = max(lineHeight, item.sizeHint().height())
-		
+
 		return y + lineHeight - rect.y()
 
 if __name__ == "__main__":
