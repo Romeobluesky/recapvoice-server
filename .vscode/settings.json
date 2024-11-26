@@ -1,3 +1,7 @@
 {
-	"pyqt-integration.qtdesigner.path": "D:\\work_vsc\\python\\myenv\\Lib\\site-packages\\qt5_applications\\Qt\\bin\\designer.exe"
+	"files.eol": "\n",
+	"editor.insertSpaces": false,
+	"editor.tabSize": 2,
+	"pyqt-integration.qtdesigner.path": "D:\\work_vsc\\python\\myenv\\Lib\\site-packages\\qt5_applications\\Qt\\bin\\designer.exe",
+	"editor.wordWrap": "on"
 }
