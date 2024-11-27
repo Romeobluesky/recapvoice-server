@@ -318,8 +318,5 @@ pyrightconfig.json
 
 # MongoDB
 mongodb/
-mongodb/bin/*.pdb
-mongodb/bin/*.exe
-mongodb/data/db/journal/*
-mongodb/data/db/*
+# nginx
 nginx/
