@@ -16,6 +16,14 @@ if %ERRORLEVEL% neq 0 (
     exit /b
 )
 
+:: NestJS npm 시작
+echo Starting NestJS...
+npm --prefix D:\work_vsc\packetwave_client run start:dev
+if %ERRORLEVEL% neq 0 (
+    echo Failed to start NestJS
+    exit /b
+)
+
 :: Python 스키마 초기화 및 프로그램 실행
 echo Initializing MongoDB schemas...
 python apply_schemas.py
