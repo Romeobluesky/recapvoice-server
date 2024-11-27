@@ -18,6 +18,11 @@ if %ERRORLEVEL% neq 0 (
 
 :: NestJS npm 시작
 echo Starting NestJS...
+where npm >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+	echo npm is not installed.
+	exit /b
+)
 npm --prefix D:\work_vsc\packetwave_client run start:dev
 if %ERRORLEVEL% neq 0 (
 	echo Failed to start NestJS
