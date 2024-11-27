@@ -276,7 +276,7 @@ venv.bak/
 mongodb/
 # nginx
 nginx/
-schemas/
+
 # Spyder project settings
 .spyderproject
 .spyproject
