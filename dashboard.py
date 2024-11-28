@@ -310,9 +310,9 @@ class Dashboard(QMainWindow):
 		auto_record = self._create_toggle_group("AUTO RECORD")
 		top_layout.addWidget(auto_record, 25)
 
-		# Record Start (1/4 비율)
-		record_start = self._create_toggle_group("RECORD START")
-		top_layout.addWidget(record_start, 25)
+		# CLIENT START (1/4 비율)
+		client_start = self._create_client_start_group()
+		top_layout.addWidget(client_start, 25)
 
 		layout.addLayout(top_layout)
 
@@ -1519,6 +1519,89 @@ class Dashboard(QMainWindow):
 										break
 		except Exception as e:
 			print(f"통화 시간 업데이트 중 오류: {e}")
+
+	def _create_client_start_group(self):
+		"""CLIENT START 그룹 생성"""
+		group = QGroupBox("CLIENT START")
+		layout = QHBoxLayout(group)
+		layout.setContentsMargins(15, 20, 15, 15)
+		layout.setSpacing(2)
+
+		# 버튼 컨테이너
+		button_container = QWidget()
+		button_layout = QHBoxLayout(button_container)
+		button_layout.setContentsMargins(0, 0, 0, 0)
+		button_layout.setSpacing(2)
+
+		# OFF/ON 버튼
+		self.off_btn = QPushButton("OFF")
+		self.off_btn.setObjectName("toggleOff")
+		self.off_btn.setCursor(Qt.PointingHandCursor)
+		self.off_btn.clicked.connect(self.stop_client)
+		
+		self.on_btn = QPushButton("ON")
+		self.on_btn.setObjectName("toggleOn")
+		self.on_btn.setCursor(Qt.PointingHandCursor)
+		self.on_btn.clicked.connect(self.start_client)
+		
+		button_layout.addWidget(self.off_btn, 1)
+		button_layout.addWidget(self.on_btn, 1)
+		
+		layout.addWidget(button_container)
+		return group
+
+	def start_client(self):
+		"""start.bat 실행 및 ON 버튼 색상 변경"""
+		try:
+			# start.bat 실행
+			import subprocess
+			subprocess.Popen(['start.bat'], shell=True)
+			
+			# ON 버튼 색상 변경
+			self.on_btn.setStyleSheet("""
+				QPushButton {
+					background-color: #FF0000;
+					color: white;
+					border: none;
+					border-radius: 4px;
+					min-height: 35px;
+				}
+				QPushButton:hover {
+					background-color: #CC0000;
+				}
+			""")
+			
+		except Exception as e:
+			print(f"클라이언트 시작 중 오류: {e}")
+
+	def stop_client(self):
+		"""start.bat 중지 및 ON 버튼 색상 원복"""
+		try:
+			# 종료할 프로세스 목록
+			processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
+			
+			# 각 프로세스 종료
+			import os
+			for process in processes_to_kill:
+				os.system(f'taskkill /f /im {process}')
+				print(f"프로세스 종료 시도: {process}")
+			
+			# ON 버튼 색상 원복
+			self.on_btn.setStyleSheet("""
+				QPushButton {
+					background-color: #8e44ad;
+					color: white;
+					border: none;
+					border-radius: 4px;
+					min-height: 35px;
+				}
+				QPushButton:hover {
+					background-color: black;
+				}
+			""")
+			
+		except Exception as e:
+			print(f"클라이언트 중지 중 오류: {e}")
 
 # FlowLayout 래스 추가 (Qt의 동적 그리 레이아웃 구현)
 class FlowLayout(QLayout):
