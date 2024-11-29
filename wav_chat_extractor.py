@@ -14,27 +14,27 @@ class WavChatExtractor:
 		try:
 			print(f"음성 파일 분석 시작: {wav_path}")
 			audio = AudioSegment.from_wav(wav_path)
-			
+
 			texts = []
 			temp_dir = "temp_audio_chunks"
 			os.makedirs(temp_dir, exist_ok=True)
-			
+
 			total_chunks = len(audio) // chunk_duration + 1
-			
+
 			for i in range(0, len(audio), chunk_duration):
 				chunk_num = i // chunk_duration + 1
 				print(f"청크 처리 중: {chunk_num}/{total_chunks}")
-				
+
 				chunk = audio[i:i + chunk_duration]
 				temp_path = os.path.join(temp_dir, f"chunk_{i}.wav")
 				chunk.export(temp_path, format="wav")
-				
+
 				# Google STT로 음성 인식
 				with sr.AudioFile(temp_path) as source:
 					audio_data = self.recognizer.record(source)
 					try:
 						text = self.recognizer.recognize_google(
-							audio_data, 
+							audio_data,
 							language='ko-KR'
 						)
 						if text.strip():
@@ -43,12 +43,12 @@ class WavChatExtractor:
 								texts.append((i//1000, text))
 					except (sr.UnknownValueError, sr.RequestError):
 						pass  # 음성 인식 실패 시 조용히 넘어감
-				
+
 				os.remove(temp_path)
-			
+
 			os.rmdir(temp_dir)
 			return texts
-			
+
 		except Exception as e:
 			print(f"음성 인식 오류: {str(e)}")
 			return []
@@ -57,10 +57,10 @@ class WavChatExtractor:
 		"""텍스트 정제 함수"""
 		# 1. 기본 정제
 		text = text.replace('.', '').replace(',', '')
-		
+
 		# 2. 불필요한 반복 제거
 		text = ' '.join(text.split())
-		
+
 		return text
 
 	def extract_chat_to_html(self, ip, timestamp_dir, timestamp, local_num, remote_num, wav1_path, wav2_path, save_path):
@@ -81,9 +81,9 @@ class WavChatExtractor:
 				<meta charset="utf-8">
 				<style>
 					body {{ font-family: Arial, sans-serif; }}
-					.chat-container {{ 
-						max-width: 800px; 
-						margin: 20px auto; 
+					.chat-container {{
+						max-width: 800px;
+						margin: 20px auto;
 						padding: 20px;
 						background: #f5f5f5;
 						border-radius: 10px;
@@ -94,27 +94,27 @@ class WavChatExtractor:
 						border-bottom: 1px solid #ddd;
 						margin-bottom: 20px;
 					}}
-					.message {{ 
-						margin: 10px 0; 
+					.message {{
+						margin: 10px 0;
 						padding: 10px 15px;
 						border-radius: 15px;
 						max-width: 70%;
 						position: relative;
 						clear: both;
 					}}
-					.receiver {{ 
-						background: #e3e3e3; 
+					.receiver {{
+						background: #e3e3e3;
 						float: left;
 						margin-right: auto;
 					}}
-					.sender {{ 
-						background: #0084ff; 
-						color: white; 
+					.sender {{
+						background: #0084ff;
+						color: white;
 						float: right;
 						margin-left: auto;
 					}}
-					.timestamp {{ 
-						font-size: 0.8em; 
+					.timestamp {{
+						font-size: 0.8em;
 						margin-top: 5px;
 						opacity: 0.7;
 					}}
@@ -135,14 +135,14 @@ class WavChatExtractor:
 				all_texts.append(('receiver', time, text, local_num))
 			for time, text in texts2:
 				all_texts.append(('sender', time, text, remote_num))
-			
+
 			# 시간순 정렬
 			all_texts.sort(key=lambda x: x[1])
 
 			# 메시지 생성
 			for msg_type, time, text, number in all_texts:
 				time_str = str(timedelta(seconds=time))
-				
+
 				if msg_type == 'receiver':
 					html_content += f"""
 					<div class="message receiver">
