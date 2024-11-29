@@ -317,9 +317,9 @@ class Dashboard(QMainWindow):
 		port_group = self._create_info_group("PORT MIRRORING IP", port_mirror_ip)
 		top_layout.addWidget(port_group, 25)
 
-		# Auto Record (1/4 비율)
-		auto_record = self._create_toggle_group("AUTO RECORD")
-		top_layout.addWidget(auto_record, 25)
+		# Record Start (1/4 비율)
+		record_start = self._create_toggle_group("RECORD START")
+		top_layout.addWidget(record_start, 25)
 
 		# CLIENT START (1/4 비율)
 		client_start = self._create_client_start_group()
