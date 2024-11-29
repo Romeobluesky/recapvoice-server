@@ -861,7 +861,7 @@ class Dashboard(QMainWindow):
 			if 'Network' in settings_data:
 				self.mirror_ip_value.setText(settings_data['Network']['ip'])
 
-			# 디스 정보 업데이트
+			# 디스크 정보 업데이트
 			self.update_disk_usage()
 
 		except Exception as e:
@@ -878,7 +878,7 @@ class Dashboard(QMainWindow):
 				config['Recording'] = {}
 			config['Recording']['save_path'] = new_path
 
-			# 디스크 보 업이트
+			# 디스크 정보 업데이트
 			self.update_disk_usage()
 
 			#print(f"Recording path updated to: {new_path}")  # 디깅용
@@ -1538,15 +1538,15 @@ class Dashboard(QMainWindow):
 		self.off_btn.setObjectName("toggleOff")
 		self.off_btn.setCursor(Qt.PointingHandCursor)
 		self.off_btn.clicked.connect(self.stop_client)
-		
+
 		self.on_btn = QPushButton("ON")
 		self.on_btn.setObjectName("toggleOn")
 		self.on_btn.setCursor(Qt.PointingHandCursor)
 		self.on_btn.clicked.connect(self.start_client)
-		
+
 		button_layout.addWidget(self.off_btn, 1)
 		button_layout.addWidget(self.on_btn, 1)
-		
+
 		layout.addWidget(button_container)
 		return group
 
@@ -1556,7 +1556,7 @@ class Dashboard(QMainWindow):
 			# start.bat 실행
 			import subprocess
 			subprocess.Popen(['start.bat'], shell=True)
-			
+
 			# ON 버튼 색상 변경
 			self.on_btn.setStyleSheet("""
 				QPushButton {
@@ -1570,7 +1570,7 @@ class Dashboard(QMainWindow):
 					background-color: #CC0000;
 				}
 			""")
-			
+
 		except Exception as e:
 			print(f"클라이언트 시작 중 오류: {e}")
 
@@ -1579,13 +1579,13 @@ class Dashboard(QMainWindow):
 		try:
 			# 종료할 프로세스 목록
 			processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
-			
+
 			# 각 프로세스 종료
 			import os
 			for process in processes_to_kill:
 				os.system(f'taskkill /f /im {process}')
 				print(f"프로세스 종료 시도: {process}")
-			
+
 			# ON 버튼 색상 원복
 			self.on_btn.setStyleSheet("""
 				QPushButton {
@@ -1599,7 +1599,7 @@ class Dashboard(QMainWindow):
 					background-color: black;
 				}
 			""")
-			
+
 		except Exception as e:
 			print(f"클라이언트 중지 중 오류: {e}")
 
