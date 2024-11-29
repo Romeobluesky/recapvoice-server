@@ -61,8 +61,8 @@ class Dashboard(QMainWindow):
 
 	def __init__(self):
 		super().__init__()
-		self.setWindowIcon(QIcon("images/logo.png"))
-		self.setWindowTitle("Packet Wave")
+		self.setWindowIcon(QIcon("images/icon03.png"))
+		self.setWindowTitle("reCap VOICE")
 
 		# Signal 연결
 		self.block_creation_signal.connect(self.create_block_in_main_thread)
@@ -218,18 +218,29 @@ class Dashboard(QMainWindow):
 		layout.setContentsMargins(0, 0, 0, 0)
 		layout.setSpacing(0)
 
-		# 로고 영
+		# 로고 영역
 		logo_label = QLabel()
 		logo_label.setFixedHeight(100)
 		logo_label.setAlignment(Qt.AlignCenter)
-		logo_pixmap = QPixmap("images/logo.png")
+		logo_pixmap = QPixmap("images/wideci03.png")
 		if not logo_pixmap.isNull():
-			scaled_logo = logo_pixmap.scaled(50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+			# 원본 이미지의 가로/세로 비율 계산
+			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
+			target_width = 188  # 원하는 가로 크기
+			target_height = int(target_width * aspect_ratio)  # 비율에 맞는 세로 크기 계산
+			
+			scaled_logo = logo_pixmap.scaled(
+				target_width, 
+				target_height, 
+				Qt.KeepAspectRatio, 
+				Qt.SmoothTransformation
+			)
 			logo_label.setPixmap(scaled_logo)
 		layout.addWidget(logo_label)
 
 		# 메뉴 버들을 담을 컨테이너
 		menu_container = QWidget()
+		
 		menu_layout = QVBoxLayout(menu_container)
 		menu_layout.setContentsMargins(0, 0, 0, 0)
 		menu_layout.setSpacing(5)
