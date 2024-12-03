@@ -1,3 +1,16 @@
+import atexit
+import subprocess
+
+# 종료할 프로세스 목록
+processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
+
+def kill_processes():
+    for process in processes_to_kill:
+        subprocess.call(['taskkill', '/f', '/im', process])
+
+# 프로그램 종료 시 kill_processes 함수 실행
+atexit.register(kill_processes)
+
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
@@ -228,11 +241,11 @@ class Dashboard(QMainWindow):
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
 			target_width = 188  # 원하는 가로 크기
 			target_height = int(target_width * aspect_ratio)  # 비율에 맞는 세로 크기 계산
-			
+
 			scaled_logo = logo_pixmap.scaled(
-				target_width, 
-				target_height, 
-				Qt.KeepAspectRatio, 
+				target_width,
+				target_height,
+				Qt.KeepAspectRatio,
 				Qt.SmoothTransformation
 			)
 			logo_label.setPixmap(scaled_logo)
@@ -240,7 +253,7 @@ class Dashboard(QMainWindow):
 
 		# 메뉴 버들을 담을 컨테이너
 		menu_container = QWidget()
-		
+
 		menu_layout = QVBoxLayout(menu_container)
 		menu_layout.setContentsMargins(0, 0, 0, 0)
 		menu_layout.setSpacing(5)
