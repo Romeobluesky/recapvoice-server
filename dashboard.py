@@ -5,8 +5,8 @@ import subprocess
 processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
 
 def kill_processes():
-    for process in processes_to_kill:
-        subprocess.call(['taskkill', '/f', '/im', process])
+		for process in processes_to_kill:
+				subprocess.call(['taskkill', '/f', '/im', process])
 
 # 프로그램 종료 시 kill_processes 함수 실행
 atexit.register(kill_processes)
@@ -15,7 +15,8 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtNetwork import *
-
+import audioop
+import wave
 import os
 import psutil
 import configparser
@@ -101,6 +102,9 @@ class Dashboard(QMainWindow):
 		self.sip_registrations = {}
 		self.first_registration = False  # 변수 추가
 
+		# RTP 패킷 카운트 변수 추가
+		self.packet_get = 0
+
 		# UI 초기화
 		self._init_ui()
 
@@ -143,11 +147,15 @@ class Dashboard(QMainWindow):
 		status_section = self._create_status_section()
 		content_layout.addLayout(status_section)
 
-		# LINE LIST와 LOG LIST의 비율 조정
+		# 전화연결 상태와 LOG LIST의 비율 조정
 		line_list = self._create_line_list()
 		log_list = self._create_log_list()
-		content_layout.addWidget(line_list, 60)  # 60% 비율
-		content_layout.addWidget(log_list, 40)   # 40% 비율
+		
+		# 비율 조정 및 마진 제거
+		content_layout.addWidget(line_list, 80)
+		content_layout.addWidget(log_list, 20)
+		content_layout.setStretch(2, 80)  # line_list의 stretch factor
+		content_layout.setStretch(3, 20)  # log_list의 stretch factor
 
 		# 스타일 적용
 		self._apply_styles()
@@ -239,7 +247,7 @@ class Dashboard(QMainWindow):
 		if not logo_pixmap.isNull():
 			# 원본 이미지의 가로/세로 비율 계산
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
-			target_width = 188  # 원하는 가로 크기
+			target_width = 188  # ���하는 가로 크기
 			target_height = int(target_width * aspect_ratio)  # 비율에 맞는 세로 크기 계산
 
 			scaled_logo = logo_pixmap.scaled(
@@ -454,6 +462,8 @@ class Dashboard(QMainWindow):
 	def _create_line_list(self):
 		group = QGroupBox("전화연결 상태")
 		group.setObjectName("line_list")
+		#높이 값 증가
+		group.setMaximumHeight(400)
 		group.setStyleSheet("""
 			QGroupBox {
 				background-color: #2d2d2d;
@@ -470,7 +480,7 @@ class Dashboard(QMainWindow):
 		layout.setContentsMargins(15, 15, 15, 15)
 		layout.setSpacing(0)
 
-		# 스크롤 영역 생성
+		# 스크롤 영역 속성
 		scroll = QScrollArea()
 		scroll.setWidgetResizable(True)
 		scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -499,7 +509,7 @@ class Dashboard(QMainWindow):
 		layout.setSpacing(0)  # 수직 간격 0으로 설정
 		layout.setAlignment(Qt.AlignTop)  # 전체 내용을 상단에 정렬
 
-		# 상단 컨테이너 (LED와 정보를 포함)
+		# 상단 컨테이너 (LED와 정����를 포함)
 		top_container = QWidget()
 		top_layout = QVBoxLayout(top_container)
 		top_layout.setContentsMargins(0, 0, 0, 0)
@@ -627,9 +637,10 @@ class Dashboard(QMainWindow):
 	def _create_log_list(self):
 		"""VoIP 모니터링 리스트 생성"""
 		group = QGroupBox("LOG LIST")
+		group.setMinimumHeight(200)  # 높이를 200px로 고정
 		layout = QVBoxLayout(group)
 		layout.setContentsMargins(15, 15, 15, 15)
-
+		
 		# 테이블 위젯 설정
 		table = QTableWidget()
 		table.setObjectName("log_list_table")  # 업데이트를 위한 객체 이름 설정
@@ -850,6 +861,7 @@ class Dashboard(QMainWindow):
 		try:
 			self.voip_window = VoipMonitor()
 			self.voip_window.show()
+			print("VOIP Monitor 열림")
 		except Exception as e:
 			print(f"Error opening VOIP Monitor: {e}")
 			QMessageBox.warning(self, "오류", "VOIP Monitor를 열 수 없습니다.")
@@ -858,6 +870,7 @@ class Dashboard(QMainWindow):
 		try:
 			self.packet_window = PacketMonitor()
 			self.packet_window.show()
+			print("Packet Monitor 열림")
 		except Exception as e:
 			print(f"Error opening Packet Monitor: {e}")
 			QMessageBox.warning(self, "오류", "Packet Monitor를 열 수 없니다.")
@@ -866,6 +879,7 @@ class Dashboard(QMainWindow):
 		try:
 			# 기존 settings_popup 인스턴스를 사용
 			self.settings_popup.show()
+			print("Settings 열림")
 		except Exception as e:
 			print(f"Error opening Settings: {e}")
 			QMessageBox.warning(self, "오류", "Settings를  수 없습니다.")
@@ -951,6 +965,9 @@ class Dashboard(QMainWindow):
 			print(f"\n=== SIP 패킷 감지 ===")
 			print(f"Call-ID: {call_id}")
 
+			# extension 변수 초기화
+			extension = None
+
 			if hasattr(sip_layer, 'status_line'):
 				status_code = sip_layer.status_code
 				print(f"Status Line: {sip_layer.status_line}")
@@ -962,9 +979,10 @@ class Dashboard(QMainWindow):
 					extension = self.extract_number(sip_layer.from_user)
 					if extension and len(extension) == 4 and extension[0] in ['1', '2', '3', '4']:
 						print(f"내선번호 감지: {extension}")
-						# 대기중 록 생성
-						self.block_update_signal.emit(extension, "대기중", "")
-						print(f"대기중 블록 생성 요청: {extension}")
+						# 대기중 블록 생성
+						if extension:  # extension이 유효한 경우에만 시그널 발생
+							self.block_update_signal.emit(extension, "대기중", "")
+							print(f"대기중 블록 생성 요청: {extension}")
 
 				# 나머지 상태 코드 처리
 				if call_id in self.active_calls:
@@ -986,9 +1004,11 @@ class Dashboard(QMainWindow):
 					elif status_code in ['486', '603']:  # Busy, Decline
 						print("통화 거절됨")
 						self.update_call_status(call_id, '통화종료', '수신거부')
-						# 대기중 록 생성
-						self.block_update_signal.emit(extension, "대기중", "")
-						print(f"대기중 블록 생성 요청: {extension}")
+						# 내선번호 찾기
+						extension = self.get_extension_from_call(call_id)
+						if extension:  # extension이 유효한 경우에만 시그널 발생
+							self.block_update_signal.emit(extension, "대기중", "")
+							print(f"대기중 블록 생성 요청: {extension}")
 
 			elif hasattr(sip_layer, 'request_line'):
 				print(f"Request Line: {sip_layer.request_line}")
@@ -1003,24 +1023,29 @@ class Dashboard(QMainWindow):
 						'status': '시도중',
 						'from_number': from_number,
 						'to_number': to_number,
-						'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신'
+						'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신',
+						'media_endpoints': []
 					}
 					self.update_call_status(call_id, '시도중')
 
 				elif 'BYE' in sip_layer.request_line:
 					if call_id in self.active_calls:
 						self.update_call_status(call_id, '통화종료', '정상종료')
-						# 대기중 록 생성
-						self.block_update_signal.emit(extension, "대기중", "")
-						print(f"대기중 블록 생성 요청: {extension}")
+						# 내선번호 ���기
+						extension = self.get_extension_from_call(call_id)
+						if extension:  # extension이 유효한 경우에만 시그널 발생
+							self.block_update_signal.emit(extension, "대기중", "")
+							print(f"대기중 블록 생성 요청: {extension}")
 
 				# CANCEL 요청 처리
 				elif 'CANCEL' in sip_layer.request_line:
 					if call_id in self.active_calls:
 						self.update_call_status(call_id, '통화종료', '발신취소')
-						# 대기중 록 생성
-						self.block_update_signal.emit(extension, "대기중", "")
-						print(f"대기중 블록 생성 요청: {extension}")
+						# 내선번호 찾기
+						extension = self.get_extension_from_call(call_id)
+						if extension:  # extension이 유효한 경우에만 시그널 발생
+							self.block_update_signal.emit(extension, "대기중", "")
+							print(f"대기중 블록 생성 요��: {extension}")
 
 		except Exception as e:
 			print(f"SIP 패킷 분석 중 오류: {e}")
@@ -1062,7 +1087,7 @@ class Dashboard(QMainWindow):
 				'result': '정상종료'
 			})
 
-			# LOG LIST 즉시 데이트
+			# LOG LIST 즉시 업데이트
 			self.update_voip_status()
 
 			# 내선번호 찾기
@@ -1163,34 +1188,64 @@ class Dashboard(QMainWindow):
 	def is_rtp_packet(self, packet):
 		"""RTP 패킷 검증"""
 		try:
-			if 'UDP' not in packet:
+			if not hasattr(packet, 'udp') or not hasattr(packet.udp, 'payload'):
 				return False
 
-			# payload를 hex string으로 변
+			# UDP 페이로드를 hex로 변환
 			payload_hex = packet.udp.payload.replace(':', '')
-			payload = bytes.fromhex(payload_hex)
-
-			if len(payload) < 12:
+			
+			try:
+				payload = bytes.fromhex(payload_hex)
+			except ValueError:
 				return False
 
-			version = (payload[0] >> 6) & 0x03
-			payload_type = payload[1] & 0x7F
+			if len(payload) < 12:  # RTP 헤더 최소 크기
+				return False
 
-			return version == 2 and payload_type in [0, 8]  # PCMU=0, PCMA=8
+			# RTP 버전 확인 (첫 2비트가 2여야 함)
+			version = (payload[0] >> 6) & 0x03
+			if version != 2:
+				return False
+
+			# 페이로드 타입 확인 (오디오 코덱)
+			payload_type = payload[1] & 0x7F
+			
+			# 디버그 정보 출력
+			print(f"RTP 패킷 검사: Version={version}, PayloadType={payload_type}")
+			
+			# PCMU(0)와 PCMA(8)만 허용
+			return payload_type in [0, 8]
 
 		except Exception as e:
-			print(f"RTP 패킷 검증 중 오류: {e}")
+			print(f"RTP 패킷 확인 중 오류: {e}")
 			return False
 
-	def determine_stream_direction(self, packet):
-		"""RTP 스트 향 결정"""
-		src_port = int(packet.udp.srcport)
-		dst_port = int(packet.udp.dstport)
-
-		if 3000 <= src_port <= 3999:  # SIP 포트 범위
-			return "발신"
-		else:
-			return "수신"
+	def determine_stream_direction(self, packet, call_id):
+		"""RTP 스트림 방향 결정"""
+		try:
+			src_ip = packet.ip.src
+			dst_ip = packet.ip.dst
+			src_port = int(packet.udp.srcport)
+			dst_port = int(packet.udp.dstport)
+			
+			# Call-ID에서 IP 주소 추출
+			pbx_ip = call_id.split('@')[1].split(';')[0].split(':')[0]
+			
+			# 소스가 PBX IP인 경우 = OUT
+			if src_ip == pbx_ip:
+				print(f"OUT 패킷: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
+				return "OUT"
+			# 목적지가 PBX IP인 경우 = IN
+			elif dst_ip == pbx_ip:
+				print(f"IN 패킷: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
+				return "IN"
+			
+			print(f"방향 결정 실패 - SRC: {src_ip}:{src_port}, DST: {dst_ip}:{dst_port}")
+			return None
+				
+		except Exception as e:
+			print(f"스트림 방향 결정 중 오류: {e}")
+			return None
 
 	def extract_number(self, sip_user):
 		"""SIP User 필드에서 화번호 추 (전체 번호 반환)"""
@@ -1229,12 +1284,12 @@ class Dashboard(QMainWindow):
 				if "media_endpoints" in call_info:
 					for endpoint in call_info["media_endpoints"]:
 						if (src_ip == endpoint["ip"] and src_port == endpoint["port"]) or \
-						   (dst_ip == endpoint["ip"] and dst_port == endpoint["port"]):
+							 (dst_ip == endpoint["ip"] and dst_port == endpoint["port"]):
 							return call_id
 			return None
 
 		except Exception as e:
-			print(f"RTP Call-ID 매칭 오류: {e}")
+			print(f"RTP Call-ID 칭 오류: {e}")
 			return None
 
 	def handle_sip_response(self, status_code, call_id, sip_layer):
@@ -1440,7 +1495,7 @@ class Dashboard(QMainWindow):
 			print(f"블록 업데이트 중 오류: {e}")
 
 	def update_call_status(self, call_id, new_status, result=''):
-		"""통화 상태 통합 관리"""
+		"""통화 상태 업데이트"""
 		try:
 			if call_id in self.active_calls:
 				# 상태 업데이트
@@ -1451,9 +1506,27 @@ class Dashboard(QMainWindow):
 
 				if new_status == '통화종료':
 					self.active_calls[call_id]['end_time'] = datetime.datetime.now()
-					extension = self.get_extension_from_call(call_id)
-					if extension:
-						self.block_update_signal.emit(extension, "통화종료", self.active_calls[call_id]['to_number'])
+					
+					# IN/OUT 각각의 WAV 파일 저장 처리
+					for direction in ['IN', 'OUT']:
+						recording_key = f"recording_info_{direction}"
+						if recording_key in self.active_calls[call_id]:
+							recording_info = self.active_calls[call_id][recording_key]
+							if not recording_info.get('saved') and recording_info.get('audio_data'):
+								try:
+									self.save_wav_file(
+										recording_info['filepath'],
+										recording_info['audio_data'],
+										recording_info.get('payload_type', 8)
+									)
+									recording_info['saved'] = True
+									print(f"녹음 완료 ({direction}): {recording_info['filepath']}")
+								except Exception as e:
+									print(f"WAV 파일 저장 중 오류 ({direction}): {e}")
+
+				extension = self.get_extension_from_call(call_id)
+				if extension:
+					self.block_update_signal.emit(extension, "통화종료", self.active_calls[call_id]['to_number'])
 
 				else:
 					extension = self.get_extension_from_call(call_id)
@@ -1461,17 +1534,18 @@ class Dashboard(QMainWindow):
 						received_number = self.active_calls[call_id]['to_number']
 						self.block_update_signal.emit(extension, new_status, received_number)
 
-			# LOG LIST 업데이트
-			self.update_voip_status()
-
-			print(f"통화 상태 업데이트 - Call-ID: {call_id}, Status: {new_status}, Result: {result}")
+				# LOG LIST 업데이트
+				self.update_voip_status()
+				print(f"통화 상태 업데이트 - Call-ID: {call_id}, Status: {new_status}, Result: {result}")
 
 		except Exception as e:
 			print(f"통화 상태 업데이트 중 오류: {e}")
+			import traceback
+			print(traceback.format_exc())
 
 	@Slot()
 	def handle_first_registration(self):
-		"""첫 번째 SIP 등록 감지 시 처리"""
+		"""첫 번 SIP 등록 감지 시 처리"""
 		try:
 			if not self.first_registration:
 				self.first_registration = True
@@ -1485,38 +1559,222 @@ class Dashboard(QMainWindow):
 			loop = asyncio.new_event_loop()
 			asyncio.set_event_loop(loop)
 
-			# SIP 패킷만 캡처하도록 필터 설정
+			# 캡처 필터 수정
 			capture = pyshark.LiveCapture(
 				interface=interface,
-				display_filter='sip'
+				display_filter='sip or (udp and (udp.port >= 10000 and udp.port <= 20000))'
 			)
 
-			print(f"패킷 캡처 감시 - Interface: {interface}")
+			# 디버그 모드 설정
+			capture.set_debug()
 
-			# 패킷 캡처 시작 전에 인터페이스 확인
+			print(f"패킷 캡처 감시 시작 - Interface: {interface}")
+
 			if not interface:
-				print("Error: No interface selected")
+				print("Error: 선택된 인터페이스가 없습니다")
 				return
 
-			for packet in capture.sniff_continuously():
-				try:
-					if 'SIP' in packet:
-						# SIP 패킷 분석
-						self.analyze_sip_packet(packet)
+			try:
+				for packet in capture.sniff_continuously():
+					try:
+						if 'SIP' in packet:
+							self.analyze_sip_packet(packet)
+						elif 'UDP' in packet and self.is_rtp_packet(packet):
+							print("\nRTP 패킷 감지됨")
+							self.handle_rtp_packet(packet)
 
-				except Exception as packet_error:
-					print(f"개별 패킷 처리 중 오류: {packet_error}")
-					continue
+					except Exception as packet_error:
+						print(f"패킷 처리 중 오류: {packet_error}")
+						continue
+
+			except KeyboardInterrupt:
+				print("패킷 캡처 중단됨")
+			except Exception as sniff_error:
+				print(f"패킷 스니핑 중 오류: {sniff_error}")
+			finally:
+				try:
+					capture.close()
+				except Exception as close_error:
+					print(f"캡처 종료 중 오류: {close_error}")
 
 		except Exception as e:
 			print(f"패킷 캡처 중 오류: {e}")
 			import traceback
 			print(traceback.format_exc())
 		finally:
-			if 'capture' in locals():
-				capture.close()
-			if 'loop' in locals():
-				loop.close()
+			try:
+				if 'capture' in locals():
+					capture.close()
+			except:
+				pass
+			
+			try:
+				if 'loop' in locals():
+					loop.close()
+			except:
+				pass
+
+	def handle_rtp_packet(self, packet):
+		"""RTP 패킷 처리"""
+		try:
+			# 현재 활성화된 통화 중에서 '통화중' 상태인 것이 있는지 확인
+			active_call = None
+			for call_id, call_info in self.active_calls.items():
+				if call_info.get('status') == '통화중':
+					active_call = (call_id, call_info)
+					break
+			
+			if not active_call:
+				return
+
+			call_id, call_info = active_call
+
+			# Call-ID에서 IP 주소만 단순하게 추출 (@뒤의 값)
+			try:
+				phone_ip = call_id.split('@')[1]
+				print(f"Call-ID: {call_id}")
+				print(f"추출한 IP: {phone_ip}")
+			except:
+				print(f"IP 주소 추출 실패. Call-ID: {call_id}")
+				return
+
+			# RTP 패킷의 소스/목적지 정보 추출
+			src_ip = packet.ip.src
+			dst_ip = packet.ip.dst
+			src_port = int(packet.udp.srcport)
+			dst_port = int(packet.udp.dstport)
+			
+			# 스트림 방향 결정
+			direction = self.determine_stream_direction(packet, call_id)
+			if not direction:  # 방향을 결정할 수 없는 경우 스킵
+				return
+			
+			print(f"\n=== RTP 패킷 감지 ({direction}) ===")
+			print(f"Source: {src_ip}:{src_port}")
+			print(f"Destination: {dst_ip}:{dst_port}")
+			
+			# UDP 페이로드 분석 및 음성 데이터 추출
+			if hasattr(packet.udp, 'payload'):
+				payload_hex = packet.udp.payload.replace(':', '')
+				try:
+					payload = bytes.fromhex(payload_hex)
+					version = (payload[0] >> 6) & 0x03
+					payload_type = payload[1] & 0x7F
+					sequence = int.from_bytes(payload[2:4], byteorder='big')
+					timestamp = int.from_bytes(payload[4:8], byteorder='big')
+					
+					# RTP 헤더(12바이트) 이후의 데이터가 실제 음성 데이터
+					audio_data = payload[12:]
+					
+					# 녹음 파일 저장을 위한 정보 설정
+					recording_key = f"recording_info_{direction}"
+					if recording_key not in call_info:
+						# settings.ini에서 저장 경로 읽기
+						config = configparser.ConfigParser()
+						config.read('settings.ini', encoding='utf-8')
+						base_path = config.get('Recording', 'save_path', fallback='C:\\')
+						
+						# 현재 날짜로 디렉토리 생성
+						today = datetime.datetime.now().strftime("%Y%m%d")
+						date_dir = os.path.join(base_path, today)
+						
+						# Call-ID의 IP 주소로 하위 디렉토리 생성
+						ip_dir = os.path.join(date_dir, phone_ip)
+						
+						# 시간 디렉토리 생성
+						time_str = datetime.datetime.now().strftime("%H%M%S")
+						time_dir = os.path.join(ip_dir, time_str)
+						
+						# 디렉토리 생성
+						os.makedirs(time_dir, exist_ok=True)
+						
+						# 파일명 생성
+						timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+						from_number = call_info['from_number']
+						to_number = call_info['to_number']
+						filename = f"{time_str}_{direction}_{from_number}_{to_number}.wav"
+						filepath = os.path.join(time_dir, filename)
+						
+						# WAV 파일 초기화
+						with wave.open(filepath, 'wb') as wav_file:
+							wav_file.setnchannels(1)  # 모노
+							wav_file.setsampwidth(2)  # 16-bit
+							wav_file.setframerate(8000)  # 8kHz
+						
+						call_info[recording_key] = {
+							'filepath': filepath,
+							'audio_data': bytearray(),
+							'sequence': sequence,
+							'last_sequence': sequence,
+							'payload_type': payload_type,
+							'saved': False
+						}
+						print(f"녹음 시작 ({direction}): {filepath}")
+						
+					# 음성 데이터 저장
+					recording_info = call_info[recording_key]
+					if not recording_info.get('saved'):
+						recording_info['audio_data'].extend(audio_data)
+						recording_info['last_sequence'] = sequence
+						print(f"음성 데이터 저장 ({direction}): Sequence={sequence}, Size={len(audio_data)}")
+
+				except Exception as e:
+					print(f"페이로드 분석 오류: {e}")
+
+		except Exception as e:
+			print(f"RTP 패킷 처리 중 오류: {e}")
+
+	def save_wav_file(self, filepath, audio_data, payload_type):
+		"""WAV 파일 저장"""
+		try:
+			if len(audio_data) == 0:
+				print("오디오 데이터가 없습니다.")
+				return
+
+			import wave
+			import audioop
+			
+			# WAV 파일 설정
+			with wave.open(filepath, 'wb') as wav_file:
+				wav_file.setnchannels(1)  # 모노
+				wav_file.setsampwidth(2)  # 16-bit
+				wav_file.setframerate(8000)  # 8kHz
+				
+				# PCMA(8) 또는 PCMU(0) 디코딩
+				if payload_type == 8:  # PCMA (A-law)
+					decoded_data = audioop.alaw2lin(bytes(audio_data), 2)
+				else:  # PCMU (μ-law)
+					decoded_data = audioop.ulaw2lin(bytes(audio_data), 2)
+				
+				# 볼륨 증가
+				amplified_data = audioop.mul(decoded_data, 2, 4.0)
+				
+				wav_file.writeframes(amplified_data)
+				print(f"WAV 파일 저장 완료: {filepath}")
+				print(f"원본 데이터 크기: {len(audio_data)} bytes")
+				print(f"디코딩된 데이터 크기: {len(decoded_data)} bytes")
+				print(f"최종 데이터 크기: {len(amplified_data)} bytes")
+				
+		except Exception as e:
+			print(f"WAV 파일 저장 중 오류: {e}")
+
+	def decode_alaw(self, audio_data):
+		"""A-law 디코딩"""
+		try:
+			import audioop
+			return audioop.alaw2lin(audio_data, 2)
+		except Exception as e:
+			print(f"A-law 디코딩 오류: {e}")
+			return audio_data
+
+	def decode_ulaw(self, audio_data):
+		"""μ-law 디코딩"""
+		try:
+			import audioop
+			return audioop.ulaw2lin(audio_data, 2)
+		except Exception as e:
+			print(f"μ-law 디코딩 오류: {e}")
+			return audio_data
 
 	def update_call_duration(self):
 		"""통화 시간 업데이트"""
@@ -1526,7 +1784,7 @@ class Dashboard(QMainWindow):
 					extension = self.get_extension_from_call(call_id)
 					if extension:
 						duration = self.calculate_duration(call_info)
-						 # 블록 업데이트 (통화중 상태와 시간 표시)
+						# 블록 업데이트 (통화중 상태와 시간 표시)
 						self.block_update_signal.emit(extension, "통화중", call_info['to_number'])
 
 						# 블록의 시간 레이블 업데이트
@@ -1550,7 +1808,7 @@ class Dashboard(QMainWindow):
 		layout = QHBoxLayout(group)
 		layout.setContentsMargins(15, 20, 15, 15)
 		layout.setSpacing(2)
-
+		
 		# 버튼 컨테이너
 		button_container = QWidget()
 		button_layout = QHBoxLayout(button_container)
@@ -1580,7 +1838,7 @@ class Dashboard(QMainWindow):
 			# start.bat 실행
 			import subprocess
 			subprocess.Popen(['start.bat'], shell=True)
-
+			
 			# ON 버튼 색상 변경
 			self.on_btn.setStyleSheet("""
 				QPushButton {
@@ -1594,7 +1852,7 @@ class Dashboard(QMainWindow):
 					background-color: #CC0000;
 				}
 			""")
-
+				
 		except Exception as e:
 			print(f"클라이언트 시작 중 오류: {e}")
 
@@ -1626,6 +1884,49 @@ class Dashboard(QMainWindow):
 
 		except Exception as e:
 			print(f"클라이언트 중지 중 오류: {e}")
+
+	def extract_ip_from_callid(self, call_id):
+		"""Call-ID에서 IP 주소 추출"""
+		try:
+			# @ 뒤의 문자열 추출
+			ip_part = call_id.split('@')[1]
+			
+			# 가능한 모든 형식 처리
+			# 1. IP:포트;파라미터 형식 (예: 192.168.0.10:5060;transport=udp)
+			# 2. [IP]:포트 형식 (예: [192.168.0.10]:5060)
+			# 3. IP:포트 형식 (예: 192.168.0.10:5060)
+			# 4. 순수 IP 형식 (예: 192.168.0.10)
+			
+			# 세미콜론 이후 제거
+			ip_part = ip_part.split(';')[0]
+			
+			# 대괄호 제거
+			ip_part = ip_part.replace('[', '').replace(']', '')
+			
+			# 포트 부분 제거
+			ip_part = ip_part.split(':')[0]
+			
+			# IP 주소 유효성 검사 (옵션)
+			if self.is_valid_ip(ip_part):
+				return ip_part
+			else:
+				print(f"유효하지 않은 IP 주소 형식: {ip_part}")
+				return "unknown"
+			
+		except Exception as e:
+			print(f"IP 주소 추출 실패. Call-ID: {call_id}, 오류: {e}")
+			return "unknown"
+
+	def is_valid_ip(self, ip):
+		"""IP 주소 유효성 검사"""
+		try:
+			# IPv4 형식 검사
+			parts = ip.split('.')
+			if len(parts) != 4:
+				return False
+			return all(0 <= int(part) <= 255 for part in parts)
+		except:
+			return False
 
 # FlowLayout 래스 추가 (Qt의 동적 그리 레이아웃 구현)
 class FlowLayout(QLayout):
