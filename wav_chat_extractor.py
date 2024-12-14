@@ -1,7 +1,8 @@
 #wav 채팅 추출 클래스
-from pydub import AudioSegment
 import os
 from datetime import timedelta
+#서드파티 라이브러리
+from pydub import AudioSegment
 import speech_recognition as sr
 
 class WavChatExtractor:

@@ -1,36 +1,42 @@
+# 표준 라이브러리
 import atexit
 import subprocess
-
-# 종료할 프로세스 목록
-processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
-
-def kill_processes():
-		for process in processes_to_kill:
-				subprocess.call(['taskkill', '/f', '/im', process])
-
-# 프로그램 종료 시 kill_processes 함수 실행
-atexit.register(kill_processes)
-
-from PySide6.QtWidgets import *
-from PySide6.QtCore import *
-from PySide6.QtGui import *
-from PySide6.QtNetwork import *
 import audioop
 import wave
 import os
 import psutil
 import configparser
-import requests
-import pyshark
 import threading
 import asyncio
 import datetime
-from config_loader import load_config
 
+# 서드파티 라이브러리
+import requests
+import pyshark
+
+# PySide6 라이브러리
+from PySide6.QtWidgets import *
+from PySide6.QtCore import *
+from PySide6.QtGui import *
+from PySide6.QtNetwork import *
+
+# 로컬 모듈
+from config_loader import load_config
 from voip_monitor import VoipMonitor
 from packet_monitor import PacketMonitor
+from wav_merger import WavMerger
+from wav_chat_extractor import WavChatExtractor
 from settings_popup import SettingsPopup
 
+# 종료할 프로세스 목록
+processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
+
+def kill_processes():
+    for process in processes_to_kill:
+        subprocess.call(['taskkill', '/f', '/im', process])
+
+# 프로그램 종료 시 kill_processes 함수 실행
+atexit.register(kill_processes)
 class PacketFlowWidget(QWidget):
 	def __init__(self):
 		super().__init__()
@@ -206,7 +212,7 @@ class Dashboard(QMainWindow):
 		# settings.ini에서 대표번호 읽기
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
-		self.phone_number.setText(config.get('Extension', 'Rep_number', fallback=''))
+		self.phone_number.setText(config.get('Extension', 'rep_number', fallback=''))
 
 		phone_layout.addWidget(phone_text)
 		phone_layout.addWidget(self.phone_number)
@@ -219,7 +225,7 @@ class Dashboard(QMainWindow):
 
 		id_text = QLabel("ID CODE | ")
 		self.id_code = QLabel()
-		self.id_code.setText(config.get('Extension', 'Id_code', fallback=''))
+		self.id_code.setText(config.get('Extension', 'id_code', fallback=''))
 
 		id_layout.addWidget(id_text)
 		id_layout.addWidget(self.id_code)
@@ -247,7 +253,7 @@ class Dashboard(QMainWindow):
 		if not logo_pixmap.isNull():
 			# 원본 이미지의 가로/세로 비율 계산
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
-			target_width = 188  # ���하는 가로 크기
+			target_width = 182  # 원하는 가로 크기
 			target_height = int(target_width * aspect_ratio)  # 비율에 맞는 세로 크기 계산
 
 			scaled_logo = logo_pixmap.scaled(
@@ -509,7 +515,7 @@ class Dashboard(QMainWindow):
 		layout.setSpacing(0)  # 수직 간격 0으로 설정
 		layout.setAlignment(Qt.AlignTop)  # 전체 내용을 상단에 정렬
 
-		# 상단 컨테이너 (LED와 정����를 포함)
+		# 상단 컨테이너 (LED와 정보 포함)
 		top_container = QWidget()
 		top_layout = QVBoxLayout(top_container)
 		top_layout.setContentsMargins(0, 0, 0, 0)
@@ -987,19 +993,23 @@ class Dashboard(QMainWindow):
 				# 나머지 상태 코드 처리
 				if call_id in self.active_calls:
 					if status_code == '183':  # Session Progress (벨울림)
-						print("Ringing 상태 감지")
+						print("벨울림 상태 감지")
 						self.update_call_status(call_id, '벨울림')
+						# 내선번호 찾기 및 블록 상태 업데이트
+						extension = self.get_extension_from_call(call_id)
+						if extension:
+							received_number = self.active_calls[call_id]['to_number']
+							self.block_update_signal.emit(extension, "벨울림", received_number)
 
 					elif status_code == '200':  # OK
 						print("통화 연결됨")
 						if self.active_calls[call_id]['status'] != '통화종료':
 							self.update_call_status(call_id, '통화중')
-
-						# 통화 시간 업데이트 타이머 시작
-						if not hasattr(self, 'duration_timer') or not self.duration_timer.isActive():
-							self.duration_timer = QTimer()
-							self.duration_timer.timeout.connect(self.update_call_duration)
-							self.duration_timer.start(1000)  # 1초마다 업데이트
+							# 내선번호 찾기 및 블록 상태 업데이트
+							extension = self.get_extension_from_call(call_id)
+							if extension:
+								received_number = self.active_calls[call_id]['to_number']
+								self.block_update_signal.emit(extension, "통화중", received_number)
 
 					elif status_code in ['486', '603']:  # Busy, Decline
 						print("통화 거절됨")
@@ -1045,7 +1055,7 @@ class Dashboard(QMainWindow):
 						extension = self.get_extension_from_call(call_id)
 						if extension:  # extension이 유효한 경우에만 시그널 발생
 							self.block_update_signal.emit(extension, "대기중", "")
-							print(f"대기중 블록 생성 요��: {extension}")
+							print(f"대기중 블록 생성 요청: {extension}")
 
 		except Exception as e:
 			print(f"SIP 패킷 분석 중 오류: {e}")
@@ -1423,7 +1433,7 @@ class Dashboard(QMainWindow):
 			print("로딩 화면 타임아웃으로 종료")
 
 	def force_update_block(self, extension):
-		"""강제로 록 상태 업데이트"""
+		"""강제로 블록 상태 업데이트"""
 		try:
 			# 기존 블록 모두 제거
 			for i in range(self.calls_layout.count()-1, -1, -1):
@@ -1730,9 +1740,6 @@ class Dashboard(QMainWindow):
 			if len(audio_data) == 0:
 				print("오디오 데이터가 없습니다.")
 				return
-
-			import wave
-			import audioop
 			
 			# WAV 파일 설정
 			with wave.open(filepath, 'wb') as wav_file:
@@ -1761,7 +1768,6 @@ class Dashboard(QMainWindow):
 	def decode_alaw(self, audio_data):
 		"""A-law 디코딩"""
 		try:
-			import audioop
 			return audioop.alaw2lin(audio_data, 2)
 		except Exception as e:
 			print(f"A-law 디코딩 오류: {e}")
@@ -1770,7 +1776,6 @@ class Dashboard(QMainWindow):
 	def decode_ulaw(self, audio_data):
 		"""μ-law 디코딩"""
 		try:
-			import audioop
 			return audioop.ulaw2lin(audio_data, 2)
 		except Exception as e:
 			print(f"μ-law 디코딩 오류: {e}")
