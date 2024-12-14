@@ -3,6 +3,7 @@ import os
 from datetime import timedelta
 #서드파티 라이브러리
 from pydub import AudioSegment
+from pydub.silence import detect_nonsilent
 import speech_recognition as sr
 
 class WavChatExtractor:
@@ -11,22 +12,34 @@ class WavChatExtractor:
 		self.recognizer = sr.Recognizer()
 		print("초기화 완료!")
 
-	def extract_audio_text_by_chunk(self, wav_path, chunk_duration=3000):  # 3초 단위
+	def extract_audio_text_by_voice_activity(self, wav_path, min_silence_len=500, silence_thresh=-40):
+		"""음성 구간을 감지하여 텍스트로 변환"""
 		try:
 			print(f"음성 파일 분석 시작: {wav_path}")
 			audio = AudioSegment.from_wav(wav_path)
+
+			# 음성 구간 감지
+			nonsilent_ranges = detect_nonsilent(
+				audio,
+				min_silence_len=min_silence_len,  # 최소 무음 구간 (ms)
+				silence_thresh=silence_thresh      # 무음 임계값 (dB)
+			)
 
 			texts = []
 			temp_dir = "temp_audio_chunks"
 			os.makedirs(temp_dir, exist_ok=True)
 
-			total_chunks = len(audio) // chunk_duration + 1
+			total_chunks = len(nonsilent_ranges)
+			for i, (start_ms, end_ms) in enumerate(nonsilent_ranges):
+				print(f"발화 구간 처리 중: {i+1}/{total_chunks}")
 
-			for i in range(0, len(audio), chunk_duration):
-				chunk_num = i // chunk_duration + 1
-				print(f"청크 처리 중: {chunk_num}/{total_chunks}")
+				# 발화 구간 추출
+				chunk = audio[start_ms:end_ms]
+				
+				# 너무 짧은 구간은 건너뛰기 (200ms 미만)
+				if len(chunk) < 200:
+					continue
 
-				chunk = audio[i:i + chunk_duration]
 				temp_path = os.path.join(temp_dir, f"chunk_{i}.wav")
 				chunk.export(temp_path, format="wav")
 
@@ -41,9 +54,12 @@ class WavChatExtractor:
 						if text.strip():
 							text = self.clean_text(text)
 							if text:
-								texts.append((i//1000, text))
-					except (sr.UnknownValueError, sr.RequestError):
-						pass  # 음성 인식 실패 시 조용히 넘어감
+								# 시작 시간을 초 단위로 변환
+								start_time = start_ms // 1000
+								texts.append((start_time, text))
+								print(f"인식된 텍스트 ({start_time}초): {text}")
+					except (sr.UnknownValueError, sr.RequestError) as e:
+						print(f"음성 인식 실패: {e}")
 
 				os.remove(temp_path)
 
@@ -66,14 +82,13 @@ class WavChatExtractor:
 
 	def extract_chat_to_html(self, ip, timestamp_dir, timestamp, local_num, remote_num, wav1_path, wav2_path, save_path):
 		try:
-			save_dir = os.path.join(save_path, ip, timestamp_dir)
-			os.makedirs(save_dir, exist_ok=True)
-			output_html_path = os.path.join(save_dir, f"{timestamp}_chat_{local_num}-{remote_num}.html")
+			# HTML 파일 경로 (IN/OUT 파일과 같은 디렉토리에 저장)
+			output_html_path = os.path.join(save_path, f"{timestamp}_chat_{local_num}-{remote_num}.html")
 
-			print(f"[{ip}] 음성 인식 시작...")
-			texts1 = self.extract_audio_text_by_chunk(wav1_path)
-			texts2 = self.extract_audio_text_by_chunk(wav2_path)
-			print(f"[{ip}] 음성 인식 완료")
+			print(f"음성 인식 시작...")
+			texts1 = self.extract_audio_text_by_voice_activity(wav1_path)
+			texts2 = self.extract_audio_text_by_voice_activity(wav2_path)
+			print(f"음성 인식 완료")
 
 			html_content = f"""
 			<!DOCTYPE html>
@@ -172,9 +187,9 @@ class WavChatExtractor:
 			with open(output_html_path, 'w', encoding='utf-8') as f:
 				f.write(html_content)
 
-			print(f"[{ip}] 채팅 HTML 생성 완료: {output_html_path}")
+			print(f"채팅 HTML 생성 완료: {output_html_path}")
 			return output_html_path
 
 		except Exception as e:
-			print(f"채팅 HTML 생성 중 오류 발생 (IP {ip}): {e}")
+			print(f"채팅 HTML 생성 중 오류 발생: {e}")
 			return None

@@ -5,12 +5,8 @@ import subprocess
 class WavMerger:
 	def merge_and_save(self, ip, timestamp_dir, timestamp, local_num, remote_num, wav1_path, wav2_path, save_path):
 		try:
-			# 저장 디렉토리 생성
-			save_dir = os.path.join(save_path, ip, timestamp_dir)
-			os.makedirs(save_dir, exist_ok=True)
-
-			# 출력 파일 경로
-			output_path = os.path.join(save_dir, f"{timestamp}_merge_{local_num}-{remote_num}.wav")
+			# 출력 파일 경로 (IN/OUT 파일과 같은 디렉토리에 저장)
+			output_path = os.path.join(save_path, f"{timestamp}_MERGE_{local_num}-{remote_num}.wav")
 
 			# ffmpeg 명령어 구성
 			cmd = [
@@ -26,12 +22,12 @@ class WavMerger:
 			result = subprocess.run(cmd, capture_output=True, text=True)
 
 			if result.returncode == 0:
-				print(f"[{ip}] WAV 파일 병합 완료: {output_path}")
+				print(f"WAV 파일 병합 완료: {output_path}")
 				return output_path
 			else:
-				print(f"[{ip}] FFmpeg 오류: {result.stderr}")
+				print(f"FFmpeg 오류: {result.stderr}")
 				return None
 
 		except Exception as e:
-			print(f"WAV 파일 병합 중 오류 발생 (IP {ip}): {e}")
+			print(f"WAV 파일 병합 중 오류 발생: {e}")
 			return None

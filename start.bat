@@ -8,7 +8,7 @@ for /f "tokens=1,2 delims== " %%A in ('findstr "dir_path" settings.ini') do (
 
 :: 읽은 값 확인
 echo Work directory is: %dir_path%
-pause
+::pause
 
 :: 필요한 디렉토리 생성
 if not exist "%dir_path%\packet_wave\logs" mkdir "%dir_path%\packet_wave\logs"

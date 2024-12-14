@@ -28,6 +28,9 @@ from wav_merger import WavMerger
 from wav_chat_extractor import WavChatExtractor
 from settings_popup import SettingsPopup
 
+# MongoDB 관련 import 추가
+from pymongo import MongoClient
+
 # 종료할 프로세스 목록
 processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
 
@@ -125,6 +128,19 @@ class Dashboard(QMainWindow):
 		self.duration_timer = QTimer()
 		self.duration_timer.timeout.connect(self.update_call_duration)
 		self.duration_timer.start(1000)  # 1초마다 업데이트
+
+		# WavMerger와 WavChatExtractor 초기화
+		self.wav_merger = WavMerger()
+		self.chat_extractor = WavChatExtractor()
+		
+		# MongoDB 연결
+		try:
+			self.mongo_client = MongoClient('mongodb://localhost:27017/')
+			self.db = self.mongo_client['packetwave']
+			self.filesinfo = self.db['filesinfo']
+			print("MongoDB 연결 성공")
+		except Exception as e:
+			print(f"MongoDB 연결 실패: {e}")
 
 	def _init_ui(self):
 		# 메인 위젯 설정
@@ -946,7 +962,6 @@ class Dashboard(QMainWindow):
 		table.setStyleSheet(self.TABLE_STYLE)
 
 
-
 	@Slot(str)
 	def create_waiting_block(self, extension):
 		"""대기 블록 생성"""
@@ -1289,7 +1304,7 @@ class Dashboard(QMainWindow):
 			src_port = int(packet.udp.srcport)
 			dst_port = int(packet.udp.dstport)
 
-			# self.active_calls에서 이 RTP 스트림과 칭되는 Call-ID 찾기
+			# self.active_calls에서 이 RTP 스트림과 칭���는 Call-ID 찾기
 			for call_id, call_info in self.active_calls.items():
 				if "media_endpoints" in call_info:
 					for endpoint in call_info["media_endpoints"]:
@@ -1508,7 +1523,7 @@ class Dashboard(QMainWindow):
 		"""통화 상태 업데이트"""
 		try:
 			if call_id in self.active_calls:
-				# 상태 업데이트
+				# 기존 상태 업데이트 코드...
 				self.active_calls[call_id].update({
 					'status': new_status,
 					'result': result
@@ -1517,36 +1532,108 @@ class Dashboard(QMainWindow):
 				if new_status == '통화종료':
 					self.active_calls[call_id]['end_time'] = datetime.datetime.now()
 					
-					# IN/OUT 각각의 WAV 파일 저장 처리
+					# WAV 파일 저장 처리
+					wav_files = {'IN': None, 'OUT': None}
 					for direction in ['IN', 'OUT']:
 						recording_key = f"recording_info_{direction}"
 						if recording_key in self.active_calls[call_id]:
-							recording_info = self.active_calls[call_id][recording_key]
-							if not recording_info.get('saved') and recording_info.get('audio_data'):
-								try:
-									self.save_wav_file(
-										recording_info['filepath'],
-										recording_info['audio_data'],
-										recording_info.get('payload_type', 8)
-									)
-									recording_info['saved'] = True
-									print(f"녹음 완료 ({direction}): {recording_info['filepath']}")
-								except Exception as e:
-									print(f"WAV 파일 저장 중 오류 ({direction}): {e}")
+								recording_info = self.active_calls[call_id][recording_key]
+								if not recording_info.get('saved') and recording_info.get('audio_data'):
+									try:
+										self.save_wav_file(
+											recording_info['filepath'],
+											recording_info['audio_data'],
+											recording_info.get('payload_type', 8)
+										)
+										recording_info['saved'] = True
+										wav_files[direction] = recording_info['filepath']
+										print(f"녹음 완료 ({direction}): {recording_info['filepath']}")
+									except Exception as e:
+										print(f"WAV 파일 저장 중 오류 ({direction}): {e}")
 
-				extension = self.get_extension_from_call(call_id)
-				if extension:
-					self.block_update_signal.emit(extension, "통화종료", self.active_calls[call_id]['to_number'])
+					# 두 WAV 파일이 모두 저장된 경우에만 병합 및 텍스트 변환 진행
+					if wav_files['IN'] and wav_files['OUT']:
+						try:
+							# 파일 경로에서 필요한 정보 추출
+							file_path = wav_files['IN']
+							path_parts = os.path.normpath(file_path).split(os.sep)
+							date_dir = path_parts[-4]      # 날짜 (20241214)
+							ip = path_parts[-3]            # IP (192.168.0.55)
+							timestamp_dir = path_parts[-2] # 시간 (154637)
+							timestamp = timestamp_dir      # 시간값 그대로 사용
+							
+							# 발신/수신 번호 가져오기
+							local_num = self.active_calls[call_id]['from_number']
+							remote_num = self.active_calls[call_id]['to_number']  # 이 줄을 다시 추가
+							
+							# 저장 경로를 IN/OUT 파일이 있는 디렉토리로 설정
+							save_path = os.path.dirname(file_path)
 
-				else:
+							# WAV 파일 병합
+							merged_file = self.wav_merger.merge_and_save(
+								ip,
+								timestamp_dir,
+								timestamp,
+								local_num,
+								remote_num,
+								wav_files['IN'],
+								wav_files['OUT'],
+								save_path
+							)
+
+							if merged_file:
+								# 음성을 텍스트로 변환하여 HTML 생성 (같은 경로 사용)
+								html_file = self.chat_extractor.extract_chat_to_html(
+									ip,
+									timestamp_dir,
+									timestamp,
+									local_num,
+									remote_num,
+									wav_files['IN'],
+									wav_files['OUT'],
+									save_path
+								)
+
+								# MongoDB에 정보 저장
+								if merged_file and html_file:
+									try:
+										# 현재 저장된 최대 id 값 조회
+										max_id_doc = self.filesinfo.find_one(
+											sort=[("id", -1)]  # id 필드 기준 내림차순 정렬
+										)
+										next_id = 1 if max_id_doc is None else max_id_doc["id"] + 1
+
+										filesize = os.path.getsize(merged_file)
+										doc = {
+											"id": next_id,                    # 자동 증가 ID
+											"user_id": local_num,             # 내선번호
+											"filename": merged_file,          # 병합된 WAV 파일 전체 경로
+											"from_number": local_num,         # 발신번호
+											"to_number": remote_num,          # 수신번호
+											"filesize": str(filesize),        # 파일 크기를 문자열로 저장
+											"filestype": "wav",               # 파일 타입
+											"files_text": html_file,          # HTML 파일 전체 경로
+											"down_count": 0,                  # 다운로드 카운트 초기값
+											"created_at": datetime.datetime.utcnow()  # UTC 시간으로 저장
+										}
+										
+										result = self.filesinfo.insert_one(doc)
+										print(f"MongoDB 저장 완료: {result.inserted_id}")
+										
+									except Exception as e:
+										print(f"MongoDB 저장 중 오류: {e}")
+
+						except Exception as e:
+							print(f"병합/변환/저장 중 오류: {e}")
+
+					# 내선번호 찾기 및 블록 상태 업데이트
 					extension = self.get_extension_from_call(call_id)
 					if extension:
-						received_number = self.active_calls[call_id]['to_number']
-						self.block_update_signal.emit(extension, new_status, received_number)
+						self.block_update_signal.emit(extension, "대기중", "")
+						print(f"대기중 블록 생성 요청: {extension}")
 
 				# LOG LIST 업데이트
 				self.update_voip_status()
-				print(f"통화 상태 업데이트 - Call-ID: {call_id}, Status: {new_status}, Result: {result}")
 
 		except Exception as e:
 			print(f"통화 상태 업데이트 중 오류: {e}")
@@ -1663,7 +1750,7 @@ class Dashboard(QMainWindow):
 			print(f"Source: {src_ip}:{src_port}")
 			print(f"Destination: {dst_ip}:{dst_port}")
 			
-			# UDP 페이로드 분석 및 음성 데이터 추출
+			# UDP 페이로드 분석 및 음성 데이�� 추출
 			if hasattr(packet.udp, 'payload'):
 				payload_hex = packet.udp.payload.replace(':', '')
 				try:
