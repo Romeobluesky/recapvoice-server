@@ -19,6 +19,8 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtNetwork import *
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 
 # 로컬 모듈
 from config_loader import load_config
@@ -267,7 +269,7 @@ class Dashboard(QMainWindow):
 		if not logo_pixmap.isNull():
 			# 원본 이미지의 가로/세로 비율 계산
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
-			target_width = 182  # 원하는 가로 크기
+			target_width = 160  # 원하는 가로 크기
 			target_height = int(target_width * aspect_ratio)  # 비율에 맞는 세로 크기 계산
 
 			scaled_logo = logo_pixmap.scaled(
@@ -294,13 +296,9 @@ class Dashboard(QMainWindow):
 		packet_btn = self._create_menu_button("PACKET MONITOR", "images/packet_icon.png")
 		packet_btn.clicked.connect(self.show_packet_monitor)
 
-		setting_btn = self._create_menu_button("SETTING", "images/setting_icon.png")
-		setting_btn.clicked.connect(self.show_settings)
-
 		menu_layout.addWidget(voip_btn)
 		menu_layout.addWidget(packet_btn)
-		menu_layout.addStretch()
-		menu_layout.addWidget(setting_btn)
+		menu_layout.addStretch()  # SETTING 버튼 대신 여백만 유지
 
 		layout.addWidget(menu_container)
 
@@ -347,24 +345,24 @@ class Dashboard(QMainWindow):
 		top_layout = QHBoxLayout()
 		top_layout.setSpacing(15)
 
-		# Network IP (1/4 비율) 공인아이피
-		network_group = self._create_info_group("NETWORK IP", self.get_public_ip())
+		# 네트워크 IP (1/4 비율) 공인아이피
+		network_group = self._create_info_group("네트워크 IP", self.get_public_ip())
 		top_layout.addWidget(network_group, 25)
 
-		# PORT MIRRORING IP (1/4 비율) 내부이피
+		# 포트미러링 IP (1/4 비율) 내부이피
 		config = configparser.ConfigParser()
 		config.read('settings.ini', encoding='utf-8')
 		port_mirror_ip = config.get('Network', 'ip', fallback='127.0.0.1')
-		port_group = self._create_info_group("PORT MIRRORING IP", port_mirror_ip)
+		port_group = self._create_info_group("포트미러링 IP", port_mirror_ip)
 		top_layout.addWidget(port_group, 25)
 
-		# Record Start (1/4 비율)
-		record_start = self._create_toggle_group("RECORD START")
-		top_layout.addWidget(record_start, 25)
-
-		# CLIENT START (1/4 비율)
+		# 클라이언트서버 (1/4 비율) - 위치 변경
 		client_start = self._create_client_start_group()
 		top_layout.addWidget(client_start, 25)
+
+		# 환경설정 / 관리사이트 (1/4 비율) - 위치 변경
+		record_start = self._create_toggle_group("환경설정 / 관리사이트")
+		top_layout.addWidget(record_start, 25)
 
 		layout.addLayout(top_layout)
 
@@ -433,10 +431,10 @@ class Dashboard(QMainWindow):
 		layout.setContentsMargins(15, 20, 15, 15)
 
 		# 레이블을 클래스 멤버 변수로 저장
-		if title == "NETWORK IP":
+		if title == "네트워크 IP":
 			self.ip_value = QLabel(value)
 			value_label = self.ip_value
-		elif title == "PORT MIRRORING IP":
+		elif title == "포트미러링 IP":
 			self.mirror_ip_value = QLabel(value)
 			value_label = self.mirror_ip_value
 		else:
@@ -454,6 +452,7 @@ class Dashboard(QMainWindow):
 		return group
 
 	def _create_toggle_group(self, title):
+		"""환경설정 / 관리사이트 그룹 생성"""
 		group = QGroupBox(title)
 		layout = QHBoxLayout(group)
 		layout.setContentsMargins(15, 15, 15, 15)
@@ -464,19 +463,22 @@ class Dashboard(QMainWindow):
 		button_layout.setContentsMargins(0, 0, 0, 0)
 		button_layout.setSpacing(2)
 
-		off_btn = QPushButton("OFF")
-		off_btn.setObjectName("toggleOff")
-		off_btn.setCursor(Qt.PointingHandCursor)
+		# 환경설정 버튼
+		settings_btn = QPushButton("환경설정")
+		settings_btn.setObjectName("toggleOn")
+		settings_btn.setCursor(Qt.PointingHandCursor)
+		settings_btn.clicked.connect(self.show_settings)  # SETTING 버튼과 동일한 기능 연결
 
-		on_btn = QPushButton("ON")
-		on_btn.setObjectName("toggleOn")
-		on_btn.setCursor(Qt.PointingHandCursor)
+		# 관리사이트 버튼
+		admin_btn = QPushButton("관리사이트이동")
+		admin_btn.setObjectName("toggleOff")
+		admin_btn.setCursor(Qt.PointingHandCursor)
+		admin_btn.clicked.connect(self.open_admin_site)  # 새로운 기능 추가
 
-		button_layout.addWidget(off_btn, 1)
-		button_layout.addWidget(on_btn, 1)
+		button_layout.addWidget(settings_btn, 1)
+		button_layout.addWidget(admin_btn, 1)
 
 		layout.addWidget(button_container)
-
 		return group
 
 	def _create_line_list(self):
@@ -911,11 +913,11 @@ class Dashboard(QMainWindow):
 			if 'Extension' in settings_data:
 				self.phone_number.setText(settings_data['Extension']['Rep_number'])
 
-			# NETWORK IP 업데이트
+			# 네트워크 IP 업데이트
 			if 'Network' in settings_data:
 				self.ip_value.setText(settings_data['Network']['ap_ip'])
 
-			# PORT MIRRORING IP 업데이트
+			# 포트미러링 IP 업데이트
 			if 'Network' in settings_data:
 				self.mirror_ip_value.setText(settings_data['Network']['ip'])
 
@@ -992,13 +994,13 @@ class Dashboard(QMainWindow):
 				print(f"Status Line: {sip_layer.status_line}")
 				print(f"Status Code: {status_code}")
 
-				# 100 Trying 감지 시 즉시 블록 생성
+				# 100 Trying 감지 시 즉시 ��록 생성
 				if status_code == '100':
 					print("100 Trying 감지")
 					extension = self.extract_number(sip_layer.from_user)
 					if extension and len(extension) == 4 and extension[0] in ['1', '2', '3', '4']:
 						print(f"내선번호 감지: {extension}")
-						# 대기중 블록 생성
+						# 대기중 ���록 생성
 						if extension:  # extension이 유효한 경우에만 시그널 발생
 							self.block_update_signal.emit(extension, "대기중", "")
 							print(f"대기중 블록 생성 요청: {extension}")
@@ -1302,7 +1304,7 @@ class Dashboard(QMainWindow):
 			src_port = int(packet.udp.srcport)
 			dst_port = int(packet.udp.dstport)
 
-			# self.active_calls에서 이 RTP 스트림과 칭�����는 Call-ID 찾기
+			# self.active_calls에서 이 RTP 스트림과 칭������는 Call-ID 찾기
 			for call_id, call_info in self.active_calls.items():
 				if "media_endpoints" in call_info:
 					for endpoint in call_info["media_endpoints"]:
@@ -1469,7 +1471,7 @@ class Dashboard(QMainWindow):
 			# 레이아웃 강제 업데이트
 			self.calls_layout.update()
 			self.calls_container.update()
-			print(f"블록 강제 업데이트 완료: {extension} -> 대기중")
+			print(f"블�� 강제 업데이트 완료: {extension} -> 대기중")
 
 			# LOG LIST 업데이트 강제 실행
 			self.update_voip_status()
@@ -1893,8 +1895,8 @@ class Dashboard(QMainWindow):
 			print(f"통화 시간 업데이트 중 오류: {e}")
 
 	def _create_client_start_group(self):
-		"""CLIENT START 그룹 생성"""
-		group = QGroupBox("CLIENT START")
+		"""클라이언트서버 그룹 생성"""
+		group = QGroupBox("클라이언트서버")
 		layout = QHBoxLayout(group)
 		layout.setContentsMargins(15, 20, 15, 15)
 		layout.setSpacing(2)
@@ -1905,19 +1907,19 @@ class Dashboard(QMainWindow):
 		button_layout.setContentsMargins(0, 0, 0, 0)
 		button_layout.setSpacing(2)
 
-		# OFF/ON 버튼
-		self.off_btn = QPushButton("OFF")
-		self.off_btn.setObjectName("toggleOff")
-		self.off_btn.setCursor(Qt.PointingHandCursor)
-		self.off_btn.clicked.connect(self.stop_client)
-
+		# ON/OFF 버튼 순서 변경
 		self.on_btn = QPushButton("ON")
 		self.on_btn.setObjectName("toggleOn")
 		self.on_btn.setCursor(Qt.PointingHandCursor)
 		self.on_btn.clicked.connect(self.start_client)
 
-		button_layout.addWidget(self.off_btn, 1)
+		self.off_btn = QPushButton("OFF")
+		self.off_btn.setObjectName("toggleOff")
+		self.off_btn.setCursor(Qt.PointingHandCursor)
+		self.off_btn.clicked.connect(self.stop_client)
+
 		button_layout.addWidget(self.on_btn, 1)
+		button_layout.addWidget(self.off_btn, 1)
 
 		layout.addWidget(button_container)
 		return group
@@ -2017,6 +2019,21 @@ class Dashboard(QMainWindow):
 			return all(0 <= int(part) <= 255 for part in parts)
 		except:
 			return False
+
+	def open_admin_site(self):
+		"""관리사이트 열기"""
+		try:
+			# settings.ini에서 IP 주소 읽기
+			config = configparser.ConfigParser()
+			config.read('settings.ini', encoding='utf-8')
+			ip_address = config.get('Network', 'ip', fallback='127.0.0.1')
+			
+			# URL 생성 및 웹브라우저로 열기
+			url = f"http://{ip_address}"
+			QDesktopServices.openUrl(QUrl(url))
+		except Exception as e:
+			print(f"관리사이트 열기 실패: {e}")
+			QMessageBox.warning(self, "오류", "관리사이트를 열 수 없습니다.")
 
 # FlowLayout 래스 추가 (Qt의 동적 그리 레이아웃 구현)
 class FlowLayout(QLayout):
