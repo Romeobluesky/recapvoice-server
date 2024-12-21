@@ -265,7 +265,7 @@ class Dashboard(QMainWindow):
 		logo_label = QLabel()
 		logo_label.setFixedHeight(100)
 		logo_label.setAlignment(Qt.AlignCenter)
-		logo_pixmap = QPixmap("images/recapvoicelogo.png")
+		logo_pixmap = QPixmap("images/recapvoice_v3_ci.png")
 		if not logo_pixmap.isNull():
 			# 원본 이미지의 가로/세로 비율 계산
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
