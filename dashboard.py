@@ -256,14 +256,12 @@ class Dashboard(QMainWindow):
 		sidebar.setObjectName("sidebar")
 		sidebar.setFixedWidth(200)
 
-
 		layout = QVBoxLayout(sidebar)
 		layout.setContentsMargins(0, 0, 0, 0)
 		layout.setSpacing(0)
 
 		# 로고 영역
 		logo_label = QLabel()
-		logo_label.setFixedHeight(100)
 		logo_label.setAlignment(Qt.AlignCenter)
 		logo_pixmap = QPixmap("images/recapvoice_v3_ci.png")
 		if not logo_pixmap.isNull():
@@ -279,11 +277,12 @@ class Dashboard(QMainWindow):
 				Qt.SmoothTransformation
 			)
 			logo_label.setPixmap(scaled_logo)
+			# 로고의 실제 높이에 맞춰 설정
+			logo_label.setFixedHeight(target_height + 20)  # 여백 20px 추가
 		layout.addWidget(logo_label)
 
-		# 메뉴 버들을 담을 컨테이너
+		# 메뉴 컨테이너
 		menu_container = QWidget()
-
 		menu_layout = QVBoxLayout(menu_container)
 		menu_layout.setContentsMargins(0, 0, 0, 0)
 		menu_layout.setSpacing(5)
@@ -301,7 +300,6 @@ class Dashboard(QMainWindow):
 		menu_layout.addWidget(voip_btn)
 		menu_layout.addWidget(packet_btn)
 		menu_layout.addStretch()
-
 		menu_layout.addWidget(setting_btn)
 
 		layout.addWidget(menu_container)
@@ -1304,7 +1302,7 @@ class Dashboard(QMainWindow):
 			src_port = int(packet.udp.srcport)
 			dst_port = int(packet.udp.dstport)
 
-			# self.active_calls에서 이 RTP 스트림과 칭���는 Call-ID 찾기
+			# self.active_calls에서 이 RTP 스트림과 칭�����는 Call-ID 찾기
 			for call_id, call_info in self.active_calls.items():
 				if "media_endpoints" in call_info:
 					for endpoint in call_info["media_endpoints"]:
@@ -1743,7 +1741,7 @@ class Dashboard(QMainWindow):
 			
 			# 스트림 방향 결정
 			direction = self.determine_stream_direction(packet, call_id)
-			if not direction:  # 방향을 결정할 수 없는 경우 스킵
+			if not direction:  # 방향을 결정할 수 ���는 경우 스킵
 				return
 			
 			print(f"\n=== RTP 패킷 감지 ({direction}) ===")
