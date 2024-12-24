@@ -134,7 +134,7 @@ class Dashboard(QMainWindow):
 		# WavMerger와 WavChatExtractor 초기화
 		self.wav_merger = WavMerger()
 		self.chat_extractor = WavChatExtractor()
-		
+
 		# MongoDB 연결
 		try:
 			self.mongo_client = MongoClient('mongodb://localhost:27017/')
@@ -174,7 +174,7 @@ class Dashboard(QMainWindow):
 		# 전화연결 상태와 LOG LIST의 비율 조정
 		line_list = self._create_line_list()
 		log_list = self._create_log_list()
-		
+
 		# 비율 조정 및 마진 제거
 		content_layout.addWidget(line_list, 80)
 		content_layout.addWidget(log_list, 20)
@@ -662,7 +662,7 @@ class Dashboard(QMainWindow):
 		group.setMinimumHeight(200)  # 높이를 200px로 고정
 		layout = QVBoxLayout(group)
 		layout.setContentsMargins(15, 15, 15, 15)
-		
+
 		# 테이블 위젯 설정
 		table = QTableWidget()
 		table.setObjectName("log_list_table")  # 업데이트를 위한 객체 이름 설정
@@ -1218,7 +1218,7 @@ class Dashboard(QMainWindow):
 
 			# UDP 페이로드를 hex로 변환
 			payload_hex = packet.udp.payload.replace(':', '')
-			
+
 			try:
 				payload = bytes.fromhex(payload_hex)
 			except ValueError:
@@ -1234,10 +1234,10 @@ class Dashboard(QMainWindow):
 
 			# 페이로드 타입 확인 (오디오 코덱)
 			payload_type = payload[1] & 0x7F
-			
+
 			# 디버그 정보 출력
 			print(f"RTP 패킷 검사: Version={version}, PayloadType={payload_type}")
-			
+
 			# PCMU(0)와 PCMA(8)만 허용
 			return payload_type in [0, 8]
 
@@ -1252,10 +1252,10 @@ class Dashboard(QMainWindow):
 			dst_ip = packet.ip.dst
 			src_port = int(packet.udp.srcport)
 			dst_port = int(packet.udp.dstport)
-			
+
 			# Call-ID에서 IP 주소 추출
 			pbx_ip = call_id.split('@')[1].split(';')[0].split(':')[0]
-			
+
 			# 소스가 PBX IP인 경우 = OUT
 			if src_ip == pbx_ip:
 				print(f"OUT 패킷: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
@@ -1264,10 +1264,10 @@ class Dashboard(QMainWindow):
 			elif dst_ip == pbx_ip:
 				print(f"IN 패킷: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
 				return "IN"
-			
+
 			print(f"방향 결정 실패 - SRC: {src_ip}:{src_port}, DST: {dst_ip}:{dst_port}")
 			return None
-				
+
 		except Exception as e:
 			print(f"스트림 방향 결정 중 오류: {e}")
 			return None
@@ -1531,7 +1531,7 @@ class Dashboard(QMainWindow):
 
 				if new_status == '통화종료':
 					self.active_calls[call_id]['end_time'] = datetime.datetime.now()
-					
+
 					# WAV 파일 저장 처리
 					wav_files = {'IN': None, 'OUT': None}
 					for direction in ['IN', 'OUT']:
@@ -1561,11 +1561,11 @@ class Dashboard(QMainWindow):
 							ip = path_parts[-3]            # IP (192.168.0.55)
 							timestamp_dir = path_parts[-2] # 시간 (154637)
 							timestamp = timestamp_dir      # 시간값 그대로 사용
-							
+
 							# 발신/수신 번호 가져오기
 							local_num = self.active_calls[call_id]['from_number']
 							remote_num = self.active_calls[call_id]['to_number']  # 이 줄을 다시 추가
-							
+
 							# 저장 경로를 IN/OUT 파일이 있는 디렉토리로 설정
 							save_path = os.path.dirname(file_path)
 
@@ -1616,10 +1616,10 @@ class Dashboard(QMainWindow):
 											"down_count": 0,                  # 다운로드 카운트 초기값
 											"created_at": datetime.datetime.utcnow()  # UTC 시간으로 저장
 										}
-										
+
 										result = self.filesinfo.insert_one(doc)
 										print(f"MongoDB 저장 완료: {result.inserted_id}")
-										
+
 									except Exception as e:
 										print(f"MongoDB 저장 중 오류: {e}")
 
@@ -1704,7 +1704,7 @@ class Dashboard(QMainWindow):
 					capture.close()
 			except:
 				pass
-			
+
 			try:
 				if 'loop' in locals():
 					loop.close()
@@ -1720,7 +1720,7 @@ class Dashboard(QMainWindow):
 				if call_info.get('status') == '통화중':
 					active_call = (call_id, call_info)
 					break
-			
+
 			if not active_call:
 				return
 
@@ -1740,16 +1740,16 @@ class Dashboard(QMainWindow):
 			dst_ip = packet.ip.dst
 			src_port = int(packet.udp.srcport)
 			dst_port = int(packet.udp.dstport)
-			
+
 			# 스트림 방향 결정
 			direction = self.determine_stream_direction(packet, call_id)
 			if not direction:  # 방향을 결정할 수 ���는 경우 스킵
 				return
-			
+
 			print(f"\n=== RTP 패킷 감지 ({direction}) ===")
 			print(f"Source: {src_ip}:{src_port}")
 			print(f"Destination: {dst_ip}:{dst_port}")
-			
+
 			# UDP 페이로드 분석 및 음성 데이�� 추출
 			if hasattr(packet.udp, 'payload'):
 				payload_hex = packet.udp.payload.replace(':', '')
@@ -1759,10 +1759,10 @@ class Dashboard(QMainWindow):
 					payload_type = payload[1] & 0x7F
 					sequence = int.from_bytes(payload[2:4], byteorder='big')
 					timestamp = int.from_bytes(payload[4:8], byteorder='big')
-					
+
 					# RTP 헤더(12바이트) 이후의 데이터가 실제 음성 데이터
 					audio_data = payload[12:]
-					
+
 					# 녹음 파일 저장을 위한 정보 설정
 					recording_key = f"recording_info_{direction}"
 					if recording_key not in call_info:
@@ -1770,34 +1770,34 @@ class Dashboard(QMainWindow):
 						config = configparser.ConfigParser()
 						config.read('settings.ini', encoding='utf-8')
 						base_path = config.get('Recording', 'save_path', fallback='C:\\')
-						
+
 						# 현재 날짜로 디렉토리 생성
 						today = datetime.datetime.now().strftime("%Y%m%d")
 						date_dir = os.path.join(base_path, today)
-						
+
 						# Call-ID의 IP 주소로 하위 디렉토리 생성
 						ip_dir = os.path.join(date_dir, phone_ip)
-						
+
 						# 시간 디렉토리 생성
 						time_str = datetime.datetime.now().strftime("%H%M%S")
 						time_dir = os.path.join(ip_dir, time_str)
-						
+
 						# 디렉토리 생성
 						os.makedirs(time_dir, exist_ok=True)
-						
+
 						# 파일명 생성
 						timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 						from_number = call_info['from_number']
 						to_number = call_info['to_number']
 						filename = f"{time_str}_{direction}_{from_number}_{to_number}.wav"
 						filepath = os.path.join(time_dir, filename)
-						
+
 						# WAV 파일 초기화
 						with wave.open(filepath, 'wb') as wav_file:
 							wav_file.setnchannels(1)  # 모노
 							wav_file.setsampwidth(2)  # 16-bit
 							wav_file.setframerate(8000)  # 8kHz
-						
+
 						call_info[recording_key] = {
 							'filepath': filepath,
 							'audio_data': bytearray(),
@@ -1807,7 +1807,7 @@ class Dashboard(QMainWindow):
 							'saved': False
 						}
 						print(f"녹음 시작 ({direction}): {filepath}")
-						
+
 					# 음성 데이터 저장
 					recording_info = call_info[recording_key]
 					if not recording_info.get('saved'):
@@ -1827,28 +1827,28 @@ class Dashboard(QMainWindow):
 			if len(audio_data) == 0:
 				print("오디오 데이터가 없습니다.")
 				return
-			
+
 			# WAV 파일 설정
 			with wave.open(filepath, 'wb') as wav_file:
 				wav_file.setnchannels(1)  # 모노
 				wav_file.setsampwidth(2)  # 16-bit
 				wav_file.setframerate(8000)  # 8kHz
-				
+
 				# PCMA(8) 또는 PCMU(0) 디코딩
 				if payload_type == 8:  # PCMA (A-law)
 					decoded_data = audioop.alaw2lin(bytes(audio_data), 2)
 				else:  # PCMU (μ-law)
 					decoded_data = audioop.ulaw2lin(bytes(audio_data), 2)
-				
+
 				# 볼륨 증가
 				amplified_data = audioop.mul(decoded_data, 2, 4.0)
-				
+
 				wav_file.writeframes(amplified_data)
 				print(f"WAV 파일 저장 완료: {filepath}")
 				print(f"원본 데이터 크기: {len(audio_data)} bytes")
 				print(f"디코딩된 데이터 크기: {len(decoded_data)} bytes")
 				print(f"최종 데이터 크기: {len(amplified_data)} bytes")
-				
+
 		except Exception as e:
 			print(f"WAV 파일 저장 중 오류: {e}")
 
@@ -1900,7 +1900,7 @@ class Dashboard(QMainWindow):
 		layout = QHBoxLayout(group)
 		layout.setContentsMargins(15, 20, 15, 15)
 		layout.setSpacing(2)
-		
+
 		# 버튼 컨테이너
 		button_container = QWidget()
 		button_layout = QHBoxLayout(button_container)
@@ -1930,7 +1930,7 @@ class Dashboard(QMainWindow):
 			# start.bat 실행
 			import subprocess
 			subprocess.Popen(['start.bat'], shell=True)
-			
+
 			# ON 버튼 색상 변경
 			self.on_btn.setStyleSheet("""
 				QPushButton {
@@ -1944,7 +1944,7 @@ class Dashboard(QMainWindow):
 					background-color: #CC0000;
 				}
 			""")
-				
+
 		except Exception as e:
 			print(f"클라이언트 시작 중 오류: {e}")
 
@@ -1982,29 +1982,29 @@ class Dashboard(QMainWindow):
 		try:
 			# @ 뒤의 문자열 추출
 			ip_part = call_id.split('@')[1]
-			
+
 			# 가능한 모든 형식 처리
 			# 1. IP:포트;파라미터 형식 (예: 192.168.0.10:5060;transport=udp)
 			# 2. [IP]:포트 형식 (예: [192.168.0.10]:5060)
 			# 3. IP:포트 형식 (예: 192.168.0.10:5060)
 			# 4. 순수 IP 형식 (예: 192.168.0.10)
-			
+
 			# 세미콜론 이후 제거
 			ip_part = ip_part.split(';')[0]
-			
+
 			# 대괄호 제거
 			ip_part = ip_part.replace('[', '').replace(']', '')
-			
+
 			# 포트 부분 제거
 			ip_part = ip_part.split(':')[0]
-			
+
 			# IP 주소 유효성 검사 (옵션)
 			if self.is_valid_ip(ip_part):
 				return ip_part
 			else:
 				print(f"유효하지 않은 IP 주소 형식: {ip_part}")
 				return "unknown"
-			
+
 		except Exception as e:
 			print(f"IP 주소 추출 실패. Call-ID: {call_id}, 오류: {e}")
 			return "unknown"
@@ -2027,7 +2027,7 @@ class Dashboard(QMainWindow):
 			config = configparser.ConfigParser()
 			config.read('settings.ini', encoding='utf-8')
 			ip_address = config.get('Network', 'ip', fallback='127.0.0.1')
-			
+
 			# URL 생성 및 웹브라우저로 열기
 			url = f"http://{ip_address}"
 			QDesktopServices.openUrl(QUrl(url))
