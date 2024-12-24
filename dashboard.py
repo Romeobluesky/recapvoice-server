@@ -201,7 +201,7 @@ class Dashboard(QMainWindow):
 			self.selected_interface = default_interface
 
 		except Exception as e:
-			print(f"네트워 인터페이스 로드 패: {e}")
+			print(f"네트워 인터페이스 로드 실패: {e}")
 
 	def start_packet_capture(self):
 		"""패킷 캡처 시작"""
