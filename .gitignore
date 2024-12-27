@@ -319,4 +319,6 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+#External interlocking files
+prereq/
 # End of https://www.toptal.com/developers/gitignore/api/node,python
