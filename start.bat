@@ -19,23 +19,23 @@ if "!env_mode!"=="development" (
     set "WORK_DIR=!dir_path!"
 ) else (
     :: 배포 환경 경로
-    set "WORK_DIR=%ProgramFiles%\PacketWave"
+    set "WORK_DIR=%ProgramFiles%\Recap Voice"
 )
 
 :: nginx.exe 존재 여부 확인
-if not exist "!WORK_DIR!\packet_wave\nginx\nginx.exe" (
-    echo Error: nginx.exe not found at !WORK_DIR!\packet_wave\nginx\nginx.exe
+if not exist "!WORK_DIR!\nginx\nginx.exe" (
+    echo Error: nginx.exe not found at !WORK_DIR!\nginx\nginx.exe
     goto error
 )
 
 :: 작업 디렉토리 생성
-if not exist "!WORK_DIR!\packet_wave\logs" mkdir "!WORK_DIR!\packet_wave\logs"
-if not exist "!WORK_DIR!\packet_wave\temp" mkdir "!WORK_DIR!\packet_wave\temp"
-if not exist "!WORK_DIR!\packet_wave\temp\client_body_temp" mkdir "!WORK_DIR!\packet_wave\temp\client_body_temp"
+if not exist "!WORK_DIR!\logs" mkdir "!WORK_DIR!\logs"
+if not exist "!WORK_DIR!\temp" mkdir "!WORK_DIR!\temp"
+if not exist "!WORK_DIR!\temp\client_body_temp" mkdir "!WORK_DIR!\temp\client_body_temp"
 
 :: Nginx 시작
-echo Starting Nginx from: !WORK_DIR!\packet_wave\nginx\nginx.exe
-start "" "!WORK_DIR!\packet_wave\nginx\nginx.exe" -c "!WORK_DIR!\packet_wave\nginx\conf\nginx.conf"
+echo Starting Nginx from: !WORK_DIR!\nginx\nginx.exe
+start "" "!WORK_DIR!\nginx\nginx.exe" -c "!WORK_DIR!\nginx\conf\nginx.conf"
 if !ERRORLEVEL! neq 0 (
     echo Failed to start Nginx.
     goto error
@@ -43,7 +43,7 @@ if !ERRORLEVEL! neq 0 (
 
 :: MongoDB 시작
 echo Starting MongoDB...
-start "" /b "!WORK_DIR!\packet_wave\mongodb\bin\mongod.exe" --dbpath "!WORK_DIR!\packet_wave\mongodb\data\db" --logpath "!WORK_DIR!\packet_wave\mongodb\log\mongodb.log" --logappend
+start "" /b "!WORK_DIR!\mongodb\bin\mongod.exe" --dbpath "!WORK_DIR!\mongodb\data\db" --logpath "!WORK_DIR!\mongodb\log\mongodb.log" --logappend
 if %ERRORLEVEL% neq 0 (
     echo Failed to start MongoDB.
     goto error
