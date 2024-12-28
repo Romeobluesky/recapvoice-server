@@ -324,7 +324,7 @@ prereq/
 # End of https://www.toptal.com/developers/gitignore/api/node,python
 
 # OutFile Exe
-#RecapVoice_Setup.exe
+RecapVoice_Setup.exe
 
 #Client
 packetwave_client/
