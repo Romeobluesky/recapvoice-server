@@ -1,48 +1,82 @@
 @echo off
-
-:: settings.ini에서 경로 읽기
 setlocal enabledelayedexpansion
-for /f "tokens=1,2 delims== " %%A in ('findstr "dir_path" settings.ini') do (
-    set "%%A=%%B"
+
+:: 환경 모드 확인
+for /f "tokens=1,2 delims==" %%A in ('findstr /b "mode" settings.ini') do (
+    set "env_mode=%%B"
+    set "env_mode=!env_mode: =!"
+    echo Mode is: !env_mode!
 )
 
-:: 읽은 값 확인
-echo Work directory is: %dir_path%
-::pause
+:: 경로 설정
+if "!env_mode!"=="development" (
+    :: 개발 환경 경로 - settings.ini에서 직접 경로 읽기
+    for /f "tokens=1,2 delims==" %%A in ('findstr /b "dir_path" settings.ini') do (
+        set "dir_path=%%B"
+        set "dir_path=!dir_path: =!"
+        echo Found dir_path: !dir_path!
+    )
+    set "WORK_DIR=!dir_path!"
+) else (
+    :: 배포 환경 경로
+    set "WORK_DIR=%ProgramFiles%\PacketWave"
+)
 
-:: 필요한 디렉토리 생성
-if not exist "%dir_path%\packet_wave\logs" mkdir "%dir_path%\packet_wave\logs"
-if not exist "%dir_path%\packet_wave\temp" mkdir "%dir_path%\packet_wave\temp"
-if not exist "%dir_path%\packet_wave\temp\client_body_temp" mkdir "%dir_path%\packet_wave\temp\client_body_temp"
+:: nginx.exe 존재 여부 확인
+if not exist "!WORK_DIR!\packet_wave\nginx\nginx.exe" (
+    echo Error: nginx.exe not found at !WORK_DIR!\packet_wave\nginx\nginx.exe
+    goto error
+)
+
+:: 작업 디렉토리 생성
+if not exist "!WORK_DIR!\packet_wave\logs" mkdir "!WORK_DIR!\packet_wave\logs"
+if not exist "!WORK_DIR!\packet_wave\temp" mkdir "!WORK_DIR!\packet_wave\temp"
+if not exist "!WORK_DIR!\packet_wave\temp\client_body_temp" mkdir "!WORK_DIR!\packet_wave\temp\client_body_temp"
 
 :: Nginx 시작
-echo Starting Nginx...
-start "" "%dir_path%\packet_wave\nginx\nginx.exe" -c "%dir_path%\packet_wave\nginx\conf\nginx.conf"
-if %ERRORLEVEL% neq 0 (
+echo Starting Nginx from: !WORK_DIR!\packet_wave\nginx\nginx.exe
+start "" "!WORK_DIR!\packet_wave\nginx\nginx.exe" -c "!WORK_DIR!\packet_wave\nginx\conf\nginx.conf"
+if !ERRORLEVEL! neq 0 (
     echo Failed to start Nginx.
-    exit /b
+    goto error
 )
 
-:: MongoDB 독립 실행
+:: MongoDB 시작
 echo Starting MongoDB...
-start "" /b "%dir_path%\packet_wave\mongodb\bin\mongod.exe" --dbpath "%dir_path%\packet_wave\mongodb\data\db" --logpath "%dir_path%\packet_wave\mongodb\log\mongodb.log" --logappend
+start "" /b "!WORK_DIR!\packet_wave\mongodb\bin\mongod.exe" --dbpath "!WORK_DIR!\packet_wave\mongodb\data\db" --logpath "!WORK_DIR!\packet_wave\mongodb\log\mongodb.log" --logappend
 if %ERRORLEVEL% neq 0 (
     echo Failed to start MongoDB.
-    exit /b
+    goto error
 )
 
-:: NestJS npm 시작
+:: NestJS 시작
 echo Starting NestJS...
 where npm >nul 2>nul
 if %ERRORLEVEL% neq 0 (
     echo npm is not installed.
-    exit /b
+    goto error
 )
-cd /d %dir_path%\packetwave_client
+
+cd /d "!WORK_DIR!\packetwave_client"
 npm run start:dev
 if %ERRORLEVEL% neq 0 (
     echo Failed to start NestJS
-    exit /b
+    goto error
 )
 
-exit
+goto :end
+
+:error
+echo Error occurred. Check the logs for details.
+pause
+exit /b 1
+
+:end
+echo All services started successfully.
+if "!env_mode!"=="development" (
+    echo Running in development mode
+    echo Work directory is: !WORK_DIR!
+) else (
+    echo Running in production mode
+)
+exit /b 0

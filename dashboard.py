@@ -1471,7 +1471,7 @@ class Dashboard(QMainWindow):
 			# 레이아웃 강제 업데이트
 			self.calls_layout.update()
 			self.calls_container.update()
-			print(f"블�� 강제 업데이트 완료: {extension} -> 대기중")
+			print(f"블록 강제 업데이트 완료: {extension} -> 대기중")
 
 			# LOG LIST 업데이트 강제 실행
 			self.update_voip_status()
