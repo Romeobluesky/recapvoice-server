@@ -49,6 +49,11 @@ VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
   Call ReplaceInFile
 !macroend
 
+!macro un.RemovePath PATH
+  Push "${PATH}"
+  Call un.RemoveFromPath
+!macroend
+
 Function .onInit
     # 관리자 권한 체크
     UserInfo::GetAccountType
@@ -90,12 +95,14 @@ Section "Prerequisites"
    CreateDirectory "C:\Program Files\ffmpeg"
    SetOutPath "C:\Program Files\ffmpeg"
    File /r "prereq\ffmpeg\*.*"
-
-   # TShark 환경변수 확인
-   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "WIRESHARK_PATH"
-   ${If} $0 == ""
-       WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "WIRESHARK_PATH" "C:\Program Files\Wireshark"
+   
+   # FFmpeg bin 폴더가 있는지 확인
+   ${If} ${FileExists} "C:\Program Files\ffmpeg\bin\ffmpeg.exe"
+       Push "C:\Program Files\ffmpeg\bin"
+       Call AddToPath
    ${EndIf}
+   
+   # WIRESHARK_PATH 관련 코드 제거
 SectionEnd
 
 Section "MainSection"
@@ -260,16 +267,15 @@ FunctionEnd
 
 Section "Uninstall"
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   ${un.RemovePath} "$INSTDIR\nginx"
-   ${un.RemovePath} "$INSTDIR\mongodb\bin"
-   ${un.RemovePath} "C:\Program Files\Npcap"
-   ${un.RemovePath} "C:\Program Files\Wireshark"
-   ${un.RemovePath} "C:\Program Files\ffmpeg\bin"
+   !insertmacro un.RemovePath "$INSTDIR\nginx"
+   !insertmacro un.RemovePath "$INSTDIR\mongodb\bin"
+   !insertmacro un.RemovePath "C:\Program Files\Npcap"
+   !insertmacro un.RemovePath "C:\Program Files\Wireshark"
+   !insertmacro un.RemovePath "C:\Program Files\ffmpeg\bin"
    
    Delete "$INSTDIR\uninstall.exe"
    RMDir /r "$INSTDIR"
    RMDir /r "$SMPROGRAMS\${APP_NAME}"
-   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "WIRESHARK_PATH"
    
    # 내문서 폴더의 RecapVoiceRecord 삭제 여부 확인
    MessageBox MB_YESNO "음성 녹음 파일이 저장된 폴더를 삭제하시겠습니까?" IDNO skip_delete_records
@@ -280,12 +286,6 @@ Section "Uninstall"
    # 제어판에서 프로그램 제거
    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 SectionEnd
-
-# PATH 제거 함수 추가
-!macro un.RemovePath PATH
-  Push "${PATH}"
-  Call un.RemoveFromPath
-!macroend
 
 Function un.RemoveFromPath
    Exch $0
