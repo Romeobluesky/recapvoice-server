@@ -18,7 +18,7 @@ VSVersionInfo(
          StringStruct(u'FileVersion', u'1.103'),
          StringStruct(u'InternalName', u'recap_voice'),
          StringStruct(u'LegalCopyright', u'Copyright (c) 2024'),
-         StringStruct(u'OriginalFilename', u'RecapVoice.exe'),
+         StringStruct(u'OriginalFilename', u'Recap Voice.exe'),
          StringStruct(u'ProductName', u'Recap Voice'),
          StringStruct(u'ProductVersion', u'1.103')])
     ]),
