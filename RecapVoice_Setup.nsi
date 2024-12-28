@@ -114,15 +114,12 @@ Section "MainSection"
    File /r "nginx"
    
    # settings.ini 복사 및 수정
-   File "settings.ini"
+   File "settings.ini"    # 루트에 settings.ini 복사
+   
    # 경로 수정
    !define SAVE_PATH_FIND "D:/PacketWaveRecord"
    !define SAVE_PATH_REPLACE "$DOCUMENTS\RecapVoiceRecord"
    !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${SAVE_PATH_FIND}" "${SAVE_PATH_REPLACE}"
-   # Extension 섹션 대소문자 수정
-   !define SECTION_FIND "[Extension]"
-   !define SECTION_REPLACE "[extension]"
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${SECTION_FIND}" "${SECTION_REPLACE}"
    
    File "start.bat"
    
@@ -272,6 +269,9 @@ Section "Uninstall"
    !insertmacro un.RemovePath "C:\Program Files\Npcap"
    !insertmacro un.RemovePath "C:\Program Files\Wireshark"
    !insertmacro un.RemovePath "C:\Program Files\ffmpeg\bin"
+   
+   # 바탕화면 아이콘 제거
+   Delete "$DESKTOP\${APP_NAME}.lnk"
    
    Delete "$INSTDIR\uninstall.exe"
    RMDir /r "$INSTDIR"
