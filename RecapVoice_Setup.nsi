@@ -101,8 +101,6 @@ Section "Prerequisites"
        Push "C:\Program Files\ffmpeg\bin"
        Call AddToPath
    ${EndIf}
-   
-   # WIRESHARK_PATH 관련 코드 제거
 SectionEnd
 
 Section "MainSection"
@@ -110,30 +108,39 @@ Section "MainSection"
    
    # 메인 프로그램 파일 복사
    File /r "dist\Recap Voice\*.*"
-   File /r "mongodb"
-   File /r "nginx"
+   File /r "mongodb"    # 필수 - 서비스 실행에 필요
+   File /r "nginx"      # 필수 - 서비스 실행에 필요
    
    # settings.ini 복사 및 수정
-   File "settings.ini"    # 루트에 settings.ini 복사
+   File "settings.ini"
    
    # 경로 수정
    !define SAVE_PATH_FIND "D:/PacketWaveRecord"
    !define SAVE_PATH_REPLACE "$DOCUMENTS\RecapVoiceRecord"
    !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${SAVE_PATH_FIND}" "${SAVE_PATH_REPLACE}"
    
+   # DefaultDirectory 경로 수정
+   !define DIR_PATH_FIND "D:/Work_state/packet_wave"
+   !define DIR_PATH_REPLACE "$INSTDIR"
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${DIR_PATH_FIND}" "${DIR_PATH_REPLACE}"
+   
+   # Environment 모드 수정
+   !define MODE_FIND "mode = development"
+   !define MODE_REPLACE "mode = production"
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${MODE_FIND}" "${MODE_REPLACE}"
+   
+   # start.bat를 루트에 복사
+   DetailPrint "Copying start.bat..."
    File "start.bat"
    
    # packetwave_client 폴더 복사
    DetailPrint "Copying packetwave_client..."
-   RMDir /r "$INSTDIR\packetwave_client"    # 기존 폴더 제거
    CreateDirectory "$INSTDIR\packetwave_client"
-   SetOutPath "$INSTDIR\packetwave_client"   # 대상 폴더로 변경
-   File /r "packetwave_client\*.*"          # 폴더 내용 복사
-   SetOutPath "$INSTDIR"                    # 원래 경로로 복귀
+   SetOutPath "$INSTDIR\packetwave_client"
+   File /r "packetwave_client\*.*"
+   SetOutPath "$INSTDIR"
    
    # 환경변수 설정
-   Push "PATH"
-   Push "System"
    Push "$INSTDIR\nginx"
    Call AddToPath
    Push "$INSTDIR\mongodb\bin"
@@ -147,9 +154,9 @@ Section "MainSection"
    
    # 바로가기 생성
    CreateDirectory "$SMPROGRAMS\${APP_NAME}"
-   CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe" "" "$INSTDIR\Recap Voice.exe" 0 SW_SHOWNORMAL "" "Recap Voice Application"
-   CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe" "" "$INSTDIR\Recap Voice.exe" 0
-
+   CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe"
+   CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe"
+   
    # 내문서 폴더에 저장 디렉토리 생성
    SetShellVarContext current
    CreateDirectory "$DOCUMENTS\RecapVoiceRecord"
@@ -157,14 +164,12 @@ Section "MainSection"
    
    WriteUninstaller "$INSTDIR\uninstall.exe"
    
-   # 제어판 프로그램 목록에 추가
+   # 제어판 등록
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayName" "${APP_NAME}"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString" "$INSTDIR\uninstall.exe"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayIcon" "$INSTDIR\Recap Voice.exe"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "Publisher" "Xpower Networks"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayVersion" "${VERSION}"
-   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoModify" 1
-   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoRepair" 1
 SectionEnd
 
 Function ReplaceInFile
@@ -352,4 +357,4 @@ Function un.StrStr
    Pop $R3
    Pop $R2
    Exch $R1
-FunctionEnd 
+FunctionEnd

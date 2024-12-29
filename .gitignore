@@ -328,4 +328,9 @@ RecapVoice_Setup.exe
 
 #Client
 packetwave_client/
-packetwave_client.zip
+
+# Recap Voice.spec
+Recap Voice.spec
+
+#Client
+packetwave_client/
