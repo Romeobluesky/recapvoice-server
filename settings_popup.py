@@ -26,9 +26,39 @@ class SettingsPopup(QDialog):
 
 	def __init__(self):
 		super().__init__()
-		# 설정 파일 로드
+		# 설정 파일 로드 또는 생성
 		self.config = configparser.ConfigParser()
-		self.config.read('settings.ini', encoding='utf-8')
+		
+		if not os.path.exists('settings.ini') or os.path.getsize('settings.ini') == 0:
+			# 기본 설정값 설정
+			self.config['Environment'] = {
+				'mode': 'production'
+			}
+			self.config['Recording'] = {
+				'save_path': 'D:/PacketWaveRecord',
+				'channels': '1',
+				'sample_rate': '8000'
+			}
+			self.config['Network'] = {
+				'ip': '192.168.0.64',
+				'ap_ip': '222.100.152.166',
+				'port': '8080'
+			}
+			self.config['Extension'] = {
+				'rep_number': '',
+				'id_code': 'DIFK-2345-EF78-AFE6',
+				'get_interface_length': '4'
+			}
+			self.config['OtherSettings'] = {
+				'disk_persent': '70',
+				'disk_alarm': 'true'
+			}
+			
+			# 설정 파일 저장
+			with open('settings.ini', 'w', encoding='utf-8') as configfile:
+				self.config.write(configfile)
+		else:
+			self.config.read('settings.ini', encoding='utf-8')
 
 		# 인스턴스 변수 초기화
 		self.disk_info_label = None
@@ -72,7 +102,7 @@ class SettingsPopup(QDialog):
 
 		# 대표번호 입력필드
 		self.rep_number_input = QLineEdit()
-		self.rep_number_input.setText(self.config['Extension'].get('Rep_number', ''))
+		self.rep_number_input.setText(self.config['Extension'].get('rep_number', ''))
 
 		# AP 서버 IP 입력필드
 		self.ap_ip_input = QLineEdit()
@@ -292,7 +322,7 @@ class SettingsPopup(QDialog):
 		# 설정값 업데이트
 		settings_data = {
 			'Extension': {
-				'Rep_number': self.rep_number_input.text()
+				'rep_number': self.rep_number_input.text()
 			},
 			'Network': {
 				'ip': self.ip_combo.currentText(),

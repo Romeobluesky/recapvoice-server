@@ -18,8 +18,8 @@ if "!env_mode!"=="development" (
     )
     set "WORK_DIR=!dir_path!"
 ) else (
-    :: 배포 환경 경로
-    set "WORK_DIR=%ProgramFiles%\Recap Voice"
+    :: 배포 환경 경로 (x86)
+    set "WORK_DIR=%ProgramFiles(x86)%\Recap Voice"
 )
 
 :: nginx.exe 존재 여부 확인

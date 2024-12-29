@@ -9,6 +9,7 @@ import configparser
 import threading
 import asyncio
 import datetime
+import sys
 
 # 서드파티 라이브러리
 import requests
@@ -23,7 +24,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 
 # 로컬 모듈
-from config_loader import load_config
+from config_loader import load_config, get_wireshark_path
 from voip_monitor import VoipMonitor
 from packet_monitor import PacketMonitor
 from wav_merger import WavMerger
@@ -42,6 +43,33 @@ def kill_processes():
 
 # 프로그램 종료 시 kill_processes 함수 실행
 atexit.register(kill_processes)
+
+# 필요한 import 추가
+import win32gui
+import win32con
+import psutil
+import win32process
+
+def hide_console_window(process_name):
+    def callback(hwnd, pid):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            if process_name.lower() in title.lower():
+                win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+    
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            if process_name.lower() in proc.info['name'].lower():
+                win32gui.EnumWindows(callback, proc.info['pid'])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+def resource_path(relative_path):
+    """ 리소스 파일의 절대 경로를 가져오는 함수 """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath('.'), relative_path)
+
 class PacketFlowWidget(QWidget):
 	def __init__(self):
 		super().__init__()
@@ -265,7 +293,7 @@ class Dashboard(QMainWindow):
 		# 로고 영역
 		logo_label = QLabel()
 		logo_label.setAlignment(Qt.AlignCenter)
-		logo_pixmap = QPixmap("images/recapvoice_v3_ci.png")
+		logo_pixmap = QPixmap(resource_path("images/recapvoice_v3_ci.png"))
 		if not logo_pixmap.isNull():
 			# 원본 이미지의 가로/세로 비율 계산
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
@@ -890,12 +918,58 @@ class Dashboard(QMainWindow):
 
 	def show_packet_monitor(self):
 		try:
-			self.packet_window = PacketMonitor()
-			self.packet_window.show()
-			print("Packet Monitor 열림")
+			# PacketMonitor 시작
+			self.packet_monitor = PacketMonitor()
+			self.packet_monitor.show()
+			
+			# 배포 모드일 때만 콘솔창 숨김 처리
+			config = load_config()
+			if config.get('Environment', 'mode') == 'production':
+				wireshark_path = get_wireshark_path()
+				def hide_wireshark_windows():
+					try:
+						for proc in psutil.process_iter(['pid', 'name', 'exe']):
+							if proc.info['name'] in ['dumpcap.exe', 'tshark.exe']:
+								if proc.info['exe'] and wireshark_path in proc.info['exe']:
+									def enum_windows_callback(hwnd, _):
+										try:
+											_, pid = win32process.GetWindowThreadProcessId(hwnd)
+											if pid == proc.info['pid']:
+												style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+												style &= ~win32con.WS_VISIBLE
+												win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+												win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+										except:
+											pass
+										return True
+									win32gui.EnumWindows(enum_windows_callback, None)
+					except Exception as e:
+						print(f"Error hiding windows: {e}")
+
+				self.hide_console_timer = QTimer()
+				self.hide_console_timer.timeout.connect(hide_wireshark_windows)
+				self.hide_console_timer.start(100)
+				
 		except Exception as e:
 			print(f"Error opening Packet Monitor: {e}")
-			QMessageBox.warning(self, "오류", "Packet Monitor를 열 수 없니다.")
+			QMessageBox.warning(self, "오류", "Packet Monitor를 열 수 없습니다.")
+
+	def check_and_hide_console(self):
+		"""프로세스 확인 및 콘솔창 숨김"""
+		try:
+			processes = ['dumpcap.exe', 'tshark.exe']
+			found = False
+			
+			for proc in psutil.process_iter(['name']):
+				if proc.info['name'] in processes:
+					found = True
+					hide_console_window(proc.info['name'])
+			
+			if not found:  # 프로세스를 찾지 못하면 타이머 중지
+				self.hide_console_timer.stop()
+				
+		except Exception as e:
+			print(f"Error checking processes: {e}")
 
 	def show_settings(self):
 		try:
@@ -911,7 +985,7 @@ class Dashboard(QMainWindow):
 		try:
 			# 대표번호 업데이트
 			if 'Extension' in settings_data:
-				self.phone_number.setText(settings_data['Extension']['Rep_number'])
+				self.phone_number.setText(settings_data['Extension']['rep_number'])
 
 			# 네트워크 IP 업데이트
 			if 'Network' in settings_data:
@@ -2034,6 +2108,14 @@ class Dashboard(QMainWindow):
 		except Exception as e:
 			print(f"관리사이트 열기 실패: {e}")
 			QMessageBox.warning(self, "오류", "관리사이트를 열 수 없습니다.")
+
+	def start_packet_monitor(self):
+		# packet_monitor 실행 후 콘솔창 숨기기
+		self.packet_monitor = PacketMonitor()
+		self.packet_monitor.show()
+		# dumpcap.exe와 tshark.exe의 콘솔창 숨기기
+		hide_console_window('dumpcap.exe')
+		hide_console_window('tshark.exe')
 
 # FlowLayout 래스 추가 (Qt의 동적 그리 레이아웃 구현)
 class FlowLayout(QLayout):

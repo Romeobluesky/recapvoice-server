@@ -1,6 +1,6 @@
 !define APP_NAME "Recap Voice"
 !define VERSION "1.103"
-!define INSTALL_DIR "$PROGRAMFILES64\${APP_NAME}"
+!define INSTALL_DIR "$PROGRAMFILES\${APP_NAME}"
 
 Name "${APP_NAME}"
 OutFile "RecapVoice_Setup.exe"
@@ -21,7 +21,12 @@ VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "WinCore.nsh"
+!include "WinMessages.nsh"
 !include "nsisunz.nsh"
+!include "StrFunc.nsh"
+
+# 문자열 함수 초기화
+${StrRep}
 
 # MUI 설정
 !define MUI_ABORTWARNING
@@ -63,6 +68,12 @@ Function .onInit
         Abort
     ${EndIf}
 
+    # 32비트 레지스트리 뷰 설정
+    SetRegView 32
+    
+    # 32비트 프로그램이므로 자동으로 적절한 Program Files 경로 사용
+    StrCpy $INSTDIR "$PROGRAMFILES\${APP_NAME}"
+    
     # 이전 설치 확인
     ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString"
     StrCmp $R0 "" done
@@ -80,7 +91,7 @@ Function .onInit
 FunctionEnd
 
 Section "Prerequisites"
-   # Wireshark & TShark 설치
+   # Wireshark & TShark 설치 (64비트 버전)
    DetailPrint "Installing Wireshark and TShark..."
    File "prereq\Wireshark-4.4.2-x64.exe"
    ExecWait '"$INSTDIR\prereq\Wireshark-4.4.2-x64.exe" /S /componentstrue=TShark'
@@ -90,7 +101,7 @@ Section "Prerequisites"
    File "prereq\npcap-1.80.exe"
    ExecWait '"$INSTDIR\prereq\npcap-1.80.exe" /S'
    
-   # FFmpeg 설치
+   # FFmpeg 설치 (64비트 버전)
    DetailPrint "Installing FFmpeg..."
    CreateDirectory "C:\Program Files\ffmpeg"
    SetOutPath "C:\Program Files\ffmpeg"
@@ -106,32 +117,23 @@ SectionEnd
 Section "MainSection"
    SetOutPath "$INSTDIR"
    
-   # 메인 프로그램 파일 복사
+   # 공용 문서 폴더에 저장 디렉토리 생성
+   SetShellVarContext all
+   CreateDirectory "$DOCUMENTS\RecapVoiceRecord"
+   ExecWait 'cmd.exe /C icacls "$DOCUMENTS\RecapVoiceRecord" /grant Everyone:(OI)(CI)F'
+   
+   # dist 폴더의 settings.ini 파일을 먼저 복사
+   File "dist\Recap Voice\settings.ini"
+   
+   # settings.ini 내용 수정
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/PacketWaveRecord" "$DOCUMENTS\RecapVoiceRecord"
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "mode = development" "mode = production"
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/Work_state/packet_wave" "$INSTDIR"
+   
+   # 나머지 파일들 복사
    File /r "dist\Recap Voice\*.*"
-   File /r "mongodb"    # 필수 - 서비스 실행에 필요
-   File /r "nginx"      # 필수 - 서비스 실행에 필요
-   
-   # settings.ini 복사 및 수정
-   File "settings.ini"
-   
-   # 경로 수정
-   !define SAVE_PATH_FIND "D:/PacketWaveRecord"
-   !define SAVE_PATH_REPLACE "$DOCUMENTS\RecapVoiceRecord"
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${SAVE_PATH_FIND}" "${SAVE_PATH_REPLACE}"
-   
-   # DefaultDirectory 경로 수정
-   !define DIR_PATH_FIND "D:/Work_state/packet_wave"
-   !define DIR_PATH_REPLACE "$INSTDIR"
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${DIR_PATH_FIND}" "${DIR_PATH_REPLACE}"
-   
-   # Environment 모드 수정
-   !define MODE_FIND "mode = development"
-   !define MODE_REPLACE "mode = production"
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "${MODE_FIND}" "${MODE_REPLACE}"
-   
-   # start.bat를 루트에 복사
-   DetailPrint "Copying start.bat..."
-   File "start.bat"
+   File /r "mongodb"
+   File /r "nginx"
    
    # packetwave_client 폴더 복사
    DetailPrint "Copying packetwave_client..."
@@ -152,15 +154,14 @@ Section "MainSection"
    Push "C:\Program Files\ffmpeg\bin"
    Call AddToPath
    
+   # 환경변수 설정 후 로그 출력
+   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
+   DetailPrint "Updated PATH: $0"
+   
    # 바로가기 생성
    CreateDirectory "$SMPROGRAMS\${APP_NAME}"
    CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe"
    CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe"
-   
-   # 내문서 폴더에 저장 디렉토리 생성
-   SetShellVarContext current
-   CreateDirectory "$DOCUMENTS\RecapVoiceRecord"
-   ExecWait 'cmd.exe /C icacls "$DOCUMENTS\RecapVoiceRecord" /grant Everyone:(OI)(CI)F'
    
    WriteUninstaller "$INSTDIR\uninstall.exe"
    
@@ -170,6 +171,11 @@ Section "MainSection"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayIcon" "$INSTDIR\Recap Voice.exe"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "Publisher" "Xpower Networks"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayVersion" "${VERSION}"
+   
+   # 설치 완료 후 최종 PATH 기록
+   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
+   FileWrite $9 "Final PATH: $0$\r$\n"
+   FileClose $9
 SectionEnd
 
 Function ReplaceInFile
@@ -219,24 +225,49 @@ Function ReplaceInFile
 FunctionEnd
 
 Function AddToPath
-   Exch $0
-   Push $1
-   Push $2
-   Push $3
+   Exch $0  ; 추가할 경로
+   Push $1  ; 현재 PATH 값
+   Push $2  ; 임시 변수
+   Push $3  ; 전체 PATH 길이
    
+   # 현재 PATH 값 읽기
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   # 마지막에 세미콜론이 없으면 추가
-   ${If} $1 != ""
-       StrCpy $3 $1 1 -1
-       ${If} $3 != ";"
-           StrCpy $1 "$1;"
-       ${EndIf}
-   ${EndIf}
    
-   # 새 경로 추가
-   StrCpy $3 "$1$0;"
-   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $3
+   # 이미 경로가 존재하는지 확인
+   Push $1
+   Push "$0"
+   Call StrStr
+   Pop $2
+   StrCmp $2 "" NotFound Found
    
+   Found:
+      DetailPrint "'$0' 경로가 이미 PATH에 존재합니다."
+      Goto done
+      
+   NotFound:
+      # 마지막 문자가 세미콜론인지 확인
+      ${If} $1 != ""
+         StrCpy $2 $1 1 -1
+         ${If} $2 != ";"
+            StrCpy $1 "$1;"
+         ${EndIf}
+      ${EndIf}
+      
+      # 새 경로 추가 전 길이 체크
+      StrLen $3 "$1$0;"
+      ${If} $3 > 2047
+         DetailPrint "PATH가 너무 깁니다. 기존 경로를 정리합니다."
+         # 중복된 시스템 경로 제거
+         ${StrRep} $1 $1 ";%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\;%SYSTEMROOT%\System32\OpenSSH\;" ";"
+      ${EndIf}
+      
+      # 새 경로 추가
+      StrCpy $1 "$1$0;"
+      WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $1
+      SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+      DetailPrint "'$0' 경로가 PATH에 추가되었습니다."
+
+done:
    Pop $3
    Pop $2
    Pop $1
@@ -268,6 +299,15 @@ Function StrStr
 FunctionEnd
 
 Section "Uninstall"
+   # 실행 중인 프로세스 종료
+   DetailPrint "Terminating running processes..."
+   ExecWait 'taskkill /f /im "Recap Voice.exe" /t'
+   ExecWait 'taskkill /f /im "nginx.exe" /t'
+   ExecWait 'taskkill /f /im "mongod.exe" /t'
+   ExecWait 'taskkill /f /im "node.exe" /t'
+   Sleep 2000  # 프로세스가 완전히 종료되길 기다림
+
+   # 환경 변수 제거
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
    !insertmacro un.RemovePath "$INSTDIR\nginx"
    !insertmacro un.RemovePath "$INSTDIR\mongodb\bin"
@@ -276,20 +316,29 @@ Section "Uninstall"
    !insertmacro un.RemovePath "C:\Program Files\ffmpeg\bin"
    
    # 바탕화면 아이콘 제거
+   SetShellVarContext all
    Delete "$DESKTOP\${APP_NAME}.lnk"
+   Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"
+   RMDir "$SMPROGRAMS\${APP_NAME}"
    
+   # 모든 파일 삭제 시도
+   DetailPrint "Removing installation directory..."
    Delete "$INSTDIR\uninstall.exe"
-   RMDir /r "$INSTDIR"
-   RMDir /r "$SMPROGRAMS\${APP_NAME}"
+   RMDir /r /REBOOTOK "$INSTDIR"
    
-   # 내문서 폴더의 RecapVoiceRecord 삭제 여부 확인
+   # 녹음 파일 폴더 삭제 여부 확인
    MessageBox MB_YESNO "음성 녹음 파일이 저장된 폴더를 삭제하시겠습니까?" IDNO skip_delete_records
-   SetShellVarContext current
+   SetShellVarContext all
    RMDir /r "$DOCUMENTS\RecapVoiceRecord"
    skip_delete_records:
    
    # 제어판에서 프로그램 제거
    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
+   
+   # 폴더가 여전히 존재하는지 확인
+   ${If} ${FileExists} "$INSTDIR"
+       MessageBox MB_OK|MB_ICONINFORMATION "일부 파일이 사용 중이어서 완전히 제거되지 않았습니다.$\n시스템 재시작 후 자동으로 제거됩니다."
+   ${EndIf}
 SectionEnd
 
 Function un.RemoveFromPath
