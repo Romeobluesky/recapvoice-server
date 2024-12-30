@@ -53,14 +53,15 @@ import win32process
 def hide_console_window(process_name):
     def callback(hwnd, pid):
         if win32gui.IsWindowVisible(hwnd):
-            title = win32gui.GetWindowText(hwnd)
-            if process_name.lower() in title.lower():
+            _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
+            if found_pid == pid:
                 win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
     
-    for proc in psutil.process_iter(['pid', 'name']):
+    for proc in psutil.process_iter(['pid', 'name', 'exe']):
         try:
             if process_name.lower() in proc.info['name'].lower():
-                win32gui.EnumWindows(callback, proc.info['pid'])
+                if proc.info['exe'] and ('Program Files\\Wireshark' in proc.info['exe']):
+                    win32gui.EnumWindows(callback, proc.info['pid'])
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
@@ -114,8 +115,8 @@ class Dashboard(QMainWindow):
 
 	def __init__(self):
 		super().__init__()
-		self.setWindowIcon(QIcon("images/icon03.png"))
-		self.setWindowTitle("reCap VOICE")
+		self.setWindowIcon(QIcon("images/recapvoice_ico.ico"))
+		self.setWindowTitle("Recap Voice")
 
 		# Signal 연결
 		self.block_creation_signal.connect(self.create_block_in_main_thread)

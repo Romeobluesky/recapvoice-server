@@ -91,15 +91,19 @@ Function .onInit
 FunctionEnd
 
 Section "Prerequisites"
-   # Wireshark & TShark 설치 (64비트 버전)
+   # prereq 폴더 생성 및 설정
+   CreateDirectory "$INSTDIR\prereq"
+   SetOutPath "$INSTDIR\prereq"
+   
+   # Wireshark & TShark 설치
    DetailPrint "Installing Wireshark and TShark..."
    File "prereq\Wireshark-4.4.2-x64.exe"
-   ExecWait '"$INSTDIR\prereq\Wireshark-4.4.2-x64.exe" /S /componentstrue=TShark'
-   
+   ExecWait '"$INSTDIR\prereq\Wireshark-4.4.2-x64.exe" /desktopicon=no /D=C:\Program Files\Wireshark'
+
    # Npcap 설치
-   DetailPrint "Installing Npcap..."
-   File "prereq\npcap-1.80.exe"
-   ExecWait '"$INSTDIR\prereq\npcap-1.80.exe" /S'
+   #DetailPrint "Installing Npcap..."
+   #File "prereq\npcap-1.80.exe"
+   #ExecWait '"$INSTDIR\prereq\npcap-1.79.exe"'
    
    # FFmpeg 설치 (64비트 버전)
    DetailPrint "Installing FFmpeg..."
@@ -107,28 +111,28 @@ Section "Prerequisites"
    SetOutPath "C:\Program Files\ffmpeg"
    File /r "prereq\ffmpeg\*.*"
    
-   # FFmpeg bin 폴더가 있는지 확인
-   ${If} ${FileExists} "C:\Program Files\ffmpeg\bin\ffmpeg.exe"
-       Push "C:\Program Files\ffmpeg\bin"
-       Call AddToPath
-   ${EndIf}
+   # 설치 경로를 다시 INSTDIR로 복귀
+   SetOutPath "$INSTDIR"
 SectionEnd
 
 Section "MainSection"
    SetOutPath "$INSTDIR"
    
-   # 공용 문서 폴더에 저장 디렉토리 생성
+   # 설치 디렉토리 내에 녹음 파일 저장 디렉토리 생성
    SetShellVarContext all
-   CreateDirectory "$DOCUMENTS\RecapVoiceRecord"
-   ExecWait 'cmd.exe /C icacls "$DOCUMENTS\RecapVoiceRecord" /grant Everyone:(OI)(CI)F'
+   CreateDirectory "$INSTDIR\RecapVoiceRecord"
+   ExecWait 'cmd.exe /C icacls "$INSTDIR\RecapVoiceRecord" /grant Everyone:(OI)(CI)F'
    
    # dist 폴더의 settings.ini 파일을 먼저 복사
    File "dist\Recap Voice\settings.ini"
    
    # settings.ini 내용 수정
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/PacketWaveRecord" "$DOCUMENTS\RecapVoiceRecord"
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
    !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "mode = development" "mode = production"
    !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/Work_state/packet_wave" "$INSTDIR"
+   
+   # nginx.conf 파일의 경로도 수정
+   !insertmacro ReplaceInFile "$INSTDIR\nginx\conf\nginx.conf" "D:/Work_state/packet_wave" "$INSTDIR"
    
    # 나머지 파일들 복사
    File /r "dist\Recap Voice\*.*"
@@ -142,16 +146,19 @@ Section "MainSection"
    File /r "packetwave_client\*.*"
    SetOutPath "$INSTDIR"
    
-   # 환경변수 설정
-   Push "$INSTDIR\nginx"
-   Call AddToPath
-   Push "$INSTDIR\mongodb\bin"
-   Call AddToPath
+   # 환경변수 설정 (중요도 순서대로)
    Push "C:\Program Files\Npcap"
    Call AddToPath
    Push "C:\Program Files\Wireshark"
    Call AddToPath
    Push "C:\Program Files\ffmpeg\bin"
+   Call AddToPath
+   Push "$INSTDIR\nginx"
+   Call AddToPath
+   Push "$INSTDIR\mongodb\bin"
+   Call AddToPath
+   # Node.js 모듈 경로 추가
+   Push "$INSTDIR\packetwave_client\node_modules"
    Call AddToPath
    
    # 환경변수 설정 후 로그 출력
@@ -233,6 +240,11 @@ Function AddToPath
    # 현재 PATH 값 읽기
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
    
+   # 중복 경로 제거를 먼저 수행
+   ${StrRep} $1 $1 ";%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\;%SYSTEMROOT%\System32\OpenSSH\;" ";"
+   ${StrRep} $1 $1 ";;;" ";"
+   ${StrRep} $1 $1 ";;" ";"
+   
    # 이미 경로가 존재하는지 확인
    Push $1
    Push "$0"
@@ -257,12 +269,21 @@ Function AddToPath
       StrLen $3 "$1$0;"
       ${If} $3 > 2047
          DetailPrint "PATH가 너무 깁니다. 기존 경로를 정리합니다."
-         # 중복된 시스템 경로 제거
-         ${StrRep} $1 $1 ";%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\;%SYSTEMROOT%\System32\OpenSSH\;" ";"
+         # 불필요한 중복 경로 제거
+         ${StrRep} $1 $1 "C:\Program Files\Common Files\;" ""
+         ${StrRep} $1 $1 "C:\Program Files (x86)\Common Files\;" ""
       ${EndIf}
       
       # 새 경로 추가
       StrCpy $1 "$1$0;"
+      # 최종 길이 다시 체크
+      StrLen $3 $1
+      ${If} $3 > 2047
+         MessageBox MB_OK|MB_ICONEXCLAMATION "경고: PATH 환경변수가 너무 깁니다. 일부 경로가 추가되지 않을 수 있습니다."
+         DetailPrint "PATH 길이 초과: $3 characters"
+         Goto done
+      ${EndIf}
+      
       WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $1
       SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
       DetailPrint "'$0' 경로가 PATH에 추가되었습니다."
@@ -329,7 +350,7 @@ Section "Uninstall"
    # 녹음 파일 폴더 삭제 여부 확인
    MessageBox MB_YESNO "음성 녹음 파일이 저장된 폴더를 삭제하시겠습니까?" IDNO skip_delete_records
    SetShellVarContext all
-   RMDir /r "$DOCUMENTS\RecapVoiceRecord"
+   RMDir /r "$INSTDIR\RecapVoiceRecord"
    skip_delete_records:
    
    # 제어판에서 프로그램 제거
