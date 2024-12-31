@@ -328,15 +328,3 @@ RecapVoice_Setup.exe
 
 #Client
 packetwave_client/
-
-#Dist
-dist/
-
-#Temp
-.temp
-.tmp
-
-#Build
-build/
-
-.eslintrc.js

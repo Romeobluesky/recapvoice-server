@@ -517,13 +517,19 @@ class Dashboard(QMainWindow):
 		group.setMaximumHeight(400)
 		group.setStyleSheet("""
 			QGroupBox {
-				background-color: #2d2d2d;
+				background-color: #2d2d2d !important;
 				border: 1px solid #3a3a3a;
 				border-radius: 4px;
 				margin-top: 10px;
 				padding: 10px;
 				color: white;
 				font-weight: bold;
+			}
+			QScrollArea {
+				background-color: #2d2d2d !important;
+			}
+			QWidget#scrollContents {
+				background-color: #2d2d2d !important;
 			}
 		""")
 
@@ -1069,13 +1075,13 @@ class Dashboard(QMainWindow):
 				print(f"Status Line: {sip_layer.status_line}")
 				print(f"Status Code: {status_code}")
 
-				# 100 Trying 감지 시 즉시 ��록 생성
+				# 100 Trying 감지 시 즉시 블록 생성
 				if status_code == '100':
 					print("100 Trying 감지")
 					extension = self.extract_number(sip_layer.from_user)
-					if extension and len(extension) == 4 and extension[0] in ['1', '2', '3', '4']:
+					if extension and len(extension) <= 7 and extension[0] in ['1', '2', '3', '4']:
 						print(f"내선번호 감지: {extension}")
-						# 대기중 ���록 생성
+						# 대기중 블록 생성
 						if extension:  # extension이 유효한 경우에만 시그널 발생
 							self.block_update_signal.emit(extension, "대기중", "")
 							print(f"대기중 블록 생성 요청: {extension}")
@@ -2104,7 +2110,7 @@ class Dashboard(QMainWindow):
 			ip_address = config.get('Network', 'ip', fallback='127.0.0.1')
 
 			# URL 생성 및 웹브라우저로 열기
-			url = f"http://{ip_address}"
+			url = f"http://{ip_address}:3000"
 			QDesktopServices.openUrl(QUrl(url))
 		except Exception as e:
 			print(f"관리사이트 열기 실패: {e}")
