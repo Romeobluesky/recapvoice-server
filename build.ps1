@@ -53,6 +53,17 @@ Write-Host "Copying files to dist folder..."
 if (Test-Path "settings.ini") {
     Copy-Item "settings.ini" -Destination "$distPath\settings.ini" -Force
     Write-Host "settings.ini copied successfully"
+    
+    # settings.ini 수정
+    $settingsPath = "$distPath\settings.ini"
+    Write-Host "Modifying settings.ini for production..."
+    $content = Get-Content $settingsPath -Raw
+    $installPath = "C:\Program Files (x86)\Recap Voice"
+    $content = $content -replace "D:\\Work_state\\packet_wave\\PacketWaveRecord", "$installPath\RecapVoiceRecord"
+    $content = $content -replace "mode = development", "mode = production"
+    $content = $content -replace "D:\\Work_state\\packet_wave", "$installPath"
+    Set-Content $settingsPath $content -Force
+    Write-Host "settings.ini modified successfully for production environment"
 } else {
     Write-Host "settings.ini not found"
 }
