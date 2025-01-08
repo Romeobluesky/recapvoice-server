@@ -126,7 +126,7 @@ Section "MainSection"
    # dist 폴더의 settings.ini 파일을 먼저 복사
    File "dist\Recap Voice\settings.ini"
    
-   # settings.ini 내용 수정
+   # settings.ini 내용 수정 2025-01-07 주석처리
    #!insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave\PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
    #!insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave" "$INSTDIR"
    
