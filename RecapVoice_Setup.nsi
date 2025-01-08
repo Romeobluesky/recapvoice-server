@@ -1,5 +1,5 @@
 !define APP_NAME "Recap Voice"
-!define VERSION "1.103"
+!define VERSION "1.203"
 !define INSTALL_DIR "$PROGRAMFILES\${APP_NAME}"
 
 Name "${APP_NAME}"
@@ -8,7 +8,7 @@ InstallDir "${INSTALL_DIR}"
 RequestExecutionLevel admin
 
 # 버전 정보 추가
-VIProductVersion "1.1.0.3"
+VIProductVersion "1.2.0.3"
 VIAddVersionKey "ProductName" "Recap Voice"
 VIAddVersionKey "CompanyName" "Xpower Networks"
 VIAddVersionKey "FileVersion" "1.103"
@@ -127,12 +127,11 @@ Section "MainSection"
    File "dist\Recap Voice\settings.ini"
    
    # settings.ini 내용 수정
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/Work_state/packet_wave/PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "mode = development" "mode = production"
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/Work_state/packet_wave" "$INSTDIR"
+   #!insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave\PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
+   #!insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave" "$INSTDIR"
    
    # nginx.conf 파일의 경로도 수정
-   !insertmacro ReplaceInFile "$INSTDIR\nginx\conf\nginx.conf" "D:/Work_state/packet_wave" "$INSTDIR"
+   !insertmacro ReplaceInFile "$INSTDIR\nginx\conf\nginx.conf" "D:\Work_state\packet_wave" "$INSTDIR"
    
    # 나머지 파일들 복사
    File /r "dist\Recap Voice\*.*"
