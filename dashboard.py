@@ -50,21 +50,6 @@ import win32con
 import psutil
 import win32process
 
-def hide_console_window(process_name):
-    def callback(hwnd, pid):
-        if win32gui.IsWindowVisible(hwnd):
-            _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-            if found_pid == pid:
-                win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-    
-    for proc in psutil.process_iter(['pid', 'name', 'exe']):
-        try:
-            if process_name.lower() in proc.info['name'].lower():
-                if proc.info['exe'] and ('Program Files\\Wireshark' in proc.info['exe']):
-                    win32gui.EnumWindows(callback, proc.info['pid'])
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-
 def resource_path(relative_path):
     """ 리소스 파일의 절대 경로를 가져오는 함수 """
     if hasattr(sys, '_MEIPASS'):
@@ -115,7 +100,7 @@ class Dashboard(QMainWindow):
 
 	def __init__(self):
 		super().__init__()
-		self.setWindowIcon(QIcon("images/recapvoice_ico.ico"))
+		self.setWindowIcon(QIcon(resource_path("images/recapvoice_ico.ico")))  # resource_path 함수 사용
 		self.setWindowTitle("Recap Voice")
 
 		# Signal 연결
@@ -172,6 +157,34 @@ class Dashboard(QMainWindow):
 			print("MongoDB 연결 성공")
 		except Exception as e:
 			print(f"MongoDB 연결 실패: {e}")
+
+		# 배포 모드일 때만 콘솔창 숨김 처리
+		config = load_config()
+		if config.get('Environment', 'mode') == 'production':
+			wireshark_path = get_wireshark_path()
+			def hide_wireshark_windows():
+				try:
+					for proc in psutil.process_iter(['pid', 'name', 'exe']):
+						if proc.info['name'] in ['dumpcap.exe', 'tshark.exe']:
+							if proc.info['exe'] and wireshark_path in proc.info['exe']:
+								def enum_windows_callback(hwnd, _):
+									try:
+										_, pid = win32process.GetWindowThreadProcessId(hwnd)
+										if pid == proc.info['pid']:
+											style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+											style &= ~win32con.WS_VISIBLE
+											win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+											win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+									except:
+										pass
+									return True
+								win32gui.EnumWindows(enum_windows_callback, None)
+				except Exception as e:
+					print(f"Error hiding windows: {e}")
+
+			self.hide_console_timer = QTimer()
+			self.hide_console_timer.timeout.connect(hide_wireshark_windows)
+			self.hide_console_timer.start(100)
 
 	def _init_ui(self):
 		# 메인 위젯 설정
@@ -320,10 +333,10 @@ class Dashboard(QMainWindow):
 
 		# 버튼 생성 및 클릭 이벤트 연결
 		voip_btn = self._create_menu_button("VOIP MONITOR", "images/voip_icon.png")
-		voip_btn.clicked.connect(self.show_voip_monitor)
+		voip_btn.clicked.connect(self.show_voip_monitor)  # show_voip_monitor와 연결
 
 		packet_btn = self._create_menu_button("PACKET MONITOR", "images/packet_icon.png")
-		packet_btn.clicked.connect(self.show_packet_monitor)
+		packet_btn.clicked.connect(self.show_packet_monitor)  # show_packet_monitor와 연결
 
 		menu_layout.addWidget(voip_btn)
 		menu_layout.addWidget(packet_btn)
@@ -432,7 +445,7 @@ class Dashboard(QMainWindow):
 		disk_layout.addWidget(self.disk_usage_label)
 
 		disk_group.setLayout(disk_layout)
-		bottom_layout.addWidget(disk_group, 70)
+		bottom_layout.addWidget(disk_group, 80)
 
 		# 회선상태 섹션 (30%)
 		led_group = QGroupBox('회선 상태')
@@ -440,9 +453,8 @@ class Dashboard(QMainWindow):
 		led_layout.addWidget(self._create_led_with_text('회선 Init ', 'yellow'))
 		led_layout.addWidget(self._create_led_with_text('대 기 중 ', 'blue'))
 		led_layout.addWidget(self._create_led_with_text('녹 취 중 ', 'green'))
-		led_layout.addWidget(self._create_led_with_text('녹취안됨 ', 'red'))
 		led_group.setLayout(led_layout)
-		bottom_layout.addWidget(led_group, 30)
+		bottom_layout.addWidget(led_group, 20)
 
 		layout.addLayout(bottom_layout)
 
@@ -684,12 +696,11 @@ class Dashboard(QMainWindow):
 	def _get_led_color(self, state):
 		"""LED 상태별 색상 반환"""
 		colors = {
-			"회선 연결": "#FFB800",  # 란색
-			"대기중": "#18508F",     # 파란색
-			"녹취중": "#00FF00",     # 초록색
-			"녹취안됨": "#FFB800",   # 노란색
+			"회선 연결": "yellow",  # yellow
+			"대기중": "blue",     # blue
+			"녹취중": "green",     # green
 		}
-		return colors.get(state, "#666666")  # 기본값은 회색
+		return colors.get(state, "yellow")  # 기본값은 회색
 
 	def _create_log_list(self):
 		"""VoIP 모니터링 리스트 생성"""
@@ -846,7 +857,7 @@ class Dashboard(QMainWindow):
 
 		# 그림자 효과 추가
 		shadow = QGraphicsDropShadowEffect()
-		shadow.setBlurRadius(3)
+		shadow.setBlurRadius(0)
 		shadow.setColor(QColor(color))
 		shadow.setOffset(0, 0)
 		led.setGraphicsEffect(shadow)
@@ -915,10 +926,39 @@ class Dashboard(QMainWindow):
 
 	# 팝업 창을 띄우는 메서드들 추가
 	def show_voip_monitor(self):
+		# VOIP Monitor 열기
 		try:
 			self.voip_window = VoipMonitor()
 			self.voip_window.show()
-			print("VOIP Monitor 열림")
+
+			# 배포 모드일 때만 콘솔창 숨김 처리
+			config = load_config()
+			if config.get('Environment', 'mode') == 'production':
+				wireshark_path = get_wireshark_path()
+				def hide_wireshark_windows():
+					try:
+						for proc in psutil.process_iter(['pid', 'name', 'exe']):
+							if proc.info['name'] in ['dumpcap.exe', 'tshark.exe']:
+								if proc.info['exe'] and wireshark_path in proc.info['exe']:
+									def enum_windows_callback(hwnd, _):
+										try:
+											_, pid = win32process.GetWindowThreadProcessId(hwnd)
+											if pid == proc.info['pid']:
+												style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+												style &= ~win32con.WS_VISIBLE
+												win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+												win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+										except:
+											pass
+										return True
+									win32gui.EnumWindows(enum_windows_callback, None)
+					except Exception as e:
+						print(f"Error hiding windows: {e}")
+
+				self.hide_console_timer = QTimer()
+				self.hide_console_timer.timeout.connect(hide_wireshark_windows)
+				self.hide_console_timer.start(100)
+
 		except Exception as e:
 			print(f"Error opening VOIP Monitor: {e}")
 			QMessageBox.warning(self, "오류", "VOIP Monitor를 열 수 없습니다.")
@@ -960,23 +1000,6 @@ class Dashboard(QMainWindow):
 		except Exception as e:
 			print(f"Error opening Packet Monitor: {e}")
 			QMessageBox.warning(self, "오류", "Packet Monitor를 열 수 없습니다.")
-
-	def check_and_hide_console(self):
-		"""프로세스 확인 및 콘솔창 숨김"""
-		try:
-			processes = ['dumpcap.exe', 'tshark.exe']
-			found = False
-			
-			for proc in psutil.process_iter(['name']):
-				if proc.info['name'] in processes:
-					found = True
-					hide_console_window(proc.info['name'])
-			
-			if not found:  # 프로세스를 찾지 못하면 타이머 중지
-				self.hide_console_timer.stop()
-				
-		except Exception as e:
-			print(f"Error checking processes: {e}")
 
 	def show_settings(self):
 		try:
@@ -1079,7 +1102,8 @@ class Dashboard(QMainWindow):
 				if status_code == '100':
 					print("100 Trying 감지")
 					extension = self.extract_number(sip_layer.from_user)
-					if extension and len(extension) <= 7 and extension[0] in ['1', '2', '3', '4']:
+					# 여기를 4자리로 제한
+					if extension and len(extension) == 4 and extension[0] in ['1', '2', '3', '4', '5', '6', '7', '8', '9']:
 						print(f"내선번호 감지: {extension}")
 						# 대기중 블록 생성
 						if extension:  # extension이 유효한 경우에만 시그널 발생
@@ -1129,7 +1153,7 @@ class Dashboard(QMainWindow):
 						'status': '시도중',
 						'from_number': from_number,
 						'to_number': to_number,
-						'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신',
+						'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
 						'media_endpoints': []
 					}
 					self.update_call_status(call_id, '시도중')
@@ -1174,7 +1198,7 @@ class Dashboard(QMainWindow):
 				'status': '시도중',
 				'from_number': from_number,
 				'to_number': to_number,
-				'direction': '수신' if to_number.startswith(('1','2','3','4')) else '발신',
+				'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
 				'media_endpoints': []
 			}
 
@@ -1214,7 +1238,7 @@ class Dashboard(QMainWindow):
 			to_number = call_info['to_number']
 
 			# 내선번호 확인
-			is_extension = lambda num: num.startswith(('1', '2', '3', '4')) and len(num) == 4
+			is_extension = lambda num: num.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) and len(num) == 4
 			return from_number if is_extension(from_number) else to_number if is_extension(to_number) else None
 		return None
 
@@ -1354,21 +1378,23 @@ class Dashboard(QMainWindow):
 			return None
 
 	def extract_number(self, sip_user):
-		"""SIP User 필드에서 화번호 추 (전체 번호 반환)"""
+		"""SIP User 필드에서 전화번호 추출"""
 		try:
 			if not sip_user:
 				return ''
 
 			sip_user = str(sip_user)
 
-			# sip: 제거 및 전체 번호 추
+			# sip: 제거 및 전체 번호 추출
 			if 'sip:' in sip_user:
 				number = sip_user.split('sip:')[1].split('@')[0]
 				return ''.join(c for c in number if c.isdigit())
 
-			# Q 문자로 분리된 경우 처리
-			if 'Q' in sip_user:
-				return sip_user.split('Q')[1]
+			# 109 다음에 오는 알파벳 문자로 분리
+			if '109' in sip_user:
+				for i, char in enumerate(sip_user):
+					if i > sip_user.index('109') + 2 and char.isalpha():
+						return sip_user[i+1:]  # 알파벳 다음의 숫자들만 반환
 
 			# 그 외의 경우 숫자만 추출하여 반환
 			return ''.join(c for c in sip_user if c.isdigit())
@@ -2115,14 +2141,6 @@ class Dashboard(QMainWindow):
 		except Exception as e:
 			print(f"관리사이트 열기 실패: {e}")
 			QMessageBox.warning(self, "오류", "관리사이트를 열 수 없습니다.")
-
-	def start_packet_monitor(self):
-		# packet_monitor 실행 후 콘솔창 숨기기
-		self.packet_monitor = PacketMonitor()
-		self.packet_monitor.show()
-		# dumpcap.exe와 tshark.exe의 콘솔창 숨기기
-		hide_console_window('dumpcap.exe')
-		hide_console_window('tshark.exe')
 
 # FlowLayout 래스 추가 (Qt의 동적 그리 레이아웃 구현)
 class FlowLayout(QLayout):

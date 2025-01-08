@@ -328,3 +328,6 @@ RecapVoice_Setup.exe
 
 #Client
 packetwave_client/
+
+#PacketWaveRecord
+PacketWaveRecord/

@@ -185,8 +185,15 @@ def analyze_sip(packet, voip_monitor):
 							
 						log_message("정보", f"추출된 수신번호: {to_number}")
 						
+						# 내선번호 판단 함수 추가
+						def is_extension(number):
+							"""내선번호 여부 확인 (4자리 && 1-9로 시작)"""
+							return (number and 
+									len(str(number)) == 4 and 
+									str(number)[0] in ['1','2','3','4','5','6','7','8','9'])
+
 						# 방향 결정
-						direction = '수신' if to_number and str(to_number)[0] in ['1','2','3','4'] else '발신'
+						direction = '수신' if is_extension(to_number) else '발신'
 						
 						# active_calls에 저장
 						voip_monitor.active_calls[call_id] = {

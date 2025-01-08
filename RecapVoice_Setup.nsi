@@ -100,10 +100,10 @@ Section "Prerequisites"
    File "prereq\Wireshark-4.4.2-x64.exe"
    ExecWait '"$INSTDIR\prereq\Wireshark-4.4.2-x64.exe" /desktopicon=no /D=C:\Program Files\Wireshark'
 
-   # Npcap 설치
-   #DetailPrint "Installing Npcap..."
-   #File "prereq\npcap-1.80.exe"
-   #ExecWait '"$INSTDIR\prereq\npcap-1.79.exe"'
+   # Node.js 설치
+   DetailPrint "Installing Node.js..."
+   File "prereq\node-v20.11.1-x64.msi"
+   ExecWait '"msiexec" /i "$INSTDIR\prereq\node-v20.11.1-x64.msi" /quiet /norestart'
    
    # FFmpeg 설치 (64비트 버전)
    DetailPrint "Installing FFmpeg..."
@@ -127,7 +127,7 @@ Section "MainSection"
    File "dist\Recap Voice\settings.ini"
    
    # settings.ini 내용 수정
-   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/Work_state/packet_wave/PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
    !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "mode = development" "mode = production"
    !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:/Work_state/packet_wave" "$INSTDIR"
    
@@ -156,6 +156,9 @@ Section "MainSection"
    Push "$INSTDIR\nginx"
    Call AddToPath
    Push "$INSTDIR\mongodb\bin"
+   Call AddToPath
+   # Node.js 경로 추가
+   Push "C:\Program Files\nodejs\"
    Call AddToPath
    # Node.js 모듈 경로 추가
    Push "$INSTDIR\packetwave_client\node_modules"
