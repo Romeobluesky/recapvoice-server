@@ -16,6 +16,7 @@ import time
 # 서드파티 라이브러리
 import requests
 import pyshark
+from pydub import AudioSegment
 
 # PySide6 라이브러리
 from PySide6.QtWidgets import *
@@ -193,6 +194,28 @@ class Dashboard(QMainWindow):
 
 		# 창 닫기 이벤트 처리를 위한 설정
 		self.setAttribute(Qt.WA_DeleteOnClose, False)
+
+		# 클라이언트 서버 자동 시작
+		try:
+			# start.bat 실행
+			subprocess.Popen(['start.bat'], shell=True)
+			
+			# ON 버튼 색상 변경
+			self.on_btn.setStyleSheet("""
+				QPushButton {
+					background-color: #FF0000;
+					color: white;
+					border: none;
+					border-radius: 4px;
+					min-height: 35px;
+				}
+				QPushButton:hover {
+					background-color: #CC0000;
+				}
+			""")
+			print("클라이언트 서버가 자동으로 시작되었습니다.")
+		except Exception as e:
+			print(f"클라이언트 서버 자동 시작 실패: {e}")
 
 	def _init_ui(self):
 		# 메인 위젯 설정
@@ -1169,7 +1192,7 @@ class Dashboard(QMainWindow):
 				elif 'BYE' in sip_layer.request_line:
 					if call_id in self.active_calls:
 						self.update_call_status(call_id, '통화종료', '정상종료')
-						# 내선번호 ���기
+						# 내선번호 대기중 블록 생성
 						extension = self.get_extension_from_call(call_id)
 						if extension:  # extension이 유효한 경우에만 시그널 발생
 							self.block_update_signal.emit(extension, "대기중", "")
@@ -1729,13 +1752,13 @@ class Dashboard(QMainWindow):
 								# WAV 파일 병합
 								merged_file = self.wav_merger.merge_and_save(
 									stream_info_in['phone_ip'],
-										timestamp,
-										timestamp,
-										local_num,
-										remote_num,
-										stream_info_in['filepath'],
-										stream_info_out['filepath'],
-										file_dir
+									timestamp,
+									timestamp,
+									local_num,
+									remote_num,
+									stream_info_in['filepath'],
+									stream_info_out['filepath'],
+									file_dir
 								)
 
 								if merged_file:
@@ -2137,6 +2160,12 @@ class Dashboard(QMainWindow):
 				sort=[("id", -1)]  # id 필드 기준 내림차순 정렬
 			)
 			next_id = 1 if max_id_doc is None else max_id_doc["id"] + 1
+			# 한국 시간으로 변환
+			now_kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+			# 재생 시간 계산
+			audio = AudioSegment.from_wav(merged_file)
+			duration_seconds = len(audio) / 1000.0  # milliseconds to seconds
+			duration_formatted = str(datetime.timedelta(seconds=int(duration_seconds)))
 
 			filesize = os.path.getsize(merged_file)
 			doc = {
@@ -2149,12 +2178,13 @@ class Dashboard(QMainWindow):
 				"filestype": "wav",               # 파일 타입
 				"files_text": html_file,          # HTML 파일 전체 경로
 				"down_count": 0,                  # 다운로드 카운트 초기값
-				"created_at": datetime.datetime.utcnow()  # UTC 시간으로 저장
+				"created_at": now_kst,  # utcnow() 대신 now(UTC) 사용
+				"playtime": duration_formatted,   # 재생 시간 (HH:MM:SS 형식)
 			}
 
 			result = self.filesinfo.insert_one(doc)
-			print(f"MongoDB 저장 완료: {result.inserted_id}")
-
+			print(f"MongoDB 저장 완료: {result.inserted_id} (재생시간: {duration_formatted})")
+			
 		except Exception as e:
 			print(f"MongoDB 저장 중 오류: {e}")
 

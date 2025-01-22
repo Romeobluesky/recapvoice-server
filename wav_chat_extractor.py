@@ -86,14 +86,19 @@ class WavChatExtractor:
 		try:
 			# 날짜 형식 추가
 			today = datetime.datetime.now().strftime("%Y%m%d")
+			datetime_str = datetime.datetime.now().strftime("%Y년 %m월 %d일 %H시 %M분 %S초")
 			
-			# HTML 파일명: {time}_CHAT_{from}_{to}_{yyyymmdd}.html
+			# HTML 파일명 생성
 			html_filename = f"{time_str}_CHAT_{local_num}_{remote_num}_{today}.html"
 			html_filepath = os.path.join(save_dir, html_filename)
 
+			print(f"음성 인식 시작...")
+			texts1 = self.extract_audio_text_by_voice_activity(in_file)
+			texts2 = self.extract_audio_text_by_voice_activity(out_file)
+			print(f"음성 인식 완료")
+
 			# HTML 파일 생성
 			with open(html_filepath, 'w', encoding='utf-8') as f:
-				# HTML 내용 작성
 				f.write(f"""
 				<!DOCTYPE html>
 				<html>
@@ -110,10 +115,18 @@ class WavChatExtractor:
 							border-radius: 10px;
 						}}
 						.chat-header {{
-							text-align: center;
+							display: flex;
+							justify-content: space-between;
+							align-items: center;
 							padding: 10px;
 							border-bottom: 1px solid #ddd;
 							margin-bottom: 20px;
+						}}
+						.call-info {{
+							text-align: left;
+						}}
+						.datetime-info {{
+							text-align: right;
 						}}
 						.message {{
 							margin: 10px 0;
@@ -145,14 +158,51 @@ class WavChatExtractor:
 				<body>
 					<div class="chat-container">
 						<div class="chat-header">
-							<h2>통화 내용</h2>
-							<p>발신번호: {local_num}</p>
-							<p>수신번호: {remote_num}</p>
-							<p>통화시간: {time_str}</p>
-							<p>통화날짜: {today}</p>
+							<div class="call-info">
+								<h2>통화 내용</h2>
+								<p>{local_num} → {remote_num}</p>
+							</div>
+							<div class="datetime-info">
+								<p>통화날짜일시: {datetime_str}</p>
+							</div>
 						</div>
 						<div class="chat-content">
-							<!-- 채팅 내용이 여기에 들어갑니다 -->
+				""")
+
+				# 두 음성 파일의 텍스트를 시간순으로 정렬
+				all_texts = []
+				for time, text in texts1:
+					all_texts.append(('receiver', time, text, local_num))
+				for time, text in texts2:
+					all_texts.append(('sender', time, text, remote_num))
+
+				# 시간순 정렬
+				all_texts.sort(key=lambda x: x[1])
+
+				# 메시지 추가
+				for msg_type, time, text, number in all_texts:
+					time_str = str(timedelta(seconds=time))
+					if msg_type == 'receiver':
+						f.write(f"""
+							<div class="message receiver">
+								<div>수신: {number}</div>
+								<div class="content">{text}</div>
+								<div class="timestamp">{time_str}</div>
+							</div>
+							<div class="clearfix"></div>
+						""")
+					else:
+						f.write(f"""
+							<div class="message sender">
+								<div>발신: {number}</div>
+								<div class="content">{text}</div>
+								<div class="timestamp">{time_str}</div>
+							</div>
+							<div class="clearfix"></div>
+						""")
+
+				# HTML 푸터 작성
+				f.write("""
 						</div>
 					</div>
 				</body>
