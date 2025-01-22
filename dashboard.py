@@ -10,6 +10,7 @@ import threading
 import asyncio
 import datetime
 import sys
+import re
 
 # 서드파티 라이브러리
 import requests
@@ -1351,30 +1352,75 @@ class Dashboard(QMainWindow):
 			return False
 
 	def determine_stream_direction(self, packet, call_id):
-		"""RTP 스트림 방향 결정"""
+		"""RTP 패킷의 방향 결정"""
 		try:
+			if call_id not in self.active_calls:
+				return None
+
+			call_info = self.active_calls[call_id]
+			
+			# media_endpoints 초기화
+			if 'media_endpoints' not in call_info:
+				call_info['media_endpoints'] = []
+			if 'media_endpoints_set' not in call_info:
+				call_info['media_endpoints_set'] = {
+					'local': set(),
+					'remote': set()
+				}
+
 			src_ip = packet.ip.src
 			dst_ip = packet.ip.dst
-			src_port = int(packet.udp.srcport)
-			dst_port = int(packet.udp.dstport)
-
-			# Call-ID에서 IP 주소 추출
-			pbx_ip = call_id.split('@')[1].split(';')[0].split(':')[0]
+			
+			# Call-ID에서 IP 주소 추출 (안전하게 처리)
+			try:
+				pbx_ip = call_id.split('@')[1].split(';')[0].split(':')[0]
+			except:
+				print(f"PBX IP 추출 실패 - Call-ID: {call_id}")
+				return None
+				
+			src_endpoint = f"{src_ip}:{packet.udp.srcport}"
+			dst_endpoint = f"{dst_ip}:{packet.udp.dstport}"
 
 			# 소스가 PBX IP인 경우 = OUT
 			if src_ip == pbx_ip:
-				print(f"OUT 패킷: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
+				# 기존 리스트에 추가
+				endpoint_info = {"ip": src_ip, "port": packet.udp.srcport}
+				if endpoint_info not in call_info['media_endpoints']:
+					call_info['media_endpoints'].append(endpoint_info)
+				# 새로운 세트에 추가
+				call_info['media_endpoints_set']['local'].add(src_endpoint)
+				call_info['media_endpoints_set']['remote'].add(dst_endpoint)
+				print(f"OUT 패킷: {src_endpoint} -> {dst_endpoint}")
 				return "OUT"
+				
 			# 목적지가 PBX IP인 경우 = IN
 			elif dst_ip == pbx_ip:
-				print(f"IN 패킷: {src_ip}:{src_port} -> {dst_ip}:{dst_port}")
+				# 기존 리스트에 추가
+				endpoint_info = {"ip": dst_ip, "port": packet.udp.dstport}
+				if endpoint_info not in call_info['media_endpoints']:
+					call_info['media_endpoints'].append(endpoint_info)
+				# 새로운 세트에 추가
+				call_info['media_endpoints_set']['local'].add(dst_endpoint)
+				call_info['media_endpoints_set']['remote'].add(src_endpoint)
+				print(f"IN 패킷: {src_endpoint} -> {dst_endpoint}")
 				return "IN"
+			
+			# 이미 알고 있는 엔드포인트를 기반으로 방향 결정
+			if src_endpoint in call_info['media_endpoints_set']['local']:
+				return "OUT"
+			elif src_endpoint in call_info['media_endpoints_set']['remote']:
+				return "IN"
+			elif dst_endpoint in call_info['media_endpoints_set']['local']:
+				return "IN"
+			elif dst_endpoint in call_info['media_endpoints_set']['remote']:
+				return "OUT"
 
-			print(f"방향 결정 실패 - SRC: {src_ip}:{src_port}, DST: {dst_ip}:{dst_port}")
 			return None
 
 		except Exception as e:
-			print(f"스트림 방향 결정 중 오류: {e}")
+			print(f"방향 결정 중 오류: {e}")
+			import traceback
+			print(traceback.format_exc())
 			return None
 
 	def extract_number(self, sip_user):
@@ -1410,18 +1456,30 @@ class Dashboard(QMainWindow):
 			dst_ip = packet.ip.dst
 			src_port = int(packet.udp.srcport)
 			dst_port = int(packet.udp.dstport)
+			
+			src_endpoint = f"{src_ip}:{src_port}"
+			dst_endpoint = f"{dst_ip}:{dst_port}"
 
-			# self.active_calls에서 이 RTP 스트림과 칭������는 Call-ID 찾기
+			# active_calls에서 이 RTP 스트림과 매칭되는 Call-ID 찾기
 			for call_id, call_info in self.active_calls.items():
-				if "media_endpoints" in call_info:
+				if "media_endpoints_set" in call_info:  # 새로운 구조 사용
+					if (src_endpoint in call_info["media_endpoints_set"]["local"] or 
+						src_endpoint in call_info["media_endpoints_set"]["remote"] or
+						dst_endpoint in call_info["media_endpoints_set"]["local"] or
+						dst_endpoint in call_info["media_endpoints_set"]["remote"]):
+						return call_id
+				# 기존 구조도 체크
+				elif "media_endpoints" in call_info:
 					for endpoint in call_info["media_endpoints"]:
-						if (src_ip == endpoint["ip"] and src_port == endpoint["port"]) or \
-							 (dst_ip == endpoint["ip"] and dst_port == endpoint["port"]):
+						if (src_ip == endpoint.get("ip") and src_port == endpoint.get("port")) or \
+						   (dst_ip == endpoint.get("ip") and dst_port == endpoint.get("port")):
 							return call_id
 			return None
 
 		except Exception as e:
-			print(f"RTP Call-ID 칭 오류: {e}")
+			print(f"RTP Call-ID 매칭 오류: {e}")
+			import traceback
+			print(traceback.format_exc())
 			return None
 
 	def handle_sip_response(self, status_code, call_id, sip_layer):
@@ -1630,7 +1688,6 @@ class Dashboard(QMainWindow):
 		"""통화 상태 업데이트"""
 		try:
 			if call_id in self.active_calls:
-				# 기존 상태 업데이트 코드...
 				self.active_calls[call_id].update({
 					'status': new_status,
 					'result': result
@@ -1639,113 +1696,74 @@ class Dashboard(QMainWindow):
 				if new_status == '통화종료':
 					self.active_calls[call_id]['end_time'] = datetime.datetime.now()
 
-					# WAV 파일 저장 처리
-					wav_files = {'IN': None, 'OUT': None}
-					for direction in ['IN', 'OUT']:
-						recording_key = f"recording_info_{direction}"
-						if recording_key in self.active_calls[call_id]:
-								recording_info = self.active_calls[call_id][recording_key]
-								if not recording_info.get('saved') and recording_info.get('audio_data'):
-									try:
-										self.save_wav_file(
-											recording_info['filepath'],
-											recording_info['audio_data'],
-											recording_info.get('payload_type', 8)
-										)
-										recording_info['saved'] = True
-										wav_files[direction] = recording_info['filepath']
-										print(f"녹음 완료 ({direction}): {recording_info['filepath']}")
-									except Exception as e:
-										print(f"WAV 파일 저장 중 오류 ({direction}): {e}")
+					# 스트림 종료 처리
+					if hasattr(self, 'stream_manager'):
+						stream_info_in = None
+						stream_info_out = None
+						
+						# IN 스트림 종료
+						in_key = f"{call_id}_IN"
+						if in_key in self.stream_manager.active_streams:
+							stream_info_in = self.stream_manager.finalize_stream(in_key)
+						
+						# OUT 스트림 종료
+						out_key = f"{call_id}_OUT"
+						if out_key in self.stream_manager.active_streams:
+							stream_info_out = self.stream_manager.finalize_stream(out_key)
 
-					# 두 WAV 파일이 모두 저장된 경우에만 병합 및 텍스트 변환 진행
-					if wav_files['IN'] and wav_files['OUT']:
-						try:
-							# 파일 경로에서 필요한 정보 추출
-							file_path = wav_files['IN']
-							path_parts = os.path.normpath(file_path).split(os.sep)
-							date_dir = path_parts[-4]      # 날짜 (20241214)
-							ip = path_parts[-3]            # IP (192.168.0.55)
-							timestamp_dir = path_parts[-2] # 시간 (154637)
-							timestamp = timestamp_dir      # 시간값 그대로 사용
+						# WAV 파일 병합 및 HTML 생성
+						if stream_info_in and stream_info_out:
+							try:
+								file_dir = stream_info_in['file_dir']
+								timestamp = os.path.basename(file_dir)
+								local_num = self.active_calls[call_id]['from_number']
+								remote_num = self.active_calls[call_id]['to_number']
 
-							# 발신/수신 번호 가져오기
-							local_num = self.active_calls[call_id]['from_number']
-							remote_num = self.active_calls[call_id]['to_number']  # 이 줄을 다시 추가
-
-							# 저장 경로를 IN/OUT 파일이 있는 디렉토리로 설정
-							save_path = os.path.dirname(file_path)
-
-							# WAV 파일 병합
-							merged_file = self.wav_merger.merge_and_save(
-								ip,
-								timestamp_dir,
-								timestamp,
-								local_num,
-								remote_num,
-								wav_files['IN'],
-								wav_files['OUT'],
-								save_path
-							)
-
-							if merged_file:
-								# 음성을 텍스트로 변환하여 HTML 생성 (같은 경로 사용)
-								html_file = self.chat_extractor.extract_chat_to_html(
-									ip,
-									timestamp_dir,
+								# WAV 파일 병합
+								merged_file = self.wav_merger.merge_and_save(
+									stream_info_in['phone_ip'],
+									timestamp,
 									timestamp,
 									local_num,
 									remote_num,
-									wav_files['IN'],
-									wav_files['OUT'],
-									save_path
+									stream_info_in['filepath'],
+									stream_info_out['filepath'],
+									file_dir
 								)
 
-								# MongoDB에 정보 저장
-								if merged_file and html_file:
-									try:
-										# 현재 저장된 최대 id 값 조회
-										max_id_doc = self.filesinfo.find_one(
-											sort=[("id", -1)]  # id 필드 기준 내림차순 정렬
+								if merged_file:
+									# HTML 생성
+									html_file = self.chat_extractor.extract_chat_to_html(
+										stream_info_in['phone_ip'],
+										timestamp,
+										timestamp,
+										local_num,
+										remote_num,
+										stream_info_in['filepath'],
+										stream_info_out['filepath'],
+										file_dir
+									)
+
+									# MongoDB에 정보 저장
+									if html_file:
+										self._save_to_mongodb(
+											merged_file, html_file, 
+											local_num, remote_num
 										)
-										next_id = 1 if max_id_doc is None else max_id_doc["id"] + 1
 
-										filesize = os.path.getsize(merged_file)
-										doc = {
-											"id": next_id,                    # 자동 증가 ID
-											"user_id": local_num,             # 내선번호
-											"filename": merged_file,          # 병합된 WAV 파일 전체 경로
-											"from_number": local_num,         # 발신번호
-											"to_number": remote_num,          # 수신번호
-											"filesize": str(filesize),        # 파일 크기를 문자열로 저장
-											"filestype": "wav",               # 파일 타입
-											"files_text": html_file,          # HTML 파일 전체 경로
-											"down_count": 0,                  # 다운로드 카운트 초기값
-											"created_at": datetime.datetime.utcnow()  # UTC 시간으로 저장
-										}
-
-										result = self.filesinfo.insert_one(doc)
-										print(f"MongoDB 저장 완료: {result.inserted_id}")
-
-									except Exception as e:
-										print(f"MongoDB 저장 중 오류: {e}")
-
-						except Exception as e:
-							print(f"병합/변환/저장 중 오류: {e}")
+							except Exception as e:
+								print(f"파일 처리 중 오류: {e}")
 
 					# 내선번호 찾기 및 블록 상태 업데이트
 					extension = self.get_extension_from_call(call_id)
 					if extension:
 						self.block_update_signal.emit(extension, "대기중", "")
-						print(f"대기중 블록 생성 요청: {extension}")
 
-				# LOG LIST 업데이트
-				self.update_voip_status()
+			# LOG LIST 업데이트
+			self.update_voip_status()
 
 		except Exception as e:
 			print(f"통화 상태 업데이트 중 오류: {e}")
-			import traceback
-			print(traceback.format_exc())
 
 	@Slot()
 	def handle_first_registration(self):
@@ -1821,112 +1839,66 @@ class Dashboard(QMainWindow):
 	def handle_rtp_packet(self, packet):
 		"""RTP 패킷 처리"""
 		try:
-			# 현재 활성화된 통화 중에서 '통화중' 상태인 것이 있는지 확인
-			active_call = None
+			# RTP 스트림 매니저가 없으면 생성
+			if not hasattr(self, 'stream_manager'):
+				self.stream_manager = RTPStreamManager()
+
+			# 현재 활성화된 통화 중에서 '통화중' 상태인 것들 찾기
+			active_calls = []
 			for call_id, call_info in self.active_calls.items():
 				if call_info.get('status') == '통화중':
-					active_call = (call_id, call_info)
-					break
+					active_calls.append((call_id, call_info))
 
-			if not active_call:
+			if not active_calls:
 				return
 
-			call_id, call_info = active_call
-
-			# Call-ID에서 IP 주소만 단순하게 추출 (@뒤의 값)
-			try:
-				phone_ip = call_id.split('@')[1]
-				print(f"Call-ID: {call_id}")
-				print(f"추출한 IP: {phone_ip}")
-			except:
-				print(f"IP 주소 추출 실패. Call-ID: {call_id}")
-				return
-
-			# RTP 패킷의 소스/목적지 정보 추출
-			src_ip = packet.ip.src
-			dst_ip = packet.ip.dst
-			src_port = int(packet.udp.srcport)
-			dst_port = int(packet.udp.dstport)
-
-			# 스트림 방향 결정
-			direction = self.determine_stream_direction(packet, call_id)
-			if not direction:  # 방향을 결정할 수 ���는 경우 스킵
-				return
-
-			print(f"\n=== RTP 패킷 감지 ({direction}) ===")
-			print(f"Source: {src_ip}:{src_port}")
-			print(f"Destination: {dst_ip}:{dst_port}")
-
-			# UDP 페이로드 분석 및 음성 데이�� 추출
-			if hasattr(packet.udp, 'payload'):
-				payload_hex = packet.udp.payload.replace(':', '')
+			# 각 활성 통화에 대해 처리
+			for call_id, call_info in active_calls:
 				try:
-					payload = bytes.fromhex(payload_hex)
-					version = (payload[0] >> 6) & 0x03
-					payload_type = payload[1] & 0x7F
-					sequence = int.from_bytes(payload[2:4], byteorder='big')
-					timestamp = int.from_bytes(payload[4:8], byteorder='big')
+					# Call-ID에서 IP 주소 추출
+					phone_ip = call_id.split('@')[1]
+					
+					# 스트림 방향 결정
+					direction = self.determine_stream_direction(packet, call_id)
+					if not direction:
+						continue  # 방향 결정 실패 시 다음 통화로
 
-					# RTP 헤더(12바이트) 이후의 데이터가 실제 음성 데이터
-					audio_data = payload[12:]
+					# UDP 페이로드 분석
+					if hasattr(packet.udp, 'payload'):
+						payload_hex = packet.udp.payload.replace(':', '')
+						try:
+							payload = bytes.fromhex(payload_hex)
+							version = (payload[0] >> 6) & 0x03
+							payload_type = payload[1] & 0x7F
+							sequence = int.from_bytes(payload[2:4], byteorder='big')
+							audio_data = payload[12:]  # RTP 헤더 제외
 
-					# 녹음 파일 저장을 위한 정보 설정
-					recording_key = f"recording_info_{direction}"
-					if recording_key not in call_info:
-						# settings.ini에서 저장 경로 읽기
-						config = configparser.ConfigParser()
-						config.read('settings.ini', encoding='utf-8')
-						base_path = config.get('Recording', 'save_path', fallback='C:\\')
+							if len(audio_data) == 0:
+								continue  # 오디오 데이터가 없는 경우 스킵
 
-						# 현재 날짜로 디렉토리 생성
-						today = datetime.datetime.now().strftime("%Y%m%d")
-						date_dir = os.path.join(base_path, today)
+							# 스트림 생성 또는 가져오기
+							stream_key = self.stream_manager.create_stream(
+								call_id, direction, call_info, phone_ip
+							)
+							
+							if stream_key:
+								# 패킷 처리
+								self.stream_manager.process_packet(
+									stream_key, audio_data, sequence, payload_type
+								)
 
-						# Call-ID의 IP 주소로 하위 디렉토리 생성
-						ip_dir = os.path.join(date_dir, phone_ip)
-
-						# 시간 디렉토리 생성
-						time_str = datetime.datetime.now().strftime("%H%M%S")
-						time_dir = os.path.join(ip_dir, time_str)
-
-						# 디렉토리 생성
-						os.makedirs(time_dir, exist_ok=True)
-
-						# 파일명 생성
-						timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-						from_number = call_info['from_number']
-						to_number = call_info['to_number']
-						filename = f"{time_str}_{direction}_{from_number}_{to_number}.wav"
-						filepath = os.path.join(time_dir, filename)
-
-						# WAV 파일 초기화
-						with wave.open(filepath, 'wb') as wav_file:
-							wav_file.setnchannels(1)  # 모노
-							wav_file.setsampwidth(2)  # 16-bit
-							wav_file.setframerate(8000)  # 8kHz
-
-						call_info[recording_key] = {
-							'filepath': filepath,
-							'audio_data': bytearray(),
-							'sequence': sequence,
-							'last_sequence': sequence,
-							'payload_type': payload_type,
-							'saved': False
-						}
-						print(f"녹음 시작 ({direction}): {filepath}")
-
-					# 음성 데이터 저장
-					recording_info = call_info[recording_key]
-					if not recording_info.get('saved'):
-						recording_info['audio_data'].extend(audio_data)
-						recording_info['last_sequence'] = sequence
-						print(f"음성 데이터 저장 ({direction}): Sequence={sequence}, Size={len(audio_data)}")
+						except Exception as e:
+							print(f"페이로드 분석 오류: {e}")
+							continue
 
 				except Exception as e:
-					print(f"페이로드 분석 오류: {e}")
+					print(f"통화 처리 중 오류: {e}")
+					continue
 
 		except Exception as e:
 			print(f"RTP 패킷 처리 중 오류: {e}")
+			import traceback
+			print(traceback.format_exc())  # 상세한 오류 정보 출력
 
 	def save_wav_file(self, filepath, audio_data, payload_type):
 		"""WAV 파일 저장"""
@@ -2142,6 +2114,34 @@ class Dashboard(QMainWindow):
 			print(f"관리사이트 열기 실패: {e}")
 			QMessageBox.warning(self, "오류", "관리사이트를 열 수 없습니다.")
 
+	def _save_to_mongodb(self, merged_file, html_file, local_num, remote_num):
+		try:
+			# 현재 저장된 최대 id 값 조회
+			max_id_doc = self.filesinfo.find_one(
+				sort=[("id", -1)]  # id 필드 기준 내림차순 정렬
+			)
+			next_id = 1 if max_id_doc is None else max_id_doc["id"] + 1
+
+			filesize = os.path.getsize(merged_file)
+			doc = {
+				"id": next_id,                    # 자동 증가 ID
+				"user_id": local_num,             # 내선번호
+				"filename": merged_file,          # 병합된 WAV 파일 전체 경로
+				"from_number": local_num,         # 발신번호
+				"to_number": remote_num,          # 수신번호
+				"filesize": str(filesize),        # 파일 크기를 문자열로 저장
+				"filestype": "wav",               # 파일 타입
+				"files_text": html_file,          # HTML 파일 전체 경로
+				"down_count": 0,                  # 다운로드 카운트 초기값
+				"created_at": datetime.datetime.utcnow()  # UTC 시간으로 저장
+			}
+
+			result = self.filesinfo.insert_one(doc)
+			print(f"MongoDB 저장 완료: {result.inserted_id}")
+
+		except Exception as e:
+			print(f"MongoDB 저장 중 오류: {e}")
+
 # FlowLayout 래스 추가 (Qt의 동적 그리 레이아웃 구현)
 class FlowLayout(QLayout):
 	def __init__(self, parent=None, margin=0, spacing=-1):
@@ -2215,6 +2215,156 @@ class FlowLayout(QLayout):
 			lineHeight = max(lineHeight, item.sizeHint().height())
 
 		return y + lineHeight - rect.y()
+
+# RTP 스트림 관리를 위한 새로운 클래스 추가
+class RTPStreamManager:
+    def __init__(self):
+        self.active_streams = {}  # {stream_key: StreamInfo}
+        self.stream_locks = {}    # 스트림별 락
+        self.file_locks = {}      # 파일 쓰기용 락
+        
+    def get_stream_key(self, call_id, direction):
+        """고유한 스트림 키 생성"""
+        return f"{call_id}_{direction}"
+        
+    def create_stream(self, call_id, direction, call_info, phone_ip):
+        """새로운 RTP 스트림 생성"""
+        try:
+            stream_key = self.get_stream_key(call_id, direction)
+            
+            if stream_key not in self.active_streams:
+                self.stream_locks[stream_key] = threading.Lock()
+                self.file_locks[stream_key] = threading.Lock()
+                
+                # 파일 경로 설정
+                config = configparser.ConfigParser()
+                config.read('settings.ini', encoding='utf-8')
+                base_path = config.get('Recording', 'save_path', fallback='C:\\')
+                
+                # 디렉토리 구조 생성
+                today = datetime.datetime.now().strftime("%Y%m%d")
+                time_str = datetime.datetime.now().strftime("%H%M%S")
+                
+                # /base_path/날짜/IP/시간/
+                file_dir = os.path.join(base_path, today, phone_ip, time_str)
+                os.makedirs(file_dir, exist_ok=True)
+                
+                # 파일명 생성: {time}_{direction}_{from}_{to}.wav
+                from_number = call_info['from_number']
+                to_number = call_info['to_number']
+                filename = f"{time_str}_{direction}_{from_number}_{to_number}.wav"
+                filepath = os.path.join(file_dir, filename)
+                
+                self.active_streams[stream_key] = {
+                    'call_id': call_id,
+                    'direction': direction,
+                    'call_info': call_info,
+                    'phone_ip': phone_ip,
+                    'file_dir': file_dir,
+                    'filepath': filepath,
+                    'audio_data': bytearray(),
+                    'sequence': 0,
+                    'saved': False,
+                    'wav_file': None
+                }
+                
+                # WAV 파일 초기화
+                with wave.open(filepath, 'wb') as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(8000)
+                
+            return stream_key
+            
+        except Exception as e:
+            print(f"스트림 생성 중 오류: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None
+
+    def process_packet(self, stream_key, audio_data, sequence, payload_type):
+        """RTP 패킷 처리"""
+        try:
+            with self.stream_locks[stream_key]:
+                stream_info = self.active_streams[stream_key]
+                if not stream_info['saved']:
+                    stream_info['audio_data'].extend(audio_data)
+                    stream_info['sequence'] = sequence
+                    
+                    # 일정 크기(1초)가 되면 파일에 쓰기
+                    if len(stream_info['audio_data']) >= 8000:
+                        self._write_to_wav(stream_key, payload_type)
+                    
+        except Exception as e:
+            print(f"패킷 처리 중 오류: {e}")
+
+    def _write_to_wav(self, stream_key, payload_type):
+        """WAV 파일에 데이터 쓰기"""
+        try:
+            with self.file_locks[stream_key]:
+                stream_info = self.active_streams[stream_key]
+                if not stream_info['audio_data']:
+                    return
+
+                # 디코딩
+                if payload_type == 8:  # PCMA
+                    decoded = audioop.alaw2lin(bytes(stream_info['audio_data']), 2)
+                else:  # PCMU
+                    decoded = audioop.ulaw2lin(bytes(stream_info['audio_data']), 2)
+                
+                # 볼륨 증가
+                amplified = audioop.mul(decoded, 2, 4.0)
+                
+                # WAV 파일이 없으면 새로 생성
+                if not os.path.exists(stream_info['filepath']):
+                    with wave.open(stream_info['filepath'], 'wb') as wav_file:
+                        wav_file.setnchannels(1)
+                        wav_file.setsampwidth(2)
+                        wav_file.setframerate(8000)
+                        wav_file.writeframes(amplified)
+                else:
+                    # 기존 WAV 파일 읽기
+                    with wave.open(stream_info['filepath'], 'rb') as wav_read:
+                        params = wav_read.getparams()
+                        existing_frames = wav_read.readframes(wav_read.getnframes())
+
+                    # 새로운 WAV 파일 쓰기 (기존 데이터 + 새 데이터)
+                    with wave.open(stream_info['filepath'], 'wb') as wav_write:
+                        wav_write.setparams(params)
+                        wav_write.writeframes(existing_frames)
+                        wav_write.writeframes(amplified)
+                
+                # 버퍼 초기화
+                stream_info['audio_data'] = bytearray()
+                
+        except Exception as e:
+            print(f"WAV 파일 쓰기 중 오류: {e}")
+            import traceback
+            print(traceback.format_exc())
+
+    def finalize_stream(self, stream_key):
+        """스트림 종료 처리"""
+        try:
+            if stream_key not in self.active_streams:
+                print(f"존재하지 않는 스트림 키: {stream_key}")
+                return None
+                
+            with self.stream_locks[stream_key]:
+                stream_info = self.active_streams[stream_key]
+                if not stream_info['saved']:
+                    # 남은 데이터 쓰기
+                    if stream_info['audio_data']:
+                        self._write_to_wav(stream_key, 8)  # 기본값으로 PCMA 사용
+                    stream_info['saved'] = True
+                    
+                # 스트림 정보 복사본 반환
+                return dict(stream_info)
+                
+        except Exception as e:
+            print(f"스트림 종료 중 오류: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None
 
 if __name__ == "__main__":
 	app = QApplication([])
