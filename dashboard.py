@@ -2358,7 +2358,7 @@ class RTPStreamManager:
                 config.read('settings.ini', encoding='utf-8')
                 base_path = config.get('Recording', 'save_path', fallback='C:\\')
                 
-                # 디렉토리 구조 생성
+                # 날짜와 시간 형식
                 today = datetime.datetime.now().strftime("%Y%m%d")
                 time_str = datetime.datetime.now().strftime("%H%M%S")
                 
@@ -2366,10 +2366,10 @@ class RTPStreamManager:
                 file_dir = os.path.join(base_path, today, phone_ip, time_str)
                 os.makedirs(file_dir, exist_ok=True)
                 
-                # 파일명 생성: {time}_{direction}_{from}_{to}.wav
+                # 파일명 생성: {time}_{direction}_{from}_{to}_{yyyymmdd}.wav
                 from_number = call_info['from_number']
                 to_number = call_info['to_number']
-                filename = f"{time_str}_{direction}_{from_number}_{to_number}.wav"
+                filename = f"{time_str}_{direction}_{from_number}_{to_number}_{today}.wav"
                 filepath = os.path.join(file_dir, filename)
                 
                 self.active_streams[stream_key] = {

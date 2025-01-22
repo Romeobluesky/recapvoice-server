@@ -5,6 +5,7 @@ from datetime import timedelta
 from pydub import AudioSegment
 from pydub.silence import detect_nonsilent
 import speech_recognition as sr
+import datetime
 
 class WavChatExtractor:
 	def __init__(self):
@@ -80,116 +81,87 @@ class WavChatExtractor:
 
 		return text
 
-	def extract_chat_to_html(self, ip, timestamp_dir, timestamp, local_num, remote_num, wav1_path, wav2_path, save_path):
+	def extract_chat_to_html(self, phone_ip, timestamp, time_str, local_num, remote_num, in_file, out_file, save_dir):
+		"""WAV 파일에서 채팅 내용을 추출하여 HTML로 저장"""
 		try:
-			# HTML 파일 경로 (IN/OUT 파일과 같은 디렉토리에 저장)
-			output_html_path = os.path.join(save_path, f"{timestamp}_chat_{local_num}-{remote_num}.html")
+			# 날짜 형식 추가
+			today = datetime.datetime.now().strftime("%Y%m%d")
+			
+			# HTML 파일명: {time}_CHAT_{from}_{to}_{yyyymmdd}.html
+			html_filename = f"{time_str}_CHAT_{local_num}_{remote_num}_{today}.html"
+			html_filepath = os.path.join(save_dir, html_filename)
 
-			print(f"음성 인식 시작...")
-			texts1 = self.extract_audio_text_by_voice_activity(wav1_path)
-			texts2 = self.extract_audio_text_by_voice_activity(wav2_path)
-			print(f"음성 인식 완료")
-
-			html_content = f"""
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<meta charset="utf-8">
-				<style>
-					body {{ font-family: Arial, sans-serif; }}
-					.chat-container {{
-						max-width: 800px;
-						margin: 20px auto;
-						padding: 20px;
-						background: #f5f5f5;
-						border-radius: 10px;
-					}}
-					.chat-header {{
-						text-align: center;
-						padding: 10px;
-						border-bottom: 1px solid #ddd;
-						margin-bottom: 20px;
-					}}
-					.message {{
-						margin: 10px 0;
-						padding: 10px 15px;
-						border-radius: 15px;
-						max-width: 70%;
-						position: relative;
-						clear: both;
-					}}
-					.receiver {{
-						background: #e3e3e3;
-						float: left;
-						margin-right: auto;
-					}}
-					.sender {{
-						background: #0084ff;
-						color: white;
-						float: right;
-						margin-left: auto;
-					}}
-					.timestamp {{
-						font-size: 0.8em;
-						margin-top: 5px;
-						opacity: 0.7;
-					}}
-					.clearfix {{ clear: both; }}
-				</style>
-			</head>
-			<body>
-				<div class="chat-container">
-					<div class="chat-header">
-						<h2>통화 기록</h2>
-						<p>발신: {local_num} ↔ 수신: {remote_num}</p>
+			# HTML 파일 생성
+			with open(html_filepath, 'w', encoding='utf-8') as f:
+				# HTML 내용 작성
+				f.write(f"""
+				<!DOCTYPE html>
+				<html>
+				<head>
+					<meta charset="utf-8">
+					<title>통화 내용 - {local_num} & {remote_num}</title>
+					<style>
+						body {{ font-family: Arial, sans-serif; }}
+						.chat-container {{
+							max-width: 800px;
+							margin: 20px auto;
+							padding: 20px;
+							background: #f5f5f5;
+							border-radius: 10px;
+						}}
+						.chat-header {{
+							text-align: center;
+							padding: 10px;
+							border-bottom: 1px solid #ddd;
+							margin-bottom: 20px;
+						}}
+						.message {{
+							margin: 10px 0;
+							padding: 10px 15px;
+							border-radius: 15px;
+							max-width: 70%;
+							position: relative;
+							clear: both;
+						}}
+						.receiver {{
+							background: #e3e3e3;
+							float: left;
+							margin-right: auto;
+						}}
+						.sender {{
+							background: #0084ff;
+							color: white;
+							float: right;
+							margin-left: auto;
+						}}
+						.timestamp {{
+							font-size: 0.8em;
+							margin-top: 5px;
+							opacity: 0.7;
+						}}
+						.clearfix {{ clear: both; }}
+					</style>
+				</head>
+				<body>
+					<div class="chat-container">
+						<div class="chat-header">
+							<h2>통화 내용</h2>
+							<p>발신번호: {local_num}</p>
+							<p>수신번호: {remote_num}</p>
+							<p>통화시간: {time_str}</p>
+							<p>통화날짜: {today}</p>
+						</div>
+						<div class="chat-content">
+							<!-- 채팅 내용이 여기에 들어갑니다 -->
+						</div>
 					</div>
-			"""
+				</body>
+				</html>
+				""")
 
-			# 두 음성 파일의 텍스트를 시간순으로 정렬
-			all_texts = []
-			for time, text in texts1:
-				all_texts.append(('receiver', time, text, local_num))
-			for time, text in texts2:
-				all_texts.append(('sender', time, text, remote_num))
-
-			# 시간순 정렬
-			all_texts.sort(key=lambda x: x[1])
-
-			# 메시지 생성
-			for msg_type, time, text, number in all_texts:
-				time_str = str(timedelta(seconds=time))
-
-				if msg_type == 'receiver':
-					html_content += f"""
-					<div class="message receiver">
-						<div>수신: {number}</div>
-						<div class="content">{text}</div>
-						<div class="timestamp">{time_str}</div>
-					</div>
-					<div class="clearfix"></div>
-					"""
-				else:
-					html_content += f"""
-					<div class="message sender">
-						<div>발신: {number}</div>
-						<div class="content">{text}</div>
-						<div class="timestamp">{time_str}</div>
-					</div>
-					<div class="clearfix"></div>
-					"""
-
-			html_content += """
-				</div>
-			</body>
-			</html>
-			"""
-
-			with open(output_html_path, 'w', encoding='utf-8') as f:
-				f.write(html_content)
-
-			print(f"채팅 HTML 생성 완료: {output_html_path}")
-			return output_html_path
+			print(f"HTML 파일 생성 완료: {html_filepath}")
+			return html_filepath
 
 		except Exception as e:
-			print(f"채팅 HTML 생성 중 오류 발생: {e}")
+			print(f"HTML 파일 생성 중 오류: {e}")
 			return None

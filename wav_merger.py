@@ -1,29 +1,34 @@
 #wav 병합 클래스
 import os
 import subprocess
+import datetime
 
 class WavMerger:
-	def merge_and_save(self, ip, timestamp_dir, timestamp, local_num, remote_num, wav1_path, wav2_path, save_path):
+	def merge_and_save(self, phone_ip, timestamp, time_str, local_num, remote_num, in_file, out_file, save_dir):
 		try:
-			# 출력 파일 경로 (IN/OUT 파일과 같은 디렉토리에 저장)
-			output_path = os.path.join(save_path, f"{timestamp}_MERGE_{local_num}-{remote_num}.wav")
+			# 날짜 형식 추가
+			today = datetime.datetime.now().strftime("%Y%m%d")
+			
+			# 병합된 파일명: {time}_MERGE_{from}_{to}_{yyyymmdd}.wav
+			merged_filename = f"{time_str}_MERGE_{local_num}_{remote_num}_{today}.wav"
+			merged_filepath = os.path.join(save_dir, merged_filename)
 
 			# ffmpeg 명령어 구성
 			cmd = [
 				'ffmpeg',
-				'-i', wav1_path,  # 첫 번째 입력 파일
-				'-i', wav2_path,  # 두 번째 입력 파일
+				'-i', in_file,  # 첫 번째 입력 파일
+				'-i', out_file,  # 두 번째 입력 파일
 				'-filter_complex', 'amix=inputs=2:duration=longest:dropout_transition=0',  # 오디오 믹싱
 				'-y',  # 기존 파일 덮어쓰기
-				output_path
+				merged_filepath
 			]
 
 			# ffmpeg 실행
 			result = subprocess.run(cmd, capture_output=True, text=True)
 
 			if result.returncode == 0:
-				print(f"WAV 파일 병합 완료: {output_path}")
-				return output_path
+				print(f"WAV 파일 병합 완료: {merged_filepath}")
+				return merged_filepath
 			else:
 				print(f"FFmpeg 오류: {result.stderr}")
 				return None
