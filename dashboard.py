@@ -103,9 +103,13 @@ class Dashboard(QMainWindow):
 
 	def __init__(self):
 		super().__init__()
-		self.setWindowIcon(QIcon(resource_path("images/recapvoice_ico.ico")))  # resource_path 함수 사용
+		self.setWindowIcon(QIcon(resource_path("images/x-recapvoice_s.ico")))
 		self.setWindowTitle("Recap Voice")
-
+		
+		# 창이 자동으로 숨겨지지 않도록 설정
+		self.setAttribute(Qt.WA_QuitOnClose, False)
+		self.setWindowState(Qt.WindowActive)
+		
 		# Signal 연결
 		self.block_creation_signal.connect(self.create_block_in_main_thread)
 		self.block_update_signal.connect(self.update_block_in_main_thread)
@@ -189,12 +193,9 @@ class Dashboard(QMainWindow):
 			self.hide_console_timer.timeout.connect(hide_wireshark_windows)
 			self.hide_console_timer.start(100)
 
-		# 트레이 아이콘 설정
+		# 트레이 아이콘 설정 (마지막에 수행)
 		self.setup_tray_icon()
-
-		# 창 닫기 이벤트 처리를 위한 설정
-		self.setAttribute(Qt.WA_DeleteOnClose, False)
-
+		
 		# 클라이언트 서버 자동 시작
 		try:
 			# start.bat 실행
@@ -216,6 +217,30 @@ class Dashboard(QMainWindow):
 			print("클라이언트 서버가 자동으로 시작되었습니다.")
 		except Exception as e:
 			print(f"클라이언트 서버 자동 시작 실패: {e}")
+		
+		# 창을 보이게 하고 활성화 (가장 마지막에 수행)
+		QTimer.singleShot(100, self.ensure_window_visible)
+
+		# 종료 시 cleanup 실행을 위한 등록
+		atexit.register(self.cleanup)
+
+	def ensure_window_visible(self):
+		"""창이 확실히 보이도록 하는 메서드"""
+		self.show()
+		self.raise_()
+		self.activateWindow()
+		self.setWindowState(Qt.WindowActive)
+
+	def cleanup(self):
+		"""프로그램 종료 시 리소스 정리"""
+		if hasattr(self, 'capture') and self.capture:
+			try:
+				if hasattr(self, 'loop') and self.loop and self.loop.is_running():
+					self.loop.run_until_complete(self.capture.close_async())
+				else:
+					self.capture.close()
+			except Exception as e:
+				print(f"Cleanup error: {e}")
 
 	def _init_ui(self):
 		# 메인 위젯 설정
@@ -335,14 +360,20 @@ class Dashboard(QMainWindow):
 		layout.setContentsMargins(0, 0, 0, 0)
 		layout.setSpacing(0)
 
+		# 로고 컨테이너 추가 (마진 조정을 위한 컨테이너)
+		logo_container = QWidget()
+		logo_container_layout = QVBoxLayout(logo_container)
+		logo_container_layout.setContentsMargins(0, 30, 0, 30)  # 위아래 30px 마진
+		logo_container_layout.setSpacing(0)
+
 		# 로고 영역
 		logo_label = QLabel()
 		logo_label.setAlignment(Qt.AlignCenter)
-		logo_pixmap = QPixmap(resource_path("images/recapvoice_v3_ci.png"))
+		logo_pixmap = QPixmap(resource_path("images/x-recapvoice_white.png"))
 		if not logo_pixmap.isNull():
 			# 원본 이미지의 가로/세로 비율 계산
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
-			target_width = 160  # 원하는 가로 크기
+			target_width = 140  # 원하는 가로 크기
 			target_height = int(target_width * aspect_ratio)  # 비율에 맞는 세로 크기 계산
 
 			scaled_logo = logo_pixmap.scaled(
@@ -352,9 +383,12 @@ class Dashboard(QMainWindow):
 				Qt.SmoothTransformation
 			)
 			logo_label.setPixmap(scaled_logo)
-			# 로고의 실제 높이에 맞춰 설정
-			logo_label.setFixedHeight(target_height + 20)  # 여백 20px 추가
-		layout.addWidget(logo_label)
+
+		# 로고를 컨테이너에 추가
+		logo_container_layout.addWidget(logo_label)
+		
+		# 컨테이너를 메인 레이아웃에 추가
+		layout.addWidget(logo_container)
 
 		# 메뉴 컨테이너
 		menu_container = QWidget()
@@ -1816,17 +1850,19 @@ class Dashboard(QMainWindow):
 
 	def capture_packets(self, interface):
 		"""패킷 캡처 및 분석"""
+		capture = None
+		loop = None
+		
 		try:
+			# 새로운 이벤트 루프 생성
 			loop = asyncio.new_event_loop()
 			asyncio.set_event_loop(loop)
 
-			# 캡처 필터 수정
+			# 캡처 객체 생성
 			capture = pyshark.LiveCapture(
 				interface=interface,
 				display_filter='sip or (udp and (udp.port >= 10000 and udp.port <= 20000))'
 			)
-
-			# 디버그 모드 설정
 			capture.set_debug()
 
 			print(f"패킷 캡처 감시 시작 - Interface: {interface}")
@@ -1835,45 +1871,55 @@ class Dashboard(QMainWindow):
 				print("Error: 선택된 인터페이스가 없습니다")
 				return
 
-			try:
-				for packet in capture.sniff_continuously():
-					try:
-						if 'SIP' in packet:
-							self.analyze_sip_packet(packet)
-						elif 'UDP' in packet and self.is_rtp_packet(packet):
-							print("\nRTP 패킷 감지됨")
-							self.handle_rtp_packet(packet)
-
-					except Exception as packet_error:
-						print(f"패킷 처리 중 오류: {packet_error}")
-						continue
-
-			except KeyboardInterrupt:
-				print("패킷 캡처 중단됨")
-			except Exception as sniff_error:
-				print(f"패킷 스니핑 중 오류: {sniff_error}")
-			finally:
+			# 패킷 캡처 및 처리
+			for packet in capture.sniff_continuously():
 				try:
-					capture.close()
-				except Exception as close_error:
-					print(f"캡처 종료 중 오류: {close_error}")
+					if 'SIP' in packet:
+						self.analyze_sip_packet(packet)
+					elif 'UDP' in packet and self.is_rtp_packet(packet):
+						print("\nRTP 패킷 감지됨")
+						self.handle_rtp_packet(packet)
+				except Exception as packet_error:
+					print(f"패킷 처리 중 오류: {packet_error}")
+					continue
 
+		except KeyboardInterrupt:
+			print("패킷 캡처 중단됨")
 		except Exception as e:
 			print(f"패킷 캡처 중 오류: {e}")
 			import traceback
 			print(traceback.format_exc())
 		finally:
-			try:
-				if 'capture' in locals():
-					capture.close()
-			except:
-				pass
+			# 캡처 객체 정리
+			if capture:
+				try:
+					# 비동기 종료 처리를 동기적으로 실행
+					if loop and not loop.is_closed():
+						async def close_capture():
+							await capture.close_async()
+						try:
+							loop.run_until_complete(close_capture())
+						except Exception:
+							capture.close()
+					else:
+						capture.close()
+				except Exception as close_error:
+					print(f"캡처 종료 중 오류: {close_error}")
 
-			try:
-				if 'loop' in locals():
+			# 이벤트 루프 정리
+			if loop and not loop.is_closed():
+				try:
+					# 실행 중인 작업 완료 대기
+					pending = asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else []
+					for task in pending:
+						try:
+							loop.run_until_complete(task)
+						except Exception:
+							pass
+					
 					loop.close()
-			except:
-				pass
+				except Exception as loop_error:
+					print(f"이벤트 루프 종료 중 오류: {loop_error}")
 
 	def handle_rtp_packet(self, packet):
 		"""RTP 패킷 처리"""
@@ -2164,8 +2210,13 @@ class Dashboard(QMainWindow):
 			now_kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
 			# 재생 시간 계산
 			audio = AudioSegment.from_wav(merged_file)
-			duration_seconds = len(audio) / 1000.0  # milliseconds to seconds
-			duration_formatted = str(datetime.timedelta(seconds=int(duration_seconds)))
+			duration_seconds = int(len(audio) / 1000.0)  # milliseconds to seconds
+			
+			# HH:MM:SS 형식으로 포맷팅
+			hours = duration_seconds // 3600
+			minutes = (duration_seconds % 3600) // 60
+			seconds = duration_seconds % 60
+			duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 			filesize = os.path.getsize(merged_file)
 			doc = {
@@ -2179,7 +2230,7 @@ class Dashboard(QMainWindow):
 				"files_text": html_file,          # HTML 파일 전체 경로
 				"down_count": 0,                  # 다운로드 카운트 초기값
 				"created_at": now_kst,  # utcnow() 대신 now(UTC) 사용
-				"playtime": duration_formatted,   # 재생 시간 (HH:MM:SS 형식)
+				"playtime": duration_formatted,   # "00:00:00" 형식으로 저장
 			}
 
 			result = self.filesinfo.insert_one(doc)
@@ -2196,15 +2247,15 @@ class Dashboard(QMainWindow):
 			
 			# 아이콘 설정
 			app_icon = QIcon()
-			app_icon.addFile(resource_path("images/icon03.png"), QSize(16, 16))
-			app_icon.addFile(resource_path("images/icon03.png"), QSize(24, 24))
-			app_icon.addFile(resource_path("images/icon03.png"), QSize(32, 32))
-			app_icon.addFile(resource_path("images/icon03.png"), QSize(48, 48))
+			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(16, 16))
+			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(24, 24))
+			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(32, 32))
+			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(48, 48))
 			
 			# 아이콘이 없는 경우 기본 앱 아이콘 사용
 			if app_icon.isNull():
 				app_icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
-				print("아이콘 파일을 찾을 수 없습니다: images/icon03.png")
+				print("아이콘 파일을 찾을 수 없습니다: images/x-recapvoice_s.ico")
 			
 			self.tray_icon.setIcon(app_icon)
 			self.setWindowIcon(app_icon)  # 윈도우 아이콘도 설정
@@ -2249,16 +2300,17 @@ class Dashboard(QMainWindow):
 
 	def closeEvent(self, event):
 		"""창 닫기 이벤트 처리"""
-		event.ignore()  # 기본 종료 동작 무시
-		self.hide()     # 창 숨기기
-		
-		# 트레이로 최소화 알림
-		self.tray_icon.showMessage(
-			"Recap Voice",
-			"프로그램이 트레이로 최소화되었습니다.",
-			QSystemTrayIcon.Information,
-			2000
-		)
+		if self.tray_icon.isVisible():
+			event.ignore()  # 기본 종료 동작 무시
+			self.hide()     # 창 숨기기
+			
+			# 트레이로 최소화 알림
+			self.tray_icon.showMessage(
+				"Recap Voice",
+				"프로그램이 트레이로 최소화되었습니다.",
+				QSystemTrayIcon.Information,
+				2000
+			)
 
 	def show_window(self):
 		"""창 보이기"""
