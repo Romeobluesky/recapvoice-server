@@ -37,7 +37,7 @@ from settings_popup import SettingsPopup
 from pymongo import MongoClient
 
 # 종료할 프로세스 목록
-processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
+processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe','Dumpcap.exe']
 
 def kill_processes():
     for process in processes_to_kill:
@@ -187,6 +187,12 @@ class Dashboard(QMainWindow):
 			self.hide_console_timer = QTimer()
 			self.hide_console_timer.timeout.connect(hide_wireshark_windows)
 			self.hide_console_timer.start(100)
+
+		# 트레이 아이콘 설정
+		self.setup_tray_icon()
+
+		# 창 닫기 이벤트 처리를 위한 설정
+		self.setAttribute(Qt.WA_DeleteOnClose, False)
 
 	def _init_ui(self):
 		# 메인 위젯 설정
@@ -2041,7 +2047,7 @@ class Dashboard(QMainWindow):
 		"""start.bat 중지 및 ON 버튼 색상 원복"""
 		try:
 			# 종료할 프로세스 목록
-			processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
+			processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe','Dumpcap.exe']
 
 			# 각 프로세스 종료
 			import os
@@ -2151,6 +2157,107 @@ class Dashboard(QMainWindow):
 
 		except Exception as e:
 			print(f"MongoDB 저장 중 오류: {e}")
+
+	def setup_tray_icon(self):
+		"""트레이 아이콘 설정"""
+		try:
+			# 트레이 아이콘 생성
+			self.tray_icon = QSystemTrayIcon(self)
+			
+			# 아이콘 설정
+			app_icon = QIcon()
+			app_icon.addFile(resource_path("images/icon03.png"), QSize(16, 16))
+			app_icon.addFile(resource_path("images/icon03.png"), QSize(24, 24))
+			app_icon.addFile(resource_path("images/icon03.png"), QSize(32, 32))
+			app_icon.addFile(resource_path("images/icon03.png"), QSize(48, 48))
+			
+			# 아이콘이 없는 경우 기본 앱 아이콘 사용
+			if app_icon.isNull():
+				app_icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
+				print("아이콘 파일을 찾을 수 없습니다: images/icon03.png")
+			
+			self.tray_icon.setIcon(app_icon)
+			self.setWindowIcon(app_icon)  # 윈도우 아이콘도 설정
+			
+			# 트레이 메뉴 생성
+			tray_menu = QMenu()
+			
+			# Recap Voice 열기 액션
+			open_action = QAction("Recap Voice 열기", self)
+			open_action.triggered.connect(self.show_window)
+			tray_menu.addAction(open_action)
+			
+			# 환경 설정 액션
+			settings_action = QAction("환경 설정", self)
+			settings_action.triggered.connect(self.show_settings)
+			tray_menu.addAction(settings_action)
+			
+			# 구분선 추가
+			tray_menu.addSeparator()
+			
+			# 종료 액션
+			quit_action = QAction("종료", self)
+			quit_action.triggered.connect(self.quit_application)
+			tray_menu.addAction(quit_action)
+			
+			# 메뉴 설정
+			self.tray_icon.setContextMenu(tray_menu)
+			
+			# 툴팁 설정
+			self.tray_icon.setToolTip("Recap Voice")
+			
+			# 트레이 아이콘 표시
+			self.tray_icon.show()
+			
+			# 트레이 아이콘 더블클릭 이벤트 연결
+			self.tray_icon.activated.connect(self.tray_icon_activated)
+			
+		except Exception as e:
+			print(f"트레이 아이콘 설정 중 오류: {e}")
+			import traceback
+			print(traceback.format_exc())
+
+	def closeEvent(self, event):
+		"""창 닫기 이벤트 처리"""
+		event.ignore()  # 기본 종료 동작 무시
+		self.hide()     # 창 숨기기
+		
+		# 트레이로 최소화 알림
+		self.tray_icon.showMessage(
+			"Recap Voice",
+			"프로그램이 트레이로 최소화되었습니다.",
+			QSystemTrayIcon.Information,
+			2000
+		)
+
+	def show_window(self):
+		"""창 보이기"""
+		self.show()
+		self.activateWindow()
+
+	def show_settings(self):
+		"""환경 설정 창 표시"""
+		try:
+			settings_dialog = SettingsPopup(self)
+			settings_dialog.exec()
+		except Exception as e:
+			print(f"설정 창 표시 중 오류: {e}")
+
+	def quit_application(self):
+		"""프로그램 종료"""
+		try:
+			# 트레이 아이콘 제거
+			self.tray_icon.hide()
+			
+			# 프로그램 종료
+			QApplication.quit()
+		except Exception as e:
+			print(f"프로그램 종료 중 오류: {e}")
+
+	def tray_icon_activated(self, reason):
+		"""트레이 아이콘 활성화 이벤트 처리"""
+		if reason == QSystemTrayIcon.DoubleClick:
+			self.show_window()
 
 # FlowLayout 래스 추가 (Qt의 동적 그리 레이아웃 구현)
 class FlowLayout(QLayout):

@@ -24,8 +24,8 @@ class SettingsPopup(QDialog):
 	path_changed = Signal(str)
 	settings_changed = Signal(dict)  # 모든 설정값을 dictionary로 전달
 
-	def __init__(self):
-		super().__init__()
+	def __init__(self, parent=None):
+		super().__init__(parent)
 		# 설정 파일 로드 또는 생성
 		self.config = configparser.ConfigParser()
 		
