@@ -11,6 +11,7 @@ import asyncio
 import datetime
 import sys
 import re
+import time
 
 # 서드파티 라이브러리
 import requests
@@ -1722,13 +1723,13 @@ class Dashboard(QMainWindow):
 								# WAV 파일 병합
 								merged_file = self.wav_merger.merge_and_save(
 									stream_info_in['phone_ip'],
-									timestamp,
-									timestamp,
-									local_num,
-									remote_num,
-									stream_info_in['filepath'],
-									stream_info_out['filepath'],
-									file_dir
+										timestamp,
+										timestamp,
+										local_num,
+										remote_num,
+										stream_info_in['filepath'],
+										stream_info_out['filepath'],
+										file_dir
 								)
 
 								if merged_file:
@@ -1744,20 +1745,29 @@ class Dashboard(QMainWindow):
 										file_dir
 									)
 
-									# MongoDB에 정보 저장
 									if html_file:
+										# MongoDB에 정보 저장
 										self._save_to_mongodb(
 											merged_file, html_file, 
 											local_num, remote_num
 										)
 
+										# 모든 작업이 성공적으로 완료된 후 IN/OUT 파일 삭제
+										try:
+											if os.path.exists(stream_info_in['filepath']):
+												os.remove(stream_info_in['filepath'])
+											if os.path.exists(stream_info_out['filepath']):
+												os.remove(stream_info_out['filepath'])
+										except Exception as e:
+											print(f"파일 삭제 중 오류: {e}")
+
 							except Exception as e:
 								print(f"파일 처리 중 오류: {e}")
 
-					# 내선번호 찾기 및 블록 상태 업데이트
-					extension = self.get_extension_from_call(call_id)
-					if extension:
-						self.block_update_signal.emit(extension, "대기중", "")
+				# 내선번호 찾기 및 블록 상태 업데이트
+				extension = self.get_extension_from_call(call_id)
+				if extension:
+					self.block_update_signal.emit(extension, "대기중", "")
 
 			# LOG LIST 업데이트
 			self.update_voip_status()
