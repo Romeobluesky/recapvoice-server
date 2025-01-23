@@ -994,6 +994,9 @@ class Dashboard(QMainWindow):
 		# VOIP Monitor 열기
 		try:
 			self.voip_window = VoipMonitor()
+			# 윈도우 기본 스타일 적용
+			self.voip_window.setWindowFlags(Qt.Window)  # 기본 윈도우 스타일로 설정
+			self.voip_window.setAttribute(Qt.WA_QuitOnClose, False)  # 창을 닫아도 프로그램이 종료되지 않도록 설정
 			self.voip_window.show()
 
 			# 배포 모드일 때만 콘솔창 숨김 처리
@@ -1032,6 +1035,9 @@ class Dashboard(QMainWindow):
 		try:
 			# PacketMonitor 시작
 			self.packet_monitor = PacketMonitor()
+			# 윈도우 기본 스타일 적용
+			self.packet_monitor.setWindowFlags(Qt.Window)  # 기본 윈도우 스타일로 설정
+			self.packet_monitor.setAttribute(Qt.WA_QuitOnClose, False)  # 창을 닫아도 프로그램이 종료되지 않도록 설정
 			self.packet_monitor.show()
 			
 			# 배포 모드일 때만 콘솔창 숨김 처리
