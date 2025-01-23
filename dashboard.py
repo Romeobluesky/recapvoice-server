@@ -108,7 +108,6 @@ class Dashboard(QMainWindow):
 		
 		# 창이 자동으로 숨겨지지 않도록 설정
 		self.setAttribute(Qt.WA_QuitOnClose, False)
-		self.setWindowState(Qt.WindowActive)
 		
 		# Signal 연결
 		self.block_creation_signal.connect(self.create_block_in_main_thread)
@@ -224,12 +223,21 @@ class Dashboard(QMainWindow):
 		# 종료 시 cleanup 실행을 위한 등록
 		atexit.register(self.cleanup)
 
+		# 초기화가 끝난 후 창 최대화를 위한 타이머 설정
+		QTimer.singleShot(100, self.initialize_window_state)
+
+	def initialize_window_state(self):
+		"""창 상태 초기화"""
+		self.setWindowState(Qt.WindowMaximized)
+
 	def ensure_window_visible(self):
 		"""창이 확실히 보이도록 하는 메서드"""
 		self.show()
 		self.raise_()
 		self.activateWindow()
-		self.setWindowState(Qt.WindowActive)
+		# WindowActive 대신 WindowMaximized 유지
+		if self.windowState() != Qt.WindowMaximized:
+			self.setWindowState(Qt.WindowMaximized)
 
 	def cleanup(self):
 		"""프로그램 종료 시 리소스 정리"""
