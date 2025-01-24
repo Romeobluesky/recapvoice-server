@@ -2429,12 +2429,16 @@ class FlowLayout(QLayout):
 
 		return y + lineHeight - rect.y()
 
-# RTP 스트림 관리를 위한 새로운 클래스 추가
+# RTP 스트림 관리를 위한 클래스 수정
 class RTPStreamManager:
     def __init__(self):
         self.active_streams = {}  # {stream_key: StreamInfo}
         self.stream_locks = {}    # 스트림별 락
         self.file_locks = {}      # 파일 쓰기용 락
+        # 버퍼 관련 설정 추가
+        self.min_buffer_size = 4000   # 최소 버퍼 크기 (0.5초)
+        self.max_buffer_size = 16000  # 최대 버퍼 크기 (2초)
+        self.buffer_adjust_threshold = 0.8  # 버퍼 조정 임계값
         
     def get_stream_key(self, call_id, direction):
         """고유한 스트림 키 생성"""
@@ -2449,7 +2453,7 @@ class RTPStreamManager:
                 self.stream_locks[stream_key] = threading.Lock()
                 self.file_locks[stream_key] = threading.Lock()
                 
-                # 파일 경로 설정
+                # 설정 파일 읽기
                 config = configparser.ConfigParser()
                 config.read('settings.ini', encoding='utf-8')
                 base_path = config.get('Recording', 'save_path', fallback='C:\\')
@@ -2458,16 +2462,13 @@ class RTPStreamManager:
                 today = datetime.datetime.now().strftime("%Y%m%d")
                 time_str = datetime.datetime.now().strftime("%H%M%S")
                 
-                # /base_path/날짜/IP/시간/
                 file_dir = os.path.join(base_path, today, phone_ip, time_str)
                 os.makedirs(file_dir, exist_ok=True)
                 
-                # 파일명 생성: {time}_{direction}_{from}_{to}_{yyyymmdd}.wav
-                from_number = call_info['from_number']
-                to_number = call_info['to_number']
-                filename = f"{time_str}_{direction}_{from_number}_{to_number}_{today}.wav"
+                filename = f"{time_str}_{direction}_{call_info['from_number']}_{call_info['to_number']}_{today}.wav"
                 filepath = os.path.join(file_dir, filename)
                 
+                # 스트림 정보에 버퍼 관련 필드 추가
                 self.active_streams[stream_key] = {
                     'call_id': call_id,
                     'direction': direction,
@@ -2478,7 +2479,12 @@ class RTPStreamManager:
                     'audio_data': bytearray(),
                     'sequence': 0,
                     'saved': False,
-                    'wav_file': None
+                    'wav_file': None,
+                    'current_buffer_size': 8000,  # 초기 버퍼 크기
+                    'packet_count': 0,            # 패킷 카운터
+                    'last_write_time': time.time(),  # 마지막 쓰기 시간
+                    'packet_rate': 0,             # 패킷 도착 속도
+                    'is_internal_call': self._is_internal_call(call_info)  # 내선 통화 여부
                 }
                 
                 # WAV 파일 초기화
@@ -2495,61 +2501,150 @@ class RTPStreamManager:
             print(traceback.format_exc())
             return None
 
+    def _is_internal_call(self, call_info):
+        """내선 통화 여부 확인"""
+        from_number = str(call_info['from_number'])
+        to_number = str(call_info['to_number'])
+        return (len(from_number) == 4 and from_number[0] in '123456789' and
+                len(to_number) == 4 and to_number[0] in '123456789')
+
+    def _adjust_buffer_size(self, stream_info):
+        """버퍼 크기 동적 조정"""
+        try:
+            current_time = time.time()
+            time_diff = current_time - stream_info['last_write_time']
+            
+            if time_diff > 0:
+                # 패킷 도착 속도 계산 (패킷/초)
+                current_rate = stream_info['packet_count'] / time_diff
+                
+                # 이동 평균으로 패킷 속도 업데이트
+                alpha = 0.3  # 가중치 계수
+                stream_info['packet_rate'] = (alpha * current_rate + 
+                                            (1 - alpha) * stream_info['packet_rate'])
+                
+                # 내선 통화인 경우 더 작은 버퍼 사용
+                if stream_info['is_internal_call']:
+                    target_size = min(int(stream_info['packet_rate'] * 0.8 * 1000), 
+                                    self.max_buffer_size // 2)
+                else:
+                    target_size = min(int(stream_info['packet_rate'] * 1.2 * 1000), 
+                                    self.max_buffer_size)
+                
+                # 버퍼 크기 조정
+                target_size = max(self.min_buffer_size, 
+                                min(target_size, self.max_buffer_size))
+                
+                # 점진적으로 버퍼 크기 조정
+                if abs(target_size - stream_info['current_buffer_size']) > self.min_buffer_size:
+                    if target_size > stream_info['current_buffer_size']:
+                        stream_info['current_buffer_size'] += self.min_buffer_size
+                    else:
+                        stream_info['current_buffer_size'] -= self.min_buffer_size
+                
+                # 카운터 초기화
+                stream_info['packet_count'] = 0
+                stream_info['last_write_time'] = current_time
+                
+                print(f"버퍼 크기 조정: {stream_info['current_buffer_size']} bytes")
+                
+        except Exception as e:
+            print(f"버퍼 크기 조정 중 오류: {e}")
+
     def process_packet(self, stream_key, audio_data, sequence, payload_type):
         """RTP 패킷 처리"""
         try:
             with self.stream_locks[stream_key]:
                 stream_info = self.active_streams[stream_key]
                 if not stream_info['saved']:
+                    # 시퀀스 번호와 패킷 크기 로깅
+                    print(f"패킷 수신 - 시퀀스: {sequence}, 크기: {len(audio_data)} bytes")
+                    
+                    # 시퀀스 번호 체크 (연속성 확인)
+                    if stream_info['sequence'] > 0:  # 첫 패킷이 아닌 경우
+                        expected_sequence = (stream_info['sequence'] + 1) % 65536  # RTP 시퀀스는 16비트
+                        if sequence != expected_sequence:
+                            print(f"시퀀스 불연속 감지: 예상={expected_sequence}, 실제={sequence}")
+                    
+                    # 시퀀스 번호 체크 (중복 패킷)
+                    if sequence <= stream_info['sequence']:
+                        print(f"중복 패킷 무시: 현재={stream_info['sequence']}, 수신={sequence}")
+                        return
+                    
                     stream_info['audio_data'].extend(audio_data)
                     stream_info['sequence'] = sequence
+                    stream_info['packet_count'] += 1
                     
-                    # 일정 크기(1초)가 되면 파일에 쓰기
-                    if len(stream_info['audio_data']) >= 8000:
+                    # 버퍼 상태 로깅
+                    print(f"버퍼 상태 - 현재크기: {len(stream_info['audio_data'])}, " 
+                          f"목표크기: {stream_info['current_buffer_size']}, "
+                          f"내선통화: {stream_info['is_internal_call']}")
+                    
+                    if len(stream_info['audio_data']) >= stream_info['current_buffer_size']:
                         self._write_to_wav(stream_key, payload_type)
-                    
+                        self._adjust_buffer_size(stream_info)
+                        
         except Exception as e:
             print(f"패킷 처리 중 오류: {e}")
 
     def _write_to_wav(self, stream_key, payload_type):
-        """WAV 파일에 데이터 쓰기"""
         try:
             with self.file_locks[stream_key]:
                 stream_info = self.active_streams[stream_key]
                 if not stream_info['audio_data']:
                     return
 
-                # 디코딩
+                print(f"WAV 쓰기 시작 - 데이터크기: {len(stream_info['audio_data'])} bytes")
+
                 if payload_type == 8:  # PCMA
                     decoded = audioop.alaw2lin(bytes(stream_info['audio_data']), 2)
+                    codec_type = "PCMA"
                 else:  # PCMU
                     decoded = audioop.ulaw2lin(bytes(stream_info['audio_data']), 2)
+                    codec_type = "PCMU"
                 
-                # 볼륨 증가
-                amplified = audioop.mul(decoded, 2, 4.0)
+                print(f"디코딩 완료 - 코덱: {codec_type}, 디코딩크기: {len(decoded)} bytes")
+                amplified = audioop.mul(decoded, 2, 2.0)
                 
-                # WAV 파일이 없으면 새로 생성
-                if not os.path.exists(stream_info['filepath']):
-                    with wave.open(stream_info['filepath'], 'wb') as wav_file:
-                        wav_file.setnchannels(1)
-                        wav_file.setsampwidth(2)
-                        wav_file.setframerate(8000)
-                        wav_file.writeframes(amplified)
-                else:
-                    # 기존 WAV 파일 읽기
-                    with wave.open(stream_info['filepath'], 'rb') as wav_read:
-                        params = wav_read.getparams()
-                        existing_frames = wav_read.readframes(wav_read.getnframes())
+                try:
+                    before_size = 0
+                    if os.path.exists(stream_info['filepath']):
+                        before_size = os.path.getsize(stream_info['filepath'])
+                        temp_filepath = stream_info['filepath'] + '.tmp'
+                        
+                        # 기존 WAV 파일 읽기
+                        with wave.open(stream_info['filepath'], 'rb') as wav_read:
+                            params = wav_read.getparams()
+                            existing_frames = wav_read.readframes(wav_read.getnframes())
 
-                    # 새로운 WAV 파일 쓰기 (기존 데이터 + 새 데이터)
-                    with wave.open(stream_info['filepath'], 'wb') as wav_write:
-                        wav_write.setparams(params)
-                        wav_write.writeframes(existing_frames)
-                        wav_write.writeframes(amplified)
-                
-                # 버퍼 초기화
+                        # 임시 파일에 쓰기
+                        with wave.open(temp_filepath, 'wb') as wav_write:
+                            wav_write.setparams(params)
+                            wav_write.writeframes(existing_frames)
+                            wav_write.writeframes(amplified)
+
+                        # 임시 파일을 원본으로 이동
+                        os.replace(temp_filepath, stream_info['filepath'])
+                    else:
+                        # 새 WAV 파일 생성
+                        with wave.open(stream_info['filepath'], 'wb') as wav_file:
+                            wav_file.setnchannels(1)
+                            wav_file.setsampwidth(2)
+                            wav_file.setframerate(8000)
+                            wav_file.writeframes(amplified)
+
+                    after_size = os.path.getsize(stream_info['filepath'])
+                    print(f"WAV 파일 크기 변화: {before_size} -> {after_size} bytes "
+                          f"(증가: {after_size - before_size} bytes)")
+
+                except Exception as write_error:
+                    print(f"WAV 파일 쓰기 세부 오류: {write_error}")
+                    if 'temp_filepath' in locals() and os.path.exists(temp_filepath):
+                        os.remove(temp_filepath)
+                    raise
+
                 stream_info['audio_data'] = bytearray()
-                
+
         except Exception as e:
             print(f"WAV 파일 쓰기 중 오류: {e}")
             import traceback
