@@ -214,6 +214,9 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/default_packet.txt
+docs/Session Initiation Protocol (202).txt
+docs/Session Initiation Protocol (REFER).txt
 
 # PyBuilder
 .pybuilder/
