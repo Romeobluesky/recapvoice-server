@@ -44,11 +44,11 @@ def load_config():
 		log_message("오류", f"설정 파일 로드 실패: {str(e)}")
 		return None
 
-def analyze_rtp(packet, voip_monitor):  # voip_monitor 매개변수 추가
+def analyze_rtp(packet, voip_monitor):
 	"""RTP 패킷 분석 및 음성 데이터 추출"""
 	try:
 		call_id = get_call_id_from_rtp(packet)
-		if call_id and call_id in voip_monitor.active_calls:  # voip_monitor 인스턴스의 active_calls 사용
+		if call_id and call_id in voip_monitor.active_calls:
 			# RTP 엔드포인트 정보 저장
 			src_ip = packet.ip.src
 			dst_ip = packet.ip.dst
@@ -58,7 +58,7 @@ def analyze_rtp(packet, voip_monitor):  # voip_monitor 매개변수 추가
 			if 'media_endpoints' not in voip_monitor.active_calls[call_id]:
 				voip_monitor.active_calls[call_id]['media_endpoints'] = []
 				
-			# 로운 엔드포인트 추가
+			# 새로운 엔드포인트 추가
 			endpoints = voip_monitor.active_calls[call_id]['media_endpoints']
 			new_endpoint = {
 				'ip': src_ip,

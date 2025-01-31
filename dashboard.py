@@ -103,7 +103,7 @@ class Dashboard(QMainWindow):
 
 	def __init__(self):
 		super().__init__()
-		self.setWindowIcon(QIcon(resource_path("images/x-recapvoice_s.ico")))
+		self.setWindowIcon(QIcon(resource_path("images/recapvoice_squere.ico")))
 		self.setWindowTitle("Recap Voice")
 		
 		# 창이 자동으로 숨겨지지 않도록 설정
@@ -160,7 +160,7 @@ class Dashboard(QMainWindow):
 			self.mongo_client = MongoClient('mongodb://localhost:27017/')
 			self.db = self.mongo_client['packetwave']
 			self.filesinfo = self.db['filesinfo']
-			print("MongoDB 연결 성공")
+			# print("MongoDB 연결 성공") # 이 로그 메시지 제거
 		except Exception as e:
 			print(f"MongoDB 연결 실패: {e}")
 
@@ -377,11 +377,11 @@ class Dashboard(QMainWindow):
 		# 로고 영역
 		logo_label = QLabel()
 		logo_label.setAlignment(Qt.AlignCenter)
-		logo_pixmap = QPixmap(resource_path("images/x-recapvoice_white.png"))
+		logo_pixmap = QPixmap(resource_path("images/recapvoice_squere_w.png"))
 		if not logo_pixmap.isNull():
 			# 원본 이미지의 가로/세로 비율 계산
 			aspect_ratio = logo_pixmap.height() / logo_pixmap.width()
-			target_width = 140  # 원하는 가로 크기
+			target_width = 120  # 원하는 가로 크기
 			target_height = int(target_width * aspect_ratio)  # 비율에 맞는 세로 크기 계산
 
 			scaled_logo = logo_pixmap.scaled(
@@ -787,7 +787,7 @@ class Dashboard(QMainWindow):
 		table.setObjectName("log_list_table")  # 업데이트를 위한 객체 이름 설정
 		table.setColumnCount(7)
 		table.setHorizontalHeaderLabels([
-			'시간', '통화 방', '발신번호', '수신번호', '상태', '결과', 'Call-ID'
+			'시간', '통화 방향', '발신번호', '수신번호', '상태', '결과', 'Call-ID'
 		])
 
 		# 테이블 스타일 설정
@@ -1162,104 +1162,163 @@ class Dashboard(QMainWindow):
 			print(f"대기중 블록 생성 중 오류: {e}")
 
 	def analyze_sip_packet(self, packet):
-		"""SIP 패킷 분석"""
 		try:
 			sip_layer = packet.sip
 			call_id = sip_layer.call_id
-			print(f"\n=== SIP 패킷 감지 ===")
-			print(f"Call-ID: {call_id}")
 
-			# extension 변수 초기화
-			extension = None
-
-			if hasattr(sip_layer, 'status_line'):
+			if hasattr(sip_layer, 'request_line'):
+				request_line = str(sip_layer.request_line)
+				try:
+					if 'REFER' in request_line:
+						print("\n=== 돌려주기 요청 감지 ===")
+						print(f"Call-ID: {call_id}")
+						
+						# 1. 안전한 통화 정보 접근
+						if call_id not in self.active_calls:
+							print(f"[돌려주기] 해당 Call-ID를 찾을 수 없음: {call_id}")
+							return
+							
+						try:
+							# 2. 통화 정보 복사본 사용
+							original_call = dict(self.active_calls[call_id])
+							
+							# 3. 필수 정보 검증
+							if not all(k in original_call for k in ['to_number', 'from_number']):
+								print("[돌려주기] 필수 통화 정보 누락")
+								return
+								
+							external_number = original_call['to_number']    
+							forwarding_ext = original_call['from_number']   
+							
+							# 4. Refer-To 헤더 안전하게 추출
+							try:
+								refer_to = str(sip_layer.refer_to)
+								forwarded_ext = self.extract_number(refer_to.split('@')[0])
+								if not forwarded_ext:
+									print("[돌려주기] 유효하지 않은 Refer-To 번호")
+									return
+							except Exception as e:
+								print(f"[돌려주기] Refer-To 추출 실패: {e}")
+								return
+								
+							print(f"[돌려주기] 발신번호(유지): {external_number}")
+							print(f"[돌려주기] 수신번호(유지): {forwarding_ext}")
+							print(f"[돌려주기] 돌려받을 내선: {forwarded_ext}")
+							
+							# 5. 상태 업데이트를 위한 임시 딕셔너리 사용
+							update_info = {
+								'status': '통화중',
+								'is_forwarded': True,
+								'forward_to': forwarded_ext,
+								'result': '돌려주기',
+								'from_number': external_number,
+								'to_number': forwarding_ext
+							}
+							
+							# 6. 안전한 상태 업데이트
+							with threading.Lock():  # 스레드 안전성 보장
+								if call_id in self.active_calls:  # 재확인
+									self.active_calls[call_id].update(update_info)
+									
+									# 7. 관련 통화 업데이트 (복사본 사용)
+									active_calls_copy = dict(self.active_calls)
+									for active_call_id, call_info in active_calls_copy.items():
+										if (call_info.get('from_number') == forwarding_ext and 
+											call_info.get('to_number') == forwarded_ext):
+											if active_call_id in self.active_calls:  # 재확인
+												self.active_calls[active_call_id].update({
+													'status': '통화중',
+													'result': '돌려주기'
+												})
+						
+							print("[돌려주기] 기존 통화 상태 업데이트 완료")
+							print("=== 돌려주기 처리 완료 ===\n")
+							
+						except Exception as refer_error:
+							print(f"돌려주기 상세 처리 중 오류: {refer_error}")
+							import traceback
+							print(traceback.format_exc())
+							# 오류 발생해도 계속 실행
+							
+					elif 'INVITE' in request_line:
+						from_number = self.extract_number(sip_layer.from_user)
+						to_number = self.extract_number(sip_layer.to_user)
+						
+						# 돌려주기 관련 INVITE인 경우 즉시 종료 처리
+						if hasattr(self, 'refer_info') and \
+						   from_number == self.refer_info.get('from_number') and \
+						   to_number == self.refer_info.get('to_number'):
+							self.active_calls[call_id] = {
+								'start_time': datetime.datetime.now(),
+								'status': '통화종료',
+								'from_number': from_number,
+								'to_number': to_number,
+								'direction': '수신',
+								'result': '돌려주기',
+								'is_forwarded': True
+							}
+							delattr(self, 'refer_info')  # 사용 후 제거
+						else:
+							# 일반적인 INVITE 처리
+							self.active_calls[call_id] = {
+								'start_time': datetime.datetime.now(),
+								'status': '시도중',
+								'from_number': from_number,
+								'to_number': to_number,
+								'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
+								'media_endpoints': []
+							}
+							self.update_call_status(call_id, '시도중')
+					
+					elif 'BYE' in request_line:
+						if call_id in self.active_calls:
+							self.update_call_status(call_id, '통화종료', '정상종료')
+							extension = self.get_extension_from_call(call_id)
+							if extension:
+								self.block_update_signal.emit(extension, "대기중", "")
+					
+					elif 'CANCEL' in request_line:
+						if call_id in self.active_calls:
+							self.update_call_status(call_id, '통화종료', '발신취소')
+							extension = self.get_extension_from_call(call_id)
+							if extension:
+								self.block_update_signal.emit(extension, "대기중", "")
+				
+				except Exception as request_error:
+					print(f"Request Line 처리 중 오류: {request_error}")
+					import traceback
+					print(traceback.format_exc())
+					# 오류 발생해도 계속 실행
+					
+			elif hasattr(sip_layer, 'status_line'):
 				status_code = sip_layer.status_code
-				print(f"Status Line: {sip_layer.status_line}")
-				print(f"Status Code: {status_code}")
-
-				# 100 Trying 감지 시 즉시 블록 생성
+				
 				if status_code == '100':
-					print("100 Trying 감지")
 					extension = self.extract_number(sip_layer.from_user)
-					# 여기를 4자리로 제한
-					if extension and len(extension) == 4 and extension[0] in ['1', '2', '3', '4', '5', '6', '7', '8', '9']:
-						print(f"내선번호 감지: {extension}")
-						# 대기중 블록 생성
-						if extension:  # extension이 유효한 경우에만 시그널 발생
-							self.block_update_signal.emit(extension, "대기중", "")
-							print(f"대기중 블록 생성 요청: {extension}")
-
-				# 나머지 상태 코드 처리
+					if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
+						self.block_update_signal.emit(extension, "대기중", "")
+				
 				if call_id in self.active_calls:
-					if status_code == '183':  # Session Progress (벨울림)
-						print("벨울림 상태 감지")
+					if status_code == '183':
 						self.update_call_status(call_id, '벨울림')
-						# 내선번호 찾기 및 블록 상태 업데이트
 						extension = self.get_extension_from_call(call_id)
 						if extension:
 							received_number = self.active_calls[call_id]['to_number']
 							self.block_update_signal.emit(extension, "벨울림", received_number)
-
-					elif status_code == '200':  # OK
-						print("통화 연결됨")
+					
+					elif status_code == '200':
 						if self.active_calls[call_id]['status'] != '통화종료':
 							self.update_call_status(call_id, '통화중')
-							# 내선번호 찾기 및 블록 상태 업데이트
 							extension = self.get_extension_from_call(call_id)
 							if extension:
 								received_number = self.active_calls[call_id]['to_number']
 								self.block_update_signal.emit(extension, "통화중", received_number)
-
-					elif status_code in ['486', '603']:  # Busy, Decline
-						print("통화 거절됨")
-						self.update_call_status(call_id, '통화종료', '수신거부')
-						# 내선번호 찾기
-						extension = self.get_extension_from_call(call_id)
-						if extension:  # extension이 유효한 경우에만 시그널 발생
-							self.block_update_signal.emit(extension, "대기중", "")
-							print(f"대기중 블록 생성 요청: {extension}")
-
-			elif hasattr(sip_layer, 'request_line'):
-				print(f"Request Line: {sip_layer.request_line}")
-
-				if 'INVITE' in sip_layer.request_line:
-					print("INVITE 요청 감지")
-					from_number = self.extract_number(sip_layer.from_user)
-					to_number = self.extract_number(sip_layer.to_user)
-
-					self.active_calls[call_id] = {
-						'start_time': datetime.datetime.now(),
-						'status': '시도중',
-						'from_number': from_number,
-						'to_number': to_number,
-						'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
-						'media_endpoints': []
-					}
-					self.update_call_status(call_id, '시도중')
-
-				elif 'BYE' in sip_layer.request_line:
-					if call_id in self.active_calls:
-						self.update_call_status(call_id, '통화종료', '정상종료')
-						# 내선번호 대기중 블록 생성
-						extension = self.get_extension_from_call(call_id)
-						if extension:  # extension이 유효한 경우에만 시그널 발생
-							self.block_update_signal.emit(extension, "대기중", "")
-							print(f"대기중 블록 생성 요청: {extension}")
-
-				# CANCEL 요청 처리
-				elif 'CANCEL' in sip_layer.request_line:
-					if call_id in self.active_calls:
-						self.update_call_status(call_id, '통화종료', '발신취소')
-						# 내선번호 찾기
-						extension = self.get_extension_from_call(call_id)
-						if extension:  # extension이 유효한 경우에만 시그널 발생
-							self.block_update_signal.emit(extension, "대기중", "")
-							print(f"대기중 블록 생성 요청: {extension}")
-
+	
 		except Exception as e:
 			print(f"SIP 패킷 분석 중 오류: {e}")
 			import traceback
 			print(traceback.format_exc())
+			# 오류 발생해도 계속 실행
 
 	def handle_new_call(self, sip_layer, call_id):
 		"""새로운 통화 처리"""
@@ -1420,7 +1479,7 @@ class Dashboard(QMainWindow):
 			payload_type = payload[1] & 0x7F
 
 			# 디버그 정보 출력
-			print(f"RTP 패킷 검사: Version={version}, PayloadType={payload_type}")
+			#print(f"RTP 패킷 검사: Version={version}, PayloadType={payload_type}")
 
 			# PCMU(0)와 PCMA(8)만 허용
 			return payload_type in [0, 8]
@@ -2261,15 +2320,15 @@ class Dashboard(QMainWindow):
 			
 			# 아이콘 설정
 			app_icon = QIcon()
-			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(16, 16))
-			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(24, 24))
-			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(32, 32))
-			app_icon.addFile(resource_path("images/x-recapvoice_s.ico"), QSize(48, 48))
+			app_icon.addFile(resource_path("images/recapvoice_squere.ico"), QSize(16, 16))
+			app_icon.addFile(resource_path("images/recapvoice_squere.ico"), QSize(24, 24))
+			app_icon.addFile(resource_path("images/recapvoice_squere.ico"), QSize(32, 32))
+			app_icon.addFile(resource_path("images/recapvoice_squere.ico"), QSize(48, 48))
 			
 			# 아이콘이 없는 경우 기본 앱 아이콘 사용
 			if app_icon.isNull():
 				app_icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
-				print("아이콘 파일을 찾을 수 없습니다: images/x-recapvoice_s.ico")
+				print("아이콘 파일을 찾을 수 없습니다: images/recapvoice_squere.ico")
 			
 			self.tray_icon.setIcon(app_icon)
 			self.setWindowIcon(app_icon)  # 윈도우 아이콘도 설정
@@ -2673,6 +2732,15 @@ class RTPStreamManager:
             import traceback
             print(traceback.format_exc())
             return None
+
+    def save_file_info(self, file_info):
+        """MongoDB에 파일 정보 저장"""
+        try:
+            # 파일 정보 저장
+            self.filesinfo.insert_one(file_info)
+            # print 문 제거 - 파일 정보 로그 출력하지 않음
+        except Exception as e:
+            print(f"파일 정보 저장 실패: {e}")
 
 if __name__ == "__main__":
 	app = QApplication([])
