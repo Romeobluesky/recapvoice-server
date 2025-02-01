@@ -1,21 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
-"""
-전체 코드 예시
-
-주요 개선 사항:
-1. active_calls 관련 락을 재진입 락(RLock)으로 변경하여 중첩 락으로 인한 데드락 방지
-2. REFER 처리 시 sip_layer.refer_to 속성 존재 여부를 먼저 검사하고, 예외를 철저하게 처리
-3. 전화 연결 상태 블록(UI)이 아예 보이지 않는 문제를 해결하기 위해
-   - 내선번호 표시 레이블의 objectName을 "extensionLabel"로 지정
-   - 통화 시간 표시 레이블의 objectName을 "durationLabel"로 지정
-   - block_exists(), update_block_in_main_thread() 등에서 해당 레이블을 기준으로 블록을 확인하도록 수정
-4. update_call_status()에서 실제 new_status와 수신번호를 Signal로 보내 UI 업데이트를 보장
-5. RTP 스트림 및 녹취 파일 생성 관련 부분은 로그를 통해 디버깅할 수 있도록 처리
-6. 동시에 통화 시 active_calls를 순회할 때 발생할 수 있는 자료구조 변경 오류를 방지하기 위해 락 사용
-"""
-
 import atexit
 import subprocess
 import audioop
