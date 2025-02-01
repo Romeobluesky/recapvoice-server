@@ -12,6 +12,7 @@ import asyncio
 import datetime
 import sys
 import time
+import traceback  # 추가된 import
 
 # 서드파티 라이브러리
 import requests
@@ -414,7 +415,7 @@ class Dashboard(QMainWindow):
         bottom_layout.addWidget(disk_group, 80)
         led_group = QGroupBox('회선 상태')
         led_layout = QHBoxLayout()
-        led_layout.addWidget(self._create_led_with_text('회선 Init ', 'yellow'))
+        led_layout.addWidget(self._create_led_with_text('회선 연결 ', 'yellow'))
         led_layout.addWidget(self._create_led_with_text('대 기 중 ', 'blue'))
         led_layout.addWidget(self._create_led_with_text('녹 취 중 ', 'green'))
         led_group.setLayout(led_layout)
@@ -525,9 +526,9 @@ class Dashboard(QMainWindow):
         led_layout.setSpacing(4)
         led_layout.setAlignment(Qt.AlignRight)
         if status != "대기중" and received_number:
-            led_states = ["회선 초기화", "녹취중"]
+            led_states = ["회선 연결", "녹취중"]
         else:
-            led_states = ["회선 Init", "대기중"]
+            led_states = ["회선 연결", "대기중"]
         for state in led_states:
             led = self._create_led("", self._get_led_color(state))
             led_layout.addWidget(led)
@@ -934,7 +935,7 @@ class Dashboard(QMainWindow):
 
     def log_error(self, message, error=None, additional_info=None):
         try:
-            with open('voip_monitor.log', 'a', encoding='utf-8') as log_file:
+            with open('voip_monitor.log', 'a', encoding='utf-8', buffering=1) as log_file:  # buffering=1: 라인 버퍼링
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log_file.write(f"\n[{timestamp}] {message}\n")
                 if additional_info:
@@ -942,11 +943,14 @@ class Dashboard(QMainWindow):
                 if error:
                     log_file.write(f"에러 메시지: {str(error)}\n")
                     log_file.write("스택 트레이스:\n")
-                    import traceback
                     log_file.write(traceback.format_exc())
                 log_file.write("\n")
+                log_file.flush()  # 강제로 디스크에 쓰기
+                os.fsync(log_file.fileno())  # 운영체제 버퍼도 비우기
         except Exception as e:
             print(f"로깅 중 오류 발생: {e}")
+            sys.stderr.write(f"Critical logging error: {e}\n")
+            sys.stderr.flush()
 
     def analyze_sip_packet(self, packet):
         try:
@@ -1561,63 +1565,96 @@ class Dashboard(QMainWindow):
             print(f"첫 번째 등록 처리 중 오류: {e}")
 
     def capture_packets(self, interface):
-        capture = None
-        loop = None
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            capture = pyshark.LiveCapture(
-                interface=interface,
-                display_filter='sip or (udp and (udp.port >= 10000 and udp.port <= 20000))'
-            )
-            capture.set_debug()
-            self.log_error("패킷 캡처 시작", additional_info={"interface": interface})
+            self.log_error("패킷 캡처 시작 시도", additional_info={"interface": interface})
             
+            # 인터페이스 유효성 검사
             if not interface:
-                self.log_error("인터페이스 없음", additional_info="선택된 인터페이스가 없습니다")
+                self.log_error("유효하지 않은 인터페이스")
                 return
                 
-            for packet in capture.sniff_continuously():
-                try:
-                    if 'SIP' in packet:
-                        self.analyze_sip_packet(packet)
-                    elif 'UDP' in packet and self.is_rtp_packet(packet):
-                        self.handle_rtp_packet(packet)
-                except Exception as packet_error:
-                    self.log_error("패킷 처리 중 오류", packet_error)
-                    continue
+            # 시스템 리소스 확인
+            cpu_percent = psutil.cpu_percent()
+            memory = psutil.virtual_memory()
+            self.log_error("시스템 리소스 상태", additional_info={
+                "cpu": f"{cpu_percent}%",
+                "memory": f"{memory.percent}%"
+            })
+            
+            # 캡처 초기화
+            capture = None
+            loop = None
+            
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 
-        except KeyboardInterrupt:
-            self.log_error("패킷 캡처 중단", additional_info="사용자에 의한 중단")
+                # Wireshark 설정 확인
+                wireshark_path = get_wireshark_path()
+                if not os.path.exists(wireshark_path):
+                    self.log_error("Wireshark 경로 오류", additional_info={"path": wireshark_path})
+                    return
+                    
+                capture = pyshark.LiveCapture(
+                    interface=interface,
+                    display_filter='sip or (udp and (udp.port >= 10000 and udp.port <= 20000))'
+                )
+                
+                # 패킷 캡처 시작
+                for packet in capture.sniff_continuously():
+                    try:
+                        # 메모리 사용량 모니터링
+                        process = psutil.Process()
+                        if process.memory_percent() > 80:  # 메모리 사용량이 80% 이상이면 경고
+                            self.log_error("높은 메모리 사용량 감지", 
+                                additional_info={"memory_percent": process.memory_percent()})
+                        
+                        if 'SIP' in packet:
+                            self.analyze_sip_packet(packet)
+                        elif 'UDP' in packet and self.is_rtp_packet(packet):
+                            self.handle_rtp_packet(packet)
+                            
+                    except Exception as packet_error:
+                        self.log_error("패킷 처리 중 오류", packet_error)
+                        continue
+                        
+            except KeyboardInterrupt:
+                self.log_error("사용자에 의한 캡처 중단")
+            except Exception as capture_error:
+                self.log_error("캡처 프로세스 오류", capture_error)
+                
+            finally:
+                self.cleanup_capture(capture, loop)
+                
         except Exception as e:
-            self.log_error("패킷 캡처 중 심각한 오류", e)
-        finally:
+            self.log_error("캡처 스레드 치명적 오류", e)
+            
+    def cleanup_capture(self, capture, loop):
+        """캡처 리소스 정리"""
+        try:
             if capture:
                 try:
                     if loop and not loop.is_closed():
                         async def close_capture():
                             await capture.close_async()
-                        try:
-                            loop.run_until_complete(close_capture())
-                        except Exception as async_close_error:
-                            self.log_error("비동기 캡처 종료 중 오류", async_close_error)
-                            capture.close()
+                        loop.run_until_complete(close_capture())
                     else:
                         capture.close()
                 except Exception as close_error:
-                    self.log_error("캡처 종료 중 오류", close_error)
-                
+                    self.log_error("캡처 종료 실패", close_error)
+                    
             if loop and not loop.is_closed():
                 try:
-                    pending = asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else []
-                    for task in pending:
-                        try:
-                            loop.run_until_complete(task)
-                        except Exception as task_error:
-                            self.log_error("태스크 정리 중 오류", task_error)
+                    tasks = asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else []
+                    for task in tasks:
+                        task.cancel()
+                    loop.stop()
                     loop.close()
                 except Exception as loop_error:
-                    self.log_error("이벤트 루프 종료 중 오류", loop_error)
+                    self.log_error("이벤트 루프 종료 실패", loop_error)
+                    
+        except Exception as cleanup_error:
+            self.log_error("리소스 정리 중 오류", cleanup_error)
 
     def handle_rtp_packet(self, packet):
         try:
@@ -2222,7 +2259,45 @@ class RTPStreamManager:
             print(f"파일 정보 저장 실패: {e}")
 
 if __name__ == "__main__":
-    app = QApplication([])
-    window = Dashboard()
-    window.show()
-    app.exec()
+    try:
+        app = QApplication([])
+        window = Dashboard()
+        
+        # 전역 예외 핸들러 설정
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            window.log_error("치명적인 오류 발생", 
+                error=exc_value, 
+                additional_info={
+                    "type": str(exc_type),
+                    "traceback": "".join(traceback.format_tb(exc_traceback))
+                }
+            )
+            print("치명적인 오류가 발생했습니다. voip_monitor.log를 확인하세요.")
+            sys.exit(1)
+
+        sys.excepthook = handle_exception
+        
+        # 메모리 모니터링
+        def check_memory_usage():
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            window.log_error("메모리 사용량 체크", additional_info={
+                "rss": f"{memory_info.rss / 1024 / 1024:.2f} MB",
+                "vms": f"{memory_info.vms / 1024 / 1024:.2f} MB"
+            })
+            
+        memory_timer = QTimer()
+        memory_timer.timeout.connect(check_memory_usage)
+        memory_timer.start(60000)  # 1분마다 체크
+        
+        window.show()
+        app.exec()
+        
+    except Exception as e:
+        with open('voip_monitor.log', 'a', encoding='utf-8') as f:
+            f.write(f"\n=== 프로그램 시작 실패 ===\n")
+            f.write(f"시간: {datetime.datetime.now()}\n")
+            f.write(f"오류: {str(e)}\n")
+            f.write(traceback.format_exc())
+            f.write("\n")
+        sys.exit(1)
