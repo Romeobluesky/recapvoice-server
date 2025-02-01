@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/mvenv/Scripts/activate
 # -*- coding: utf-8 -*-
 import atexit
 import subprocess
@@ -11,7 +11,6 @@ import threading
 import asyncio
 import datetime
 import sys
-import re
 import time
 
 # 서드파티 라이브러리
