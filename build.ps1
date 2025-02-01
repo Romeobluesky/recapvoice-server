@@ -8,6 +8,7 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--add-data `"LICENCE.txt;.`" " + `
     "--add-data `"version.txt;.`" " + `
     "--add-data `"voip_monitor.log;.`" " + `
+    "--add-data `"crash.log;.`" " + `
     "--add-data `"docs;docs`" " + `
     "--add-data `"apply_schemas.py;.`" " + `
     "--add-data `"config_loader.py;.`" " + `
