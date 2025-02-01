@@ -1,5 +1,5 @@
 !define APP_NAME "Recap Voice"
-!define VERSION "1.203"
+!define VERSION "1.504"
 !define INSTALL_DIR "$PROGRAMFILES\${APP_NAME}"
 
 Name "${APP_NAME}"
@@ -8,11 +8,11 @@ InstallDir "${INSTALL_DIR}"
 RequestExecutionLevel admin
 
 # 버전 정보 추가
-VIProductVersion "1.2.0.3"
+VIProductVersion "1.5.0.4"
 VIAddVersionKey "ProductName" "Recap Voice"
 VIAddVersionKey "CompanyName" "Xpower Networks"
-VIAddVersionKey "FileVersion" "1.103"
-VIAddVersionKey "ProductVersion" "1.103"
+VIAddVersionKey "FileVersion" "1.504"
+VIAddVersionKey "ProductVersion" "1.504"
 VIAddVersionKey "LegalCopyright" "Copyright (c) 2024"
 VIAddVersionKey "FileDescription" "Recap Voice Application"
 VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
@@ -30,8 +30,8 @@ ${StrRep}
 
 # MUI 설정
 !define MUI_ABORTWARNING
-!define MUI_ICON "images\recapvoice_ico.ico"
-!define MUI_UNICON "images\recapvoice_ico.ico"
+!define MUI_ICON "images\recapvoice_squere.ico"
+!define MUI_UNICON "images\recapvoice_squere.ico"
 
 # MUI 페이지
 !define MUI_WELCOMEPAGE_TITLE "Recap Voice 설치 프로그램"
