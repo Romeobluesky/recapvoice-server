@@ -13,6 +13,7 @@ import datetime
 import sys
 import time
 import traceback  # 추가된 import
+import platform  # 추가된 import
 
 # 서드파티 라이브러리
 import requests
@@ -202,6 +203,20 @@ class Dashboard(QMainWindow):
         QTimer.singleShot(100, self.ensure_window_visible)
         atexit.register(self.cleanup)
         QTimer.singleShot(100, self.initialize_window_state)
+        
+        # 리소스 모니터링 타이머 설정
+        self.resource_timer = QTimer()
+        self.resource_timer.timeout.connect(self.monitor_system_resources)
+        self.resource_timer.start(10000)  # 10초마다 체크
+        
+        # 스레드 관리를 위한 변수 추가
+        self.active_threads = set()
+        self.thread_lock = threading.Lock()
+        
+        # 의존성 및 시스템 제한 체크
+        self.check_dependencies()
+        self.check_system_limits()
+        self.setup_crash_handler()
 
     def initialize_window_state(self):
         self.setWindowState(Qt.WindowMaximized)
@@ -1992,6 +2007,151 @@ class Dashboard(QMainWindow):
     def tray_icon_activated(self, reason):
         if reason == QSystemTrayIcon.DoubleClick:
             self.show_window()
+
+    def monitor_system_resources(self):
+        try:
+            process = psutil.Process()
+            
+            # CPU 사용량 모니터링
+            cpu_percent = process.cpu_percent(interval=1.0)
+            if cpu_percent > 80:  # CPU 사용량이 80% 이상인 경우
+                self.log_error("높은 CPU 사용량 감지", additional_info={
+                    "cpu_percent": cpu_percent,
+                    "threads": len(process.threads()),
+                    "open_files": len(process.open_files()),
+                    "connections": len(process.connections())
+                })
+                
+            # 스레드 상태 모니터링
+            thread_count = len(process.threads())
+            if thread_count > 100:  # 스레드가 비정상적으로 많은 경우
+                self.log_error("비정상적인 스레드 수 감지", additional_info={
+                    "thread_count": thread_count,
+                    "thread_ids": [t.id for t in process.threads()]
+                })
+                
+            # 파일 디스크립터 모니터링
+            open_files = process.open_files()
+            if len(open_files) > 1000:  # 열린 파일이 너무 많은 경우
+                self.log_error("과도한 파일 디스크립터", additional_info={
+                    "open_files_count": len(open_files),
+                    "file_paths": [f.path for f in open_files[:10]]  # 처음 10개만 로깅
+                })
+                
+            # 네트워크 연결 모니터링
+            connections = process.connections()
+            if len(connections) > 100:  # 연결이 너무 많은 경우
+                self.log_error("과도한 네트워크 연결", additional_info={
+                    "connection_count": len(connections),
+                    "connection_status": [c.status for c in connections]
+                })
+                
+        except Exception as e:
+            self.log_error("리소스 모니터링 오류", e)
+
+    def start_new_thread(self, target, name=None):
+        """스레드 생성 및 관리"""
+        try:
+            with self.thread_lock:
+                # 죽은 스레드 정리
+                self.active_threads = {t for t in self.active_threads if t.is_alive()}
+                
+                if len(self.active_threads) > 50:  # 스레드 수 제한
+                    self.log_error("스레드 수 초과", additional_info={
+                        "active_threads": len(self.active_threads)
+                    })
+                    return None
+                    
+                thread = threading.Thread(target=target, name=name)
+                thread.daemon = True  # 메인 프로세스 종료시 함께 종료
+                thread.start()
+                self.active_threads.add(thread)
+                return thread
+                
+        except Exception as e:
+            self.log_error("스레드 생성 오류", e)
+            return None
+
+    def check_dependencies(self):
+        try:
+            # 라이브러리 버전 체크
+            import pkg_resources
+            required = {
+                'pyshark': '0.4.5',  # 최소 요구 버전
+                'PySide6': '6.0.0',
+                'psutil': '5.8.0',
+                'pymongo': '3.12.0'
+            }
+            
+            for package, min_version in required.items():
+                version = pkg_resources.get_distribution(package).version
+                self.log_error(f"라이브러리 버전 체크", additional_info={
+                    "package": package,
+                    "current_version": version,
+                    "required_version": min_version
+                })
+                
+            # Wireshark 버전 체크
+            try:
+                import subprocess
+                result = subprocess.run(['tshark', '--version'], capture_output=True, text=True)
+                self.log_error("Wireshark 버전", additional_info={
+                    "version_info": result.stdout.split('\n')[0]
+                })
+            except Exception as e:
+                self.log_error("Wireshark 버전 체크 실패", e)
+            
+        except Exception as e:
+            self.log_error("의존성 체크 중 오류", e)
+
+    def check_system_limits(self):
+        try:
+            import resource
+            # 파일 디스크립터 제한 확인
+            soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+            self.log_error("시스템 리소스 제한", additional_info={
+                "file_descriptors": {
+                    "soft_limit": soft,
+                    "hard_limit": hard
+                },
+                "max_processes": len(psutil.Process().children(recursive=True)),
+                "python_bits": platform.architecture()[0],
+                "python_version": sys.version
+            })
+            
+            # 메모리 제한 확인
+            if hasattr(resource, 'RLIMIT_AS'):
+                mem_soft, mem_hard = resource.getrlimit(resource.RLIMIT_AS)
+                self.log_error("메모리 제한", additional_info={
+                    "memory_limit": {
+                        "soft_limit": mem_soft,
+                        "hard_limit": mem_hard
+                    }
+                })
+                
+        except Exception as e:
+            self.log_error("시스템 제한 체크 중 오류", e)
+
+    def setup_crash_handler(self):
+        try:
+            import faulthandler
+            faulthandler.enable()
+            crash_log = open('crash.log', 'w')
+            faulthandler.enable(file=crash_log)
+            
+            # Windows 전용 예외 핸들러
+            if os.name == 'nt':
+                import ctypes
+                def windows_exception_handler(ex_type, value, tb):
+                    if ex_type is ctypes.c_int:
+                        self.log_error("심각한 시스템 오류", additional_info={
+                            "error_code": value,
+                            "traceback": traceback.format_tb(tb)
+                        })
+                sys.excepthook = windows_exception_handler
+                
+        except Exception as e:
+            self.log_error("크래시 핸들러 설정 실패", e)
 
 class FlowLayout(QLayout):
     def __init__(self, parent=None, margin=0, spacing=-1):
