@@ -275,7 +275,7 @@ class Dashboard(QMainWindow):
 
     def show_maximized_window(self):
         """최대화된 상태로 창을 표시"""
-        self.show()
+        self.showMaximized()  # show() 대신 showMaximized() 사용
         self.raise_()
         self.activateWindow()
 
