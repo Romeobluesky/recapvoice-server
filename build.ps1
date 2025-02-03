@@ -29,9 +29,20 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--hidden-import `"google.cloud.speech`" " + `
     "--hidden-import `"grpc`" " + `
     "--hidden-import `"termcolor`" " + `
+    "--hidden-import `"PySide6.QtMultimedia`" " + `
+    "--hidden-import `"PySide6.QtMultimediaWidgets`" " + `
+    "--hidden-import `"PySide6.QtNetwork`" " + `
+    "--hidden-import `"requests`" " + `
+    "--hidden-import `"audioop`" " + `
+    "--hidden-import `"wave`" " + `
+    "--hidden-import `"asyncio`" " + `
+    "--hidden-import `"atexit`" " + `
+    "--hidden-import `"platform`" " + `
     "--collect-all `"PySide6`" " + `
     "--collect-all `"pyshark`" " + `
     "--collect-all `"scapy`" " + `
+    "--collect-all `"requests`" " + `
+    "--collect-all `"pydub`" " + `
     "--hidden-import `"win32process`" " + `
     "--hidden-import `"win32api`" " + `
     "--hidden-import `"win32gui`" " + `
@@ -76,6 +87,32 @@ if (Test-Path "start.bat") {
     Write-Host "start.bat copied successfully"
 } else {
     Write-Host "start.bat not found"
+}
+
+# Qt 멀티미디어 DLL 파일들 복사
+Write-Host "Copying Qt DLL files..."
+
+# 가상환경의 정확한 site-packages 경로 설정
+$venvPath = "myenv\Lib\site-packages\PySide6"
+$qtBinPath = $venvPath
+
+# Qt DLL 파일 목록
+$requiredDlls = @(
+    "Qt6Multimedia.dll",
+    "Qt6MultimediaWidgets.dll",
+    "Qt6OpenGL.dll",
+    "Qt6OpenGLWidgets.dll"
+)
+
+# DLL 파일 복사
+foreach ($dll in $requiredDlls) {
+    $sourcePath = Join-Path $qtBinPath $dll
+    if (Test-Path $sourcePath) {
+        Copy-Item $sourcePath -Destination $distPath -Force
+        Write-Host "$dll copied successfully"
+    } else {
+        Write-Host "Warning: $dll not found in $qtBinPath"
+    }
 }
 
 Write-Host "Build completed!" 
