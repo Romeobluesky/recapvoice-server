@@ -352,6 +352,7 @@ class SettingsPopup(QDialog):
 
 		# 설정 변경 시그널 발생
 		self.settings_changed.emit(settings_data)
+		self.path_changed.emit(settings_data['Recording']['save_path'])
 
 		QMessageBox.information(self, "설정 저장", "설정이 성공적으로 저장되었습니다.")
 		self.close()

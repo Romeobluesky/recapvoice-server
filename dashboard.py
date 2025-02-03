@@ -941,10 +941,12 @@ class Dashboard(QMainWindow):
 
     def show_settings(self):
         try:
-            self.settings_popup.show()
-            print("Settings 열림")
+            self.settings_popup = SettingsPopup(self)
+            self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
+            self.settings_popup.path_changed.connect(self.update_storage_path)
+            self.settings_popup.exec()
         except Exception as e:
-            print(f"Error opening Settings: {e}")
+            print(f"설정 창 표시 중 오류: {e}")
             QMessageBox.warning(self, "오류", "Settings를 열 수 없습니다.")
 
     def update_dashboard_settings(self, settings_data):
@@ -953,8 +955,10 @@ class Dashboard(QMainWindow):
                 self.phone_number.setText(settings_data['Extension']['rep_number'])
             if 'Network' in settings_data:
                 self.ip_value.setText(settings_data['Network']['ap_ip'])
-            if 'Network' in settings_data:
                 self.mirror_ip_value.setText(settings_data['Network']['ip'])
+            if 'Recording' in settings_data:
+                drive_letter = settings_data['Recording']['save_path'].split(':')[0]
+                self.disk_label.setText(f'녹취드라이버 ( {drive_letter} : ) 사용률:')
             self.update_disk_usage()
         except Exception as e:
             print(f"Error updating dashboard settings: {e}")
@@ -2043,10 +2047,13 @@ class Dashboard(QMainWindow):
 
     def show_settings(self):
         try:
-            settings_dialog = SettingsPopup(self)
-            settings_dialog.exec()
+            self.settings_popup = SettingsPopup(self)
+            self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
+            self.settings_popup.path_changed.connect(self.update_storage_path)
+            self.settings_popup.exec()
         except Exception as e:
             print(f"설정 창 표시 중 오류: {e}")
+            QMessageBox.warning(self, "오류", "Settings를 열 수 없습니다.")
 
     def quit_application(self):
         try:
