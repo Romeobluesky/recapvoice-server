@@ -27,6 +27,8 @@ from PySide6.QtGui import *
 from PySide6.QtNetwork import *
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtMultimedia import QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 # 로컬 모듈
 from config_loader import load_config, get_wireshark_path
@@ -121,16 +123,65 @@ class Dashboard(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.play_intro_video()
+
+    def play_intro_video(self):
+        try:
+            # 비디오 위젯 생성
+            self.video_widget = QVideoWidget()
+            self.setCentralWidget(self.video_widget)
+            
+            # 미디어 플레이어 설정
+            self.media_player = QMediaPlayer()
+            self.media_player.setVideoOutput(self.video_widget)
+            
+            # 비디오 파일 경로 설정
+            video_path = resource_path("images/recapvoicelogo.mp4")
+            self.media_player.setSource(QUrl.fromLocalFile(video_path))
+            
+            # 창 테두리 제거 및 전체 화면 설정
+            self.setWindowFlag(Qt.FramelessWindowHint)
+            self.showFullScreen()
+            
+            # 비디오 재생 완료 시그널 연결
+            self.media_player.mediaStatusChanged.connect(self.handle_media_status)
+            
+            # 비디오 재생 시작
+            self.media_player.play()
+            
+        except Exception as e:
+            print(f"인트로 비디오 재생 중 오류: {e}")
+            self.initialize_main_window()
+
+    def handle_media_status(self, status):
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            # 비디오 재생이 끝나면 메인 창 초기화
+            self.initialize_main_window()
+
+    def initialize_main_window(self):
+        # 기존 비디오 위젯 제거
+        if hasattr(self, 'video_widget'):
+            self.video_widget.deleteLater()
+        if hasattr(self, 'media_player'):
+            self.media_player.deleteLater()
+
+        # 메인 창 초기화 전에 숨기기
+        self.hide()
+        
+        # 전체 화면 해제 및 창 설정 복원
+        self.setWindowFlag(Qt.FramelessWindowHint, False)
+        self.setWindowState(Qt.WindowMaximized)  # 미리 최대화 상태로 설정
+        
+        # 기존 초기화 코드 실행
         self.setWindowIcon(QIcon(resource_path("images/recapvoice_squere.ico")))
         self.setWindowTitle("Recap Voice")
         self.setAttribute(Qt.WA_QuitOnClose, False)
         self.block_creation_signal.connect(self.create_block_in_main_thread)
         self.block_update_signal.connect(self.update_block_in_main_thread)
         self.settings_popup = SettingsPopup()
-        # 재진입 락(RLock) 사용
         self.active_calls_lock = threading.RLock()
-        self.active_calls = {}            # call_id: 통화 정보 dict
-        self.call_state_machines = {}     # call_id: CallStateMachine
+        self.active_calls = {}
+        self.call_state_machines = {}
         self.capture_thread = None
         self.voip_timer = QTimer()
         self.voip_timer.timeout.connect(self.update_voip_status)
@@ -151,12 +202,14 @@ class Dashboard(QMainWindow):
         self.duration_timer.start(1000)
         self.wav_merger = WavMerger()
         self.chat_extractor = WavChatExtractor()
+
         try:
             self.mongo_client = MongoClient('mongodb://localhost:27017/')
             self.db = self.mongo_client['packetwave']
             self.filesinfo = self.db['filesinfo']
         except Exception as e:
             print(f"MongoDB 연결 실패: {e}")
+
         config = load_config()
         if config.get('Environment', 'mode') == 'production':
             wireshark_path = get_wireshark_path()
@@ -200,9 +253,8 @@ class Dashboard(QMainWindow):
             print("클라이언트 서버가 자동으로 시작되었습니다.")
         except Exception as e:
             print(f"클라이언트 서버 자동 시작 실패: {e}")
-        QTimer.singleShot(100, self.ensure_window_visible)
+
         atexit.register(self.cleanup)
-        QTimer.singleShot(100, self.initialize_window_state)
         
         # 리소스 모니터링 타이머 설정
         self.resource_timer = QTimer()
@@ -218,15 +270,14 @@ class Dashboard(QMainWindow):
         self.check_system_limits()
         self.setup_crash_handler()
 
-    def initialize_window_state(self):
-        self.setWindowState(Qt.WindowMaximized)
+        # UI가 완전히 준비된 후 창 표시
+        QTimer.singleShot(100, self.show_maximized_window)
 
-    def ensure_window_visible(self):
+    def show_maximized_window(self):
+        """최대화된 상태로 창을 표시"""
         self.show()
         self.raise_()
         self.activateWindow()
-        if self.windowState() != Qt.WindowMaximized:
-            self.setWindowState(Qt.WindowMaximized)
 
     def cleanup(self):
         if hasattr(self, 'capture') and self.capture:
