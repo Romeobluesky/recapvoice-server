@@ -159,119 +159,169 @@ class Dashboard(QMainWindow):
             self.initialize_main_window()
 
     def initialize_main_window(self):
-        # 기존 비디오 위젯 제거
-        if hasattr(self, 'video_widget'):
-            self.video_widget.deleteLater()
-        if hasattr(self, 'media_player'):
-            self.media_player.deleteLater()
-
-        # 메인 창 초기화 전에 숨기기
-        self.hide()
-        
-        # 전체 화면 해제 및 창 설정 복원
-        self.setWindowFlag(Qt.FramelessWindowHint, False)
-        self.setWindowState(Qt.WindowMaximized)  # 미리 최대화 상태로 설정
-        
-        # 기존 초기화 코드 실행
-        self.setWindowIcon(QIcon(resource_path("images/recapvoice_squere.ico")))
-        self.setWindowTitle("Recap Voice")
-        self.setAttribute(Qt.WA_QuitOnClose, False)
-        self.block_creation_signal.connect(self.create_block_in_main_thread)
-        self.block_update_signal.connect(self.update_block_in_main_thread)
-        self.settings_popup = SettingsPopup()
-        self.active_calls_lock = threading.RLock()
-        self.active_calls = {}
-        self.call_state_machines = {}
-        self.capture_thread = None
-        self.voip_timer = QTimer()
-        self.voip_timer.timeout.connect(self.update_voip_status)
-        self.voip_timer.start(1000)
-        self.streams = {}
-        self.packet_timer = QTimer()
-        self.packet_timer.timeout.connect(self.update_packet_status)
-        self.packet_timer.start(1000)
-        self.sip_registrations = {}
-        self.first_registration = False
-        self.packet_get = 0
-        self._init_ui()
-        self.selected_interface = None
-        self.load_network_interfaces()
-        QTimer.singleShot(1000, self.start_packet_capture)
-        self.duration_timer = QTimer()
-        self.duration_timer.timeout.connect(self.update_call_duration)
-        self.duration_timer.start(1000)
-        self.wav_merger = WavMerger()
-        self.chat_extractor = WavChatExtractor()
-
         try:
-            self.mongo_client = MongoClient('mongodb://localhost:27017/')
-            self.db = self.mongo_client['packetwave']
-            self.filesinfo = self.db['filesinfo']
-        except Exception as e:
-            print(f"MongoDB 연결 실패: {e}")
-
-        config = load_config()
-        if config.get('Environment', 'mode') == 'production':
-            wireshark_path = get_wireshark_path()
-            def hide_wireshark_windows():
+            # 기존 비디오 위젯 제거
+            if hasattr(self, 'video_widget'):
                 try:
-                    for proc in psutil.process_iter(['pid', 'name', 'exe']):
-                        if proc.info['name'] in ['dumpcap.exe', 'tshark.exe']:
-                            if proc.info['exe'] and wireshark_path in proc.info['exe']:
-                                def enum_windows_callback(hwnd, _):
-                                    try:
-                                        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                                        if pid == proc.info['pid']:
-                                            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-                                            style &= ~win32con.WS_VISIBLE
-                                            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
-                                            win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-                                    except:
-                                        pass
-                                    return True
-                                win32gui.EnumWindows(enum_windows_callback, None)
+                    self.video_widget.deleteLater()
                 except Exception as e:
-                    print(f"Error hiding windows: {e}")
-            self.hide_console_timer = QTimer()
-            self.hide_console_timer.timeout.connect(hide_wireshark_windows)
-            self.hide_console_timer.start(100)
-        self.setup_tray_icon()
-        try:
-            subprocess.Popen(['start.bat'], shell=True)
-            self.on_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #FF0000;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    min-height: 35px;
-                }
-                QPushButton:hover {
-                    background-color: #CC0000;
-                }
-            """)
-            print("클라이언트 서버가 자동으로 시작되었습니다.")
+                    self.log_error("비디오 위젯 제거 실패", e)
+                
+            if hasattr(self, 'media_player'):
+                try:
+                    self.media_player.deleteLater()
+                except Exception as e:
+                    self.log_error("미디어 플레이어 제거 실패", e)
+
+            # 메인 창 초기화 전에 숨기기
+            try:
+                self.hide()
+            except Exception as e:
+                self.log_error("창 숨기기 실패", e)
+        
+            # 전체 화면 해제 및 창 설정 복원
+            try:
+                self.setWindowFlag(Qt.FramelessWindowHint, False)
+                self.setWindowState(Qt.WindowMaximized)  # 미리 최대화 상태로 설정
+            except Exception as e:
+                self.log_error("창 상태 설정 실패", e)
+        
+            # 기존 초기화 코드 실행
+            try:
+                self.setWindowIcon(QIcon(resource_path("images/recapvoice_squere.ico")))
+                self.setWindowTitle("Recap Voice")
+                self.setAttribute(Qt.WA_QuitOnClose, False)
+                self.block_creation_signal.connect(self.create_block_in_main_thread)
+                self.block_update_signal.connect(self.update_block_in_main_thread)
+                self.settings_popup = SettingsPopup()
+                self.active_calls_lock = threading.RLock()
+                self.active_calls = {}
+                self.call_state_machines = {}
+                self.capture_thread = None
+                self.voip_timer = QTimer()
+                self.voip_timer.timeout.connect(self.update_voip_status)
+                self.voip_timer.start(1000)
+                self.streams = {}
+                self.packet_timer = QTimer()
+                self.packet_timer.timeout.connect(self.update_packet_status)
+                self.packet_timer.start(1000)
+                self.sip_registrations = {}
+                self.first_registration = False
+                self.packet_get = 0
+            except Exception as e:
+                self.log_error("기본 설정 초기화 실패", e)
+                raise
+
+            try:
+                self._init_ui()
+            except Exception as e:
+                self.log_error("UI 초기화 실패", e)
+                raise
+
+            try:
+                self.selected_interface = None
+                self.load_network_interfaces()
+                QTimer.singleShot(1000, self.start_packet_capture)
+            except Exception as e:
+                self.log_error("네트워크 인터페이스 초기화 실패", e)
+
+            try:
+                self.duration_timer = QTimer()
+                self.duration_timer.timeout.connect(self.update_call_duration)
+                self.duration_timer.start(1000)
+                self.wav_merger = WavMerger()
+                self.chat_extractor = WavChatExtractor()
+            except Exception as e:
+                self.log_error("타이머 및 유틸리티 초기화 실패", e)
+
+            try:
+                self.mongo_client = MongoClient('mongodb://localhost:27017/')
+                self.db = self.mongo_client['packetwave']
+                self.filesinfo = self.db['filesinfo']
+            except Exception as e:
+                self.log_error("MongoDB 연결 실패", e)
+
+            config = load_config()
+            if config.get('Environment', 'mode') == 'production':
+                try:
+                    wireshark_path = get_wireshark_path()
+                    def hide_wireshark_windows():
+                        try:
+                            for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                                if proc.info['name'] in ['dumpcap.exe', 'tshark.exe']:
+                                    if proc.info['exe'] and wireshark_path in proc.info['exe']:
+                                        def enum_windows_callback(hwnd, _):
+                                            try:
+                                                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                                                if pid == proc.info['pid']:
+                                                    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+                                                    style &= ~win32con.WS_VISIBLE
+                                                    win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+                                                    win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                                            except Exception as callback_error:
+                                                self.log_error("윈도우 콜백 처리 실패", callback_error)
+                                            return True
+                                        win32gui.EnumWindows(enum_windows_callback, None)
+                        except Exception as hide_error:
+                            self.log_error("Wireshark 윈도우 숨기기 실패", hide_error)
+                        
+                    self.hide_console_timer = QTimer()
+                    self.hide_console_timer.timeout.connect(hide_wireshark_windows)
+                    self.hide_console_timer.start(100)
+                except Exception as e:
+                    self.log_error("Wireshark 설정 실패", e)
+
+            try:
+                self.setup_tray_icon()
+            except Exception as e:
+                self.log_error("트레이 아이콘 설정 실패", e)
+
+            try:
+                subprocess.Popen(['start.bat'], shell=True)
+                self.on_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #FF0000;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        min-height: 35px;
+                    }
+                    QPushButton:hover {
+                        background-color: #CC0000;
+                    }
+                """)
+                print("클라이언트 서버가 자동으로 시작되었습니다.")
+            except Exception as e:
+                self.log_error("클라이언트 서버 시작 실패", e)
+
+            try:
+                atexit.register(self.cleanup)
+                
+                # 리소스 모니터링 타이머 설정
+                self.resource_timer = QTimer()
+                self.resource_timer.timeout.connect(self.monitor_system_resources)
+                self.resource_timer.start(10000)  # 10초마다 체크
+                
+                # 스레드 관리를 위한 변수 추가
+                self.active_threads = set()
+                self.thread_lock = threading.Lock()
+                
+                # 의존성 및 시스템 제한 체크
+                self.check_dependencies()
+                self.check_system_limits()
+                self.setup_crash_handler()
+            except Exception as e:
+                self.log_error("시스템 모니터링 설정 실패", e)
+
+            # UI가 완전히 준비된 후 창 표시
+            try:
+                QTimer.singleShot(100, self.show_maximized_window)
+            except Exception as e:
+                self.log_error("창 표시 실패", e)
+            
         except Exception as e:
-            print(f"클라이언트 서버 자동 시작 실패: {e}")
-
-        atexit.register(self.cleanup)
-        
-        # 리소스 모니터링 타이머 설정
-        self.resource_timer = QTimer()
-        self.resource_timer.timeout.connect(self.monitor_system_resources)
-        self.resource_timer.start(10000)  # 10초마다 체크
-        
-        # 스레드 관리를 위한 변수 추가
-        self.active_threads = set()
-        self.thread_lock = threading.Lock()
-        
-        # 의존성 및 시스템 제한 체크
-        self.check_dependencies()
-        self.check_system_limits()
-        self.setup_crash_handler()
-
-        # UI가 완전히 준비된 후 창 표시
-        QTimer.singleShot(100, self.show_maximized_window)
+            self.log_error("메인 윈도우 초기화 중 심각한 오류", e)
+            raise
 
     def show_maximized_window(self):
         """최대화된 상태로 창을 표시"""
@@ -1023,208 +1073,263 @@ class Dashboard(QMainWindow):
             sys.stderr.flush()
 
     def analyze_sip_packet(self, packet):
+        if not hasattr(packet, 'sip'):
+            self.log_error("SIP 레이어가 없는 패킷")
+            return
+
         try:
             sip_layer = packet.sip
+            if not hasattr(sip_layer, 'call_id'):
+                self.log_error("Call-ID가 없는 SIP 패킷")
+                return
+                
             call_id = sip_layer.call_id
-            if hasattr(sip_layer, 'request_line'):
-                request_line = str(sip_layer.request_line)
-                self.log_error("SIP 패킷 분석", additional_info={
-                    "request_line": request_line,
-                    "call_id": call_id
-                })
+            
+            try:
+                if hasattr(sip_layer, 'request_line'):
+                    request_line = str(sip_layer.request_line)
+                    self.log_error("SIP 패킷 분석", additional_info={
+                        "request_line": request_line,
+                        "call_id": call_id
+                    })
 
-                # INVITE 처리 시 블록 생성 로직 강화
-                if 'INVITE' in request_line:
-                    try:
-                        from_number = self.extract_number(sip_layer.from_user)
-                        to_number = self.extract_number(sip_layer.to_user)
-                        
-                        # 내선번호 확인 및 블록 생성
-                        extension = None
-                        if len(from_number) == 4 and from_number[0] in '123456789':
-                            extension = from_number
-                        elif len(to_number) == 4 and to_number[0] in '123456789':
-                            extension = to_number
-                        
-                        if extension:
-                            self.log_error("내선 블록 생성 시도", additional_info={
-                                "extension": extension,
-                                "from_number": from_number,
-                                "to_number": to_number
-                            })
-                            # 메인 스레드에서 블록 생성
-                            self.block_creation_signal.emit(extension)
-                        
-                        # 기존 통화 정보 저장 로직
-                        with self.active_calls_lock:
-                            before_state = dict(self.active_calls) if call_id in self.active_calls else None
-                            self.active_calls[call_id] = {
-                                'start_time': datetime.datetime.now(),
-                                'status': '시도중',
-                                'from_number': from_number,
-                                'to_number': to_number,
-                                'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
-                                'media_endpoints': []
-                            }
-                            after_state = dict(self.active_calls[call_id])
-                            self.log_error("통화 상태 업데이트", additional_info={
-                                "before": before_state,
-                                "after": after_state
-                            })
-                            
-                            self.call_state_machines[call_id] = CallStateMachine()
-                            self.call_state_machines[call_id].update_state(CallState.TRYING)
-                        self.update_call_status(call_id, '시도중')
-                        
-                    except Exception as invite_error:
-                        self.log_error("INVITE 처리 중 오류", invite_error)
-
-                elif 'REFER' in request_line:
-                    try:
-                        with open('voip_monitor.log', 'a', encoding='utf-8') as log_file:
-                            log_file.write("\n=== 돌려주기 요청 감지 ===\n")
-                            log_file.write(f"시간: {datetime.datetime.now()}\n")
-                            log_file.write(f"Call-ID: {call_id}\n")
-                            log_file.write(f"Request Line: {request_line}\n")
-                            
-                            # active_calls 상태 로깅
-                            with self.active_calls_lock:
-                                if call_id not in self.active_calls:
-                                    log_file.write(f"[오류] 해당 Call-ID를 찾을 수 없음: {call_id}\n")
-                                    return
-                                original_call = dict(self.active_calls[call_id])
-                                log_file.write(f"현재 통화 정보: {original_call}\n")
-                            
-                            # 필수 정보 확인
-                            if not all(k in original_call for k in ['to_number', 'from_number']):
-                                log_file.write("[오류] 필수 통화 정보 누락\n")
-                                log_file.write(f"누락된 정보: {set(['to_number', 'from_number']) - set(original_call.keys())}\n")
-                                return
-                                
-                            external_number = original_call['to_number']
-                            forwarding_ext = original_call['from_number']
-                            
-                            # REFER-TO 헤더 확인
-                            if not hasattr(sip_layer, 'refer_to'):
-                                log_file.write("[오류] REFER 헤더가 존재하지 않습니다.\n")
-                                log_file.write(f"사용 가능한 SIP 헤더들: {dir(sip_layer)}\n")
-                                return
-                                
-                            refer_to = str(sip_layer.refer_to)
-                            log_file.write(f"REFER-TO 헤더: {refer_to}\n")
-                            
-                            forwarded_ext = self.extract_number(refer_to.split('@')[0])
-                            if not forwarded_ext:
-                                log_file.write("[오류] 유효하지 않은 Refer-To 번호\n")
-                                return
-                                
-                            log_file.write(f"발신번호(유지): {external_number}\n")
-                            log_file.write(f"수신번호(유지): {forwarding_ext}\n")
-                            log_file.write(f"돌려받을 내선: {forwarded_ext}\n")
-                            
-                            # 통화 상태 업데이트
-                            update_info = {
-                                'status': '통화중',
-                                'is_forwarded': True,
-                                'forward_to': forwarded_ext,
-                                'result': '돌려주기',
-                                'from_number': external_number,
-                                'to_number': forwarding_ext
-                            }
-                            
-                            with self.active_calls_lock:
-                                if call_id in self.active_calls:
-                                    before_update = dict(self.active_calls[call_id])
-                                    self.active_calls[call_id].update(update_info)
-                                    after_update = dict(self.active_calls[call_id])
-                                    log_file.write("통화 상태 업데이트:\n")
-                                    log_file.write(f"업데이트 전: {before_update}\n")
-                                    log_file.write(f"업데이트 후: {after_update}\n")
-                                    
-                                    # 관련 통화 상태도 업데이트
-                                    for active_call_id, call_info in self.active_calls.items():
-                                        if (call_info.get('from_number') == forwarding_ext and 
-                                            call_info.get('to_number') == forwarding_ext):
-                                            before_related = dict(call_info)
-                                            call_info.update({
-                                                'status': '통화중',
-                                                'result': '돌려주기'
-                                            })
-                                            after_related = dict(call_info)
-                                            log_file.write(f"관련 통화 업데이트 (Call-ID: {active_call_id}):\n")
-                                            log_file.write(f"업데이트 전: {before_related}\n")
-                                            log_file.write(f"업데이트 후: {after_related}\n")
-                            
-                            log_file.write("=== 돌려주기 처리 완료 ===\n\n")
-                            
-                    except Exception as ex:
-                        with open('voip_monitor.log', 'a', encoding='utf-8') as log_file:
-                            log_file.write(f"\n[심각한 오류] REFER 처리 중 예외 발생: {ex}\n")
-                            import traceback
-                            log_file.write(traceback.format_exc())
-                            log_file.write("\n")
-                        return
-                elif 'BYE' in request_line:
-                    try:
-                        with self.active_calls_lock:
-                            if call_id in self.active_calls:
-                                before_state = dict(self.active_calls[call_id])
-                                self.update_call_status(call_id, '통화종료', '정상종료')
-                                extension = self.get_extension_from_call(call_id)
-                                after_state = dict(self.active_calls[call_id])
-                                self.log_error("BYE 처리", additional_info={
-                                    "extension": extension,
-                                    "before_state": before_state,
-                                    "after_state": after_state
+                    # INVITE 처리
+                    if 'INVITE' in request_line:
+                        try:
+                            if not hasattr(sip_layer, 'from_user') or not hasattr(sip_layer, 'to_user'):
+                                self.log_error("필수 SIP 헤더 누락", additional_info={
+                                    "call_id": call_id,
+                                    "request_line": request_line
                                 })
-                        if extension:
-                            self.block_update_signal.emit(extension, "대기중", "")
-                    except Exception as bye_error:
-                        self.log_error("BYE 처리 중 오류", bye_error)
-                        
-                elif 'CANCEL' in request_line:
-                    try:
-                        with self.active_calls_lock:
-                            if call_id in self.active_calls:
-                                before_state = dict(self.active_calls[call_id])
-                                self.update_call_status(call_id, '통화종료', '발신취소')
-                                extension = self.get_extension_from_call(call_id)
-                                after_state = dict(self.active_calls[call_id])
-                                self.log_error("CANCEL 처리", additional_info={
-                                    "extension": extension,
-                                    "before_state": before_state,
-                                    "after_state": after_state
+                                return
+                                
+                            from_number = self.extract_number(sip_layer.from_user)
+                            to_number = self.extract_number(sip_layer.to_user)
+                            
+                            if not from_number or not to_number:
+                                self.log_error("유효하지 않은 전화번호", additional_info={
+                                    "from_user": str(sip_layer.from_user),
+                                    "to_user": str(sip_layer.to_user)
                                 })
-                        if extension:
-                            self.block_update_signal.emit(extension, "대기중", "")
-                    except Exception as cancel_error:
-                        self.log_error("CANCEL 처리 중 오류", cancel_error)
-                        
-            elif hasattr(sip_layer, 'status_line'):
-                status_code = sip_layer.status_code
-                if status_code == '100':
-                    extension = self.extract_number(sip_layer.from_user)
-                    if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
-                        self.block_update_signal.emit(extension, "대기중", "")
-                with self.active_calls_lock:
-                    if call_id in self.active_calls:
-                        if status_code == '183':
-                            self.update_call_status(call_id, '벨울림')
-                            extension = self.get_extension_from_call(call_id)
+                                return
+                            
+                            # 내선번호 확인 및 블록 생성
+                            extension = None
+                            if len(from_number) == 4 and from_number[0] in '123456789':
+                                extension = from_number
+                            elif len(to_number) == 4 and to_number[0] in '123456789':
+                                extension = to_number
+                            
                             if extension:
-                                received_number = self.active_calls[call_id]['to_number']
-                                self.block_update_signal.emit(extension, "벨울림", received_number)
-                        elif status_code == '200':
-                            if self.active_calls[call_id]['status'] != '통화종료':
-                                self.update_call_status(call_id, '통화중')
-                                extension = self.get_extension_from_call(call_id)
-                                if extension:
-                                    received_number = self.active_calls[call_id]['to_number']
-                                    self.block_update_signal.emit(extension, "통화중", received_number)
+                                self.log_error("내선 블록 생성 시도", additional_info={
+                                    "extension": extension,
+                                    "from_number": from_number,
+                                    "to_number": to_number
+                                })
+                                self.block_creation_signal.emit(extension)
+                            
+                            # 통화 정보 저장
+                            with self.active_calls_lock:
+                                try:
+                                    before_state = dict(self.active_calls) if call_id in self.active_calls else None
+                                    self.active_calls[call_id] = {
+                                        'start_time': datetime.datetime.now(),
+                                        'status': '시도중',
+                                        'from_number': from_number,
+                                        'to_number': to_number,
+                                        'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
+                                        'media_endpoints': []
+                                    }
+                                    after_state = dict(self.active_calls[call_id])
+                                    self.log_error("통화 상태 업데이트", additional_info={
+                                        "before": before_state,
+                                        "after": after_state
+                                    })
+                                    
+                                    self.call_state_machines[call_id] = CallStateMachine()
+                                    self.call_state_machines[call_id].update_state(CallState.TRYING)
+                                except Exception as state_error:
+                                    self.log_error("통화 상태 업데이트 실패", state_error)
+                                    return
+                                    
+                            self.update_call_status(call_id, '시도중')
+                            
+                        except Exception as invite_error:
+                            self.log_error("INVITE 처리 중 오류", invite_error)
+                            return
+
+                    # REFER 처리
+                    elif 'REFER' in request_line:
+                        try:
+                            self._handle_refer_request(sip_layer, call_id, request_line)
+                        except Exception as refer_error:
+                            self.log_error("REFER 처리 중 오류", refer_error)
+                            return
+
+                    # BYE 처리
+                    elif 'BYE' in request_line:
+                        try:
+                            self._handle_bye_request(call_id)
+                        except Exception as bye_error:
+                            self.log_error("BYE 처리 중 오류", bye_error)
+                            return
+
+                    # CANCEL 처리
+                    elif 'CANCEL' in request_line:
+                        try:
+                            self._handle_cancel_request(call_id)
+                        except Exception as cancel_error:
+                            self.log_error("CANCEL 처리 중 오류", cancel_error)
+                            return
+
+                # 응답 처리
+                elif hasattr(sip_layer, 'status_line'):
+                    try:
+                        self._handle_sip_response(sip_layer, call_id)
+                    except Exception as response_error:
+                        self.log_error("SIP 응답 처리 중 오류", response_error)
+                        return
+
+            except Exception as method_error:
+                self.log_error("SIP 메소드 처리 중 오류", method_error)
+                return
+
         except Exception as e:
             self.log_error("SIP 패킷 분석 중 심각한 오류", e)
             import traceback
-            print(traceback.format_exc())
+            self.log_error("상세 오류 정보", additional_info={"traceback": traceback.format_exc()})
+
+    def _handle_refer_request(self, sip_layer, call_id, request_line):
+        """REFER 요청 처리를 위한 헬퍼 메소드"""
+        with open('voip_monitor.log', 'a', encoding='utf-8') as log_file:
+            log_file.write("\n=== 돌려주기 요청 감지 ===\n")
+            log_file.write(f"시간: {datetime.datetime.now()}\n")
+            log_file.write(f"Call-ID: {call_id}\n")
+            log_file.write(f"Request Line: {request_line}\n")
+            
+            with self.active_calls_lock:
+                if call_id not in self.active_calls:
+                    log_file.write(f"[오류] 해당 Call-ID를 찾을 수 없음: {call_id}\n")
+                    return
+                    
+                original_call = dict(self.active_calls[call_id])
+                log_file.write(f"현재 통화 정보: {original_call}\n")
+                
+                if not all(k in original_call for k in ['to_number', 'from_number']):
+                    log_file.write("[오류] 필수 통화 정보 누락\n")
+                    return
+                    
+                if not hasattr(sip_layer, 'refer_to'):
+                    log_file.write("[오류] REFER-TO 헤더 누락\n")
+                    return
+                    
+                refer_to = str(sip_layer.refer_to)
+                forwarded_ext = self.extract_number(refer_to.split('@')[0])
+                
+                if not forwarded_ext:
+                    log_file.write("[오류] 유효하지 않은 Refer-To 번호\n")
+                    return
+                    
+                self._update_call_for_refer(call_id, original_call, forwarded_ext, log_file)
+
+    def _handle_bye_request(self, call_id):
+        """BYE 요청 처리를 위한 헬퍼 메소드"""
+        with self.active_calls_lock:
+            if call_id in self.active_calls:
+                before_state = dict(self.active_calls[call_id])
+                self.update_call_status(call_id, '통화종료', '정상종료')
+                extension = self.get_extension_from_call(call_id)
+                after_state = dict(self.active_calls[call_id])
+                self.log_error("BYE 처리", additional_info={
+                    "extension": extension,
+                    "before_state": before_state,
+                    "after_state": after_state
+                })
+                if extension:
+                    self.block_update_signal.emit(extension, "대기중", "")
+
+    def _handle_cancel_request(self, call_id):
+        """CANCEL 요청 처리를 위한 헬퍼 메소드"""
+        with self.active_calls_lock:
+            if call_id in self.active_calls:
+                before_state = dict(self.active_calls[call_id])
+                self.update_call_status(call_id, '통화종료', '발신취소')
+                extension = self.get_extension_from_call(call_id)
+                after_state = dict(self.active_calls[call_id])
+                self.log_error("CANCEL 처리", additional_info={
+                    "extension": extension,
+                    "before_state": before_state,
+                    "after_state": after_state
+                })
+                if extension:
+                    self.block_update_signal.emit(extension, "대기중", "")
+
+    def _handle_sip_response(self, sip_layer, call_id):
+        """SIP 응답 처리를 위한 헬퍼 메소드"""
+        status_code = sip_layer.status_code
+        if status_code == '100':
+            extension = self.extract_number(sip_layer.from_user)
+            if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
+                self.block_update_signal.emit(extension, "대기중", "")
+                
+        with self.active_calls_lock:
+            if call_id in self.active_calls:
+                if status_code == '183':
+                    self.update_call_status(call_id, '벨울림')
+                    extension = self.get_extension_from_call(call_id)
+                    if extension:
+                        received_number = self.active_calls[call_id]['to_number']
+                        self.block_update_signal.emit(extension, "벨울림", received_number)
+                elif status_code == '200':
+                    if self.active_calls[call_id]['status'] != '통화종료':
+                        self.update_call_status(call_id, '통화중')
+                        extension = self.get_extension_from_call(call_id)
+                        if extension:
+                            received_number = self.active_calls[call_id]['to_number']
+                            self.block_update_signal.emit(extension, "통화중", received_number)
+
+    def _update_call_for_refer(self, call_id, original_call, forwarded_ext, log_file):
+        """REFER 요청에 대한 통화 상태 업데이트"""
+        external_number = original_call['to_number']
+        forwarding_ext = original_call['from_number']
+        
+        log_file.write(f"발신번호(유지): {external_number}\n")
+        log_file.write(f"수신번호(유지): {forwarding_ext}\n")
+        log_file.write(f"돌려받을 내선: {forwarded_ext}\n")
+        
+        update_info = {
+            'status': '통화중',
+            'is_forwarded': True,
+            'forward_to': forwarded_ext,
+            'result': '돌려주기',
+            'from_number': external_number,
+            'to_number': forwarding_ext
+        }
+        
+        with self.active_calls_lock:
+            if call_id in self.active_calls:
+                before_update = dict(self.active_calls[call_id])
+                self.active_calls[call_id].update(update_info)
+                after_update = dict(self.active_calls[call_id])
+                log_file.write("통화 상태 업데이트:\n")
+                log_file.write(f"업데이트 전: {before_update}\n")
+                log_file.write(f"업데이트 후: {after_update}\n")
+                
+                # 관련 통화 상태도 업데이트
+                for active_call_id, call_info in self.active_calls.items():
+                    if (call_info.get('from_number') == forwarding_ext and 
+                        call_info.get('to_number') == forwarding_ext):
+                        before_related = dict(call_info)
+                        call_info.update({
+                            'status': '통화중',
+                            'result': '돌려주기'
+                        })
+                        after_related = dict(call_info)
+                        log_file.write(f"관련 통화 업데이트 (Call-ID: {active_call_id}):\n")
+                        log_file.write(f"업데이트 전: {before_related}\n")
+                        log_file.write(f"업데이트 후: {after_related}\n")
+        
+        log_file.write("=== 돌려주기 처리 완료 ===\n\n")
 
     def handle_new_call(self, sip_layer, call_id):
         try:
@@ -2077,7 +2182,7 @@ class Dashboard(QMainWindow):
                     "cpu_percent": cpu_percent,
                     "threads": len(process.threads()),
                     "open_files": len(process.open_files()),
-                    "connections": len(process.connections())
+                    "connections": len(process.net_connections())  # connections() -> net_connections()로 변경
                 })
                 
             # 스레드 상태 모니터링
@@ -2097,12 +2202,15 @@ class Dashboard(QMainWindow):
                 })
                 
             # 네트워크 연결 모니터링
-            connections = process.connections()
-            if len(connections) > 100:  # 연결이 너무 많은 경우
-                self.log_error("과도한 네트워크 연결", additional_info={
-                    "connection_count": len(connections),
-                    "connection_status": [c.status for c in connections]
-                })
+            try:
+                connections = process.net_connections()  # connections() -> net_connections()로 변경
+                if len(connections) > 100:  # 연결이 너무 많은 경우
+                    self.log_error("과도한 네트워크 연결", additional_info={
+                        "connection_count": len(connections),
+                        "connection_status": [c.status for c in connections]
+                    })
+            except psutil.AccessDenied:
+                self.log_error("네트워크 연결 모니터링 권한 없음")
                 
         except Exception as e:
             self.log_error("리소스 모니터링 오류", e)
@@ -2383,27 +2491,102 @@ class RTPStreamManager:
             print(f"버퍼 크기 조정 중 오류: {e}")
 
     def process_packet(self, stream_key, audio_data, sequence, payload_type):
+        if not stream_key or not audio_data:
+            print("유효하지 않은 스트림 키 또는 오디오 데이터")
+            return
+
+        if stream_key not in self.stream_locks:
+            print(f"스트림 락이 존재하지 않음: {stream_key}")
+            return
+
         try:
             with self.stream_locks[stream_key]:
+                if stream_key not in self.active_streams:
+                    print(f"활성 스트림이 존재하지 않음: {stream_key}")
+                    return
+
                 stream_info = self.active_streams[stream_key]
-                if not stream_info['saved']:
+                
+                if stream_info['saved']:
+                    print("이미 저장된 스트림")
+                    return
+
+                try:
                     print(f"패킷 수신 - 시퀀스: {sequence}, 크기: {len(audio_data)} bytes")
+                    
+                    # 시퀀스 번호 검증
                     if stream_info['sequence'] > 0:
                         expected_sequence = (stream_info['sequence'] + 1) % 65536
                         if sequence != expected_sequence:
                             print(f"시퀀스 불연속 감지: 예상={expected_sequence}, 실제={sequence}")
+                            # 시퀀스 불연속 로깅
+                            self._log_sequence_discontinuity(stream_key, expected_sequence, sequence)
+                    
+                    # 중복 패킷 체크
                     if sequence <= stream_info['sequence']:
                         print(f"중복 패킷 무시: 현재={stream_info['sequence']}, 수신={sequence}")
                         return
-                    stream_info['audio_data'].extend(audio_data)
+
+                    # 메모리 사용량 체크
+                    current_memory = len(stream_info['audio_data'])
+                    if current_memory > self.max_buffer_size * 2:
+                        print(f"경고: 버퍼 크기 초과 - {current_memory} bytes")
+                        self._handle_buffer_overflow(stream_key)
+                        return
+
+                    # 오디오 데이터 추가
+                    try:
+                        stream_info['audio_data'].extend(audio_data)
+                    except Exception as extend_error:
+                        print(f"오디오 데이터 추가 실패: {extend_error}")
+                        return
+
                     stream_info['sequence'] = sequence
                     stream_info['packet_count'] += 1
-                    print(f"버퍼 상태 - 현재크기: {len(stream_info['audio_data'])}, 목표크기: {stream_info['current_buffer_size']}, 내선통화: {stream_info['is_internal_call']}")
+
+                    print(f"버퍼 상태 - 현재크기: {len(stream_info['audio_data'])}, "
+                          f"목표크기: {stream_info['current_buffer_size']}, "
+                          f"내선통화: {stream_info['is_internal_call']}")
+
+                    # 버퍼 크기 체크 및 WAV 파일 쓰기
                     if len(stream_info['audio_data']) >= stream_info['current_buffer_size']:
-                        self._write_to_wav(stream_key, payload_type)
-                        self._adjust_buffer_size(stream_info)
+                        try:
+                            self._write_to_wav(stream_key, payload_type)
+                        except Exception as write_error:
+                            print(f"WAV 파일 쓰기 실패: {write_error}")
+                            return
+
+                        try:
+                            self._adjust_buffer_size(stream_info)
+                        except Exception as adjust_error:
+                            print(f"버퍼 크기 조정 실패: {adjust_error}")
+
+                except Exception as process_error:
+                    print(f"패킷 처리 중 오류: {process_error}")
+                    import traceback
+                    print(traceback.format_exc())
+
+        except Exception as lock_error:
+            print(f"스트림 락 획득 실패: {lock_error}")
+            import traceback
+            print(traceback.format_exc())
+
+    def _log_sequence_discontinuity(self, stream_key, expected, actual):
+        try:
+            with open('sequence_errors.log', 'a') as f:
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"[{timestamp}] 스트림: {stream_key}, 예상: {expected}, 실제: {actual}\n")
         except Exception as e:
-            print(f"패킷 처리 중 오류: {e}")
+            print(f"시퀀스 오류 로깅 실패: {e}")
+
+    def _handle_buffer_overflow(self, stream_key):
+        try:
+            stream_info = self.active_streams[stream_key]
+            # 버퍼의 후반부만 유지
+            stream_info['audio_data'] = stream_info['audio_data'][-self.max_buffer_size:]
+            print(f"버퍼 오버플로우 처리 완료 - 새 크기: {len(stream_info['audio_data'])} bytes")
+        except Exception as e:
+            print(f"버퍼 오버플로우 처리 실패: {e}")
 
     def _write_to_wav(self, stream_key, payload_type):
         try:

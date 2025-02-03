@@ -19,6 +19,7 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--add-data `"wav_merger.py;.`" " + `
     "--add-data `"styles\styles.qss;styles`" " + `
     "--add-data `"images;images`" " + `
+    "--add-data `"sounds;sounds`" " + `
     "--version-file `"version.txt`" " + `
     "--hidden-import `"pymongo`" " + `
     "--hidden-import `"pydub`" " + `
