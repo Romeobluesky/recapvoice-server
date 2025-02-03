@@ -25,9 +25,6 @@ VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
 !include "nsisunz.nsh"
 !include "StrFunc.nsh"
 
-# 문자열 함수 초기화
-${StrRep}
-
 # MUI 설정
 !define MUI_ABORTWARNING
 !define MUI_ICON "images\recapvoice_squere.ico"
@@ -102,8 +99,8 @@ Section "Prerequisites"
 
    # Node.js 설치
    DetailPrint "Installing Node.js..."
-   File "prereq\node-v20.11.1-x64.msi"
-   ExecWait '"msiexec" /i "$INSTDIR\prereq\node-v20.11.1-x64.msi" /quiet /norestart'
+   File "prereq\node-v20.18.2-x64.msi"
+   ExecWait '"msiexec" /i "$INSTDIR\prereq\node-v20.18.2-x64.msi" /quiet /norestart'
    
    # FFmpeg 설치 (64비트 버전)
    DetailPrint "Installing FFmpeg..."
@@ -237,15 +234,9 @@ Function AddToPath
    Exch $0  ; 추가할 경로
    Push $1  ; 현재 PATH 값
    Push $2  ; 임시 변수
-   Push $3  ; 전체 PATH 길이
    
    # 현재 PATH 값 읽기
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   
-   # 중복 경로 제거를 먼저 수행
-   ${StrRep} $1 $1 ";%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\;%SYSTEMROOT%\System32\OpenSSH\;" ";"
-   ${StrRep} $1 $1 ";;;" ";"
-   ${StrRep} $1 $1 ";;" ";"
    
    # 이미 경로가 존재하는지 확인
    Push $1
@@ -267,31 +258,13 @@ Function AddToPath
          ${EndIf}
       ${EndIf}
       
-      # 새 경로 추가 전 길이 체크
-      StrLen $3 "$1$0;"
-      ${If} $3 > 2047
-         DetailPrint "PATH가 너무 깁니다. 기존 경로를 정리합니다."
-         # 불필요한 중복 경로 제거
-         ${StrRep} $1 $1 "C:\Program Files\Common Files\;" ""
-         ${StrRep} $1 $1 "C:\Program Files (x86)\Common Files\;" ""
-      ${EndIf}
-      
       # 새 경로 추가
       StrCpy $1 "$1$0;"
-      # 최종 길이 다시 체크
-      StrLen $3 $1
-      ${If} $3 > 2047
-         MessageBox MB_OK|MB_ICONEXCLAMATION "경고: PATH 환경변수가 너무 깁니다. 일부 경로가 추가되지 않을 수 있습니다."
-         DetailPrint "PATH 길이 초과: $3 characters"
-         Goto done
-      ${EndIf}
-      
       WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $1
       SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
       DetailPrint "'$0' 경로가 PATH에 추가되었습니다."
 
 done:
-   Pop $3
    Pop $2
    Pop $1
    Pop $0
