@@ -1,7 +1,7 @@
 # PowerShell 스크립트
 $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--name `"Recap Voice`" " + `
-    "--icon=`"images\recapvoice_ico.ico`" " + `
+    "--icon=`"images\recapvoice_squere.ico`" " + `
     "--uac-admin " + `
     "--add-data `"settings.ini;.`" " + `
     "--add-data `"start.bat;.`" " + `
