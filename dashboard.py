@@ -2017,7 +2017,7 @@ class Dashboard(QMainWindow):
 
     def stop_client(self):
         try:
-            processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe','Dumpcap.exe']
+            processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
             import os
             for process in processes_to_kill:
                 os.system(f'taskkill /f /im {process}')
@@ -2072,8 +2072,22 @@ class Dashboard(QMainWindow):
             print(f"관리사이트 열기 실패: {e}")
             QMessageBox.warning(self, "오류", "관리사이트를 열 수 없습니다.")
 
+    def __init__(self, db_url, db_name):
+        self.db_url = db_url
+        self.db_name = db_name
+        self.client = MongoClient(self.db_url)
+        self.db = self.client[self.db_name]
+        self.filesinfo = self.db["filesinfo"]
+
     def _save_to_mongodb(self, merged_file, html_file, local_num, remote_num):
         try:
+            try:
+                self.mongo_client = MongoClient('mongodb://localhost:27017/')
+                self.db = self.mongo_client['packetwave']
+                self.members = self.db['members']
+            except Exception as e:
+                self.log_error("MongoDB members collection 연결 실패", e)
+
             max_id_doc = self.filesinfo.find_one(sort=[("id", -1)])
             next_id = 1 if max_id_doc is None else max_id_doc["id"] + 1
             now_kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
@@ -2096,6 +2110,9 @@ class Dashboard(QMainWindow):
                 "down_count": 0,
                 "created_at": now_kst,
                 "playtime": duration_formatted,
+                "per_lv10": "admin",
+                "per_lv8": "",
+                "per_lv9": "",
             }
             result = self.filesinfo.insert_one(doc)
             print(f"MongoDB 저장 완료: {result.inserted_id} (재생시간: {duration_formatted})")
