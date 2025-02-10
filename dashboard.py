@@ -15,6 +15,18 @@ import time
 import traceback  # 추가된 import
 import platform  # 추가된 import
 
+# Windows 관련 import
+import win32gui
+import win32con
+import win32process
+import win32event
+import win32api
+import winerror
+
+# 기존 창 활성화를 위한 메시지 전송
+import win32gui
+import win32con
+
 # 서드파티 라이브러리
 import requests
 import pyshark
@@ -49,11 +61,6 @@ def kill_processes():
         subprocess.call(['taskkill', '/f', '/im', process])
 
 atexit.register(kill_processes)
-
-# 추가 import (윈도우 관련)
-import win32gui
-import win32con
-import win32process
 
 def resource_path(relative_path):
     """리소스 파일의 절대 경로를 반환"""
@@ -2072,21 +2079,13 @@ class Dashboard(QMainWindow):
             print(f"관리사이트 열기 실패: {e}")
             QMessageBox.warning(self, "오류", "관리사이트를 열 수 없습니다.")
 
-    def __init__(self, db_url, db_name):
-        self.db_url = db_url
-        self.db_name = db_name
-        self.client = MongoClient(self.db_url)
-        self.db = self.client[self.db_name]
-        self.filesinfo = self.db["filesinfo"]
-
     def _save_to_mongodb(self, merged_file, html_file, local_num, remote_num):
         try:
             try:
-                self.mongo_client = MongoClient('mongodb://localhost:27017/')
-                self.db = self.mongo_client['packetwave']
                 self.members = self.db['members']
             except Exception as e:
-                self.log_error("MongoDB members collection 연결 실패", e)
+                self.log_error("MongoDB members collection 참조 실패", e)
+                return False
 
             max_id_doc = self.filesinfo.find_one(sort=[("id", -1)])
             next_id = 1 if max_id_doc is None else max_id_doc["id"] + 1
@@ -2156,12 +2155,13 @@ class Dashboard(QMainWindow):
         if self.tray_icon.isVisible():
             event.ignore()
             self.hide()
-            self.tray_icon.showMessage(
-                "Recap Voice",
-                "프로그램이 트레이로 최소화되었습니다.",
-                QSystemTrayIcon.Information,
-                2000
-            )
+            # 아래 showMessage 부분을 제거하여 알림이 표시되지 않도록 함
+            # self.tray_icon.showMessage(
+            #     "Recap Voice",
+            #     "프로그램이 트레이로 최소화되었습니다.",
+            #     QSystemTrayIcon.Information,
+            #     2000
+            # )
 
     def show_window(self):
         self.show()
@@ -2678,6 +2678,29 @@ class RTPStreamManager:
 
 if __name__ == "__main__":
     try:
+        # 중복 실행 체크를 위한 뮤텍스 생성
+        mutex = win32event.CreateMutex(None, False, "RecapVoice_Mutex")
+        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            # 이미 실행 중인 경우
+            from PySide6.QtWidgets import QMessageBox, QApplication
+            app = QApplication(sys.argv)
+            QMessageBox.information(
+                None, 
+                "Recap Voice",
+                "Recap Voice가 이미 실행 중입니다.\n트레이 아이콘에서 프로그램을 열 수 있습니다.",
+                QMessageBox.Ok
+            )
+            
+            def enum_windows_callback(hwnd, _):
+                if win32gui.GetWindowText(hwnd) == "Recap Voice":
+                    # 트레이 아이콘의 "열기" 메뉴 실행과 동일한 효과
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    win32gui.SetForegroundWindow(hwnd)
+                return True
+                
+            win32gui.EnumWindows(enum_windows_callback, None)
+            sys.exit(0)
+            
         app = QApplication([])
         window = Dashboard()
         
