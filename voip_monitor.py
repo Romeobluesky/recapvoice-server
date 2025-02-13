@@ -38,44 +38,74 @@ def load_config():
 	"""설정 파일 로드"""
 	try:
 		config = configparser.ConfigParser()
+		if not os.path.exists('settings.ini'):
+			log_message("오류", "settings.ini 파일이 존재하지 않습니다.")
+			return None
 		config.read('settings.ini', encoding='utf-8')
+		
+		# 필수 설정 값 검증
+		required_sections = ['Recording', 'Network']
+		for section in required_sections:
+			if section not in config:
+				log_message("오류", f"필수 설정 섹션 '{section}'이 없습니다.")
+				return None
+				
 		return config
+	except configparser.Error as e:
+		log_message("오류", f"설정 파일 파싱 오류: {str(e)}")
+		return None
 	except Exception as e:
 		log_message("오류", f"설정 파일 로드 실패: {str(e)}")
 		return None
 
 def analyze_rtp(packet, voip_monitor):
 	"""RTP 패킷 분석 및 음성 데이터 추출"""
+	if not packet or not hasattr(packet, 'ip'):
+		log_message("경고", "유효하지 않은 RTP 패킷")
+		return
+		
 	try:
 		call_id = get_call_id_from_rtp(packet)
-		if call_id and call_id in voip_monitor.active_calls:
-			# RTP 엔드포인트 정보 저장
+		if not call_id:
+			return
+			
+		if call_id not in voip_monitor.active_calls:
+			log_message("경고", f"알 수 없는 Call-ID의 RTP 패킷: {call_id}")
+			return
+			
+		# RTP 엔드포인트 정보 저장
+		try:
 			src_ip = packet.ip.src
 			dst_ip = packet.ip.dst
 			src_port = packet.udp.srcport
 			dst_port = packet.udp.dstport
+		except AttributeError as e:
+			log_message("오류", f"RTP 패킷에서 IP/포트 정보 추출 실패: {str(e)}")
+			return
 			
-			if 'media_endpoints' not in voip_monitor.active_calls[call_id]:
-				voip_monitor.active_calls[call_id]['media_endpoints'] = []
-				
-			# 새로운 엔드포인트 추가
-			endpoints = voip_monitor.active_calls[call_id]['media_endpoints']
-			new_endpoint = {
-				'ip': src_ip,
-				'port': src_port,
-			}
-			if new_endpoint not in endpoints:
-				endpoints.append(new_endpoint)
-				
-			new_endpoint = {
-				'ip': dst_ip,
-				'port': dst_port,
-			}
-			if new_endpoint not in endpoints:
-				endpoints.append(new_endpoint)
-	
+		if 'media_endpoints' not in voip_monitor.active_calls[call_id]:
+			voip_monitor.active_calls[call_id]['media_endpoints'] = []
+			
+		# 새로운 엔드포인트 추가
+		endpoints = voip_monitor.active_calls[call_id]['media_endpoints']
+		new_endpoint = {
+			'ip': src_ip,
+			'port': src_port,
+		}
+		if new_endpoint not in endpoints:
+			endpoints.append(new_endpoint)
+			
+		new_endpoint = {
+			'ip': dst_ip,
+			'port': dst_port,
+		}
+		if new_endpoint not in endpoints:
+			endpoints.append(new_endpoint)
+
 	except Exception as e:
 		log_message("오류", f"RTP 패킷 분석 중 오류: {str(e)}")
+		import traceback
+		log_message("오류", traceback.format_exc())
 
 def get_call_id_from_rtp(packet):  # stream_id 매개변수 제거
 	"""RTP 패킷과 관련된 Call-ID 찾기"""
@@ -114,21 +144,37 @@ def load_sip_codes():
 
 def extract_number(sip_header):
 	"""SIP 헤더에서 전화번호 추출"""
+	if not sip_header:
+		return ''
+		
 	try:
-		if not sip_header:
-			return ''
+		# 전화번호 형식 검증
+		def validate_number(number):
+			if not number:
+				return ''
+			# 숫자와 일부 특수문자만 허용
+			valid_chars = set('0123456789+-,')
+			if not all(c in valid_chars for c in number):
+				return ''
+			return number
 			
 		# From 헤더에서 큰따옴표 안의 값 추출
 		if '"' in sip_header:
-			quoted_part = sip_header.split('"')[1]  # "07086661427,1427" 에서 07086661427,1427 추출
-			return quoted_part.split(',')[-1]  # 콤마가 있는 경우 마지막 값 반환 (1427)
-			
+			parts = sip_header.split('"')
+			if len(parts) >= 2:
+				quoted_part = parts[1]
+				if ',' in quoted_part:
+					return validate_number(quoted_part.split(',')[-1])
+				return validate_number(quoted_part)
+				
 		# To 헤더에서 sip: 다음의 번호 추출
 		if 'sip:' in sip_header:
-			number = sip_header.split('sip:')[1].split('@')[0]
-			return number
-			
-		return str(sip_header)
+			parts = sip_header.split('sip:')
+			if len(parts) >= 2:
+				number = parts[1].split('@')[0]
+				return validate_number(number)
+				
+		return validate_number(str(sip_header))
 		
 	except Exception as e:
 		log_message("오류", f"전화번호 추출 중 오류: {str(e)}")

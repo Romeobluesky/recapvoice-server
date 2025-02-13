@@ -21,13 +21,31 @@ class AudioManager:
 		def create_wav_file(self, stream_key, timestamp, direction, local_num, remote_num):
 				"""WAV 파일 생성"""
 				try:
+						# 설정 값 검증
+						if not self.config:
+								logging.error("설정이 로드되지 않았습니다.")
+								return False
+								
 						save_dir = self.config.get('Recording', 'save_path', fallback='D:\\')
 						channels = self.config.getint('Recording', 'channels', fallback=1)
 						sample_rate = self.config.getint('Recording', 'sample_rate', fallback=8000)
 						
-						if not os.path.exists(save_dir):
-								os.makedirs(save_dir)
+						# 디렉토리 생성 시도
+						try:
+								if not os.path.exists(save_dir):
+										os.makedirs(save_dir)
+						except PermissionError:
+								logging.error(f"저장 디렉토리 생성 권한 없음: {save_dir}")
+								return False
+						except Exception as e:
+								logging.error(f"저장 디렉토리 생성 실패: {str(e)}")
+								return False
 
+						# 파일명 생성 및 검증
+						if not all(isinstance(x, str) for x in [local_num, remote_num]):
+								logging.error("유효하지 않은 전화번호 형식")
+								return False
+								
 						local_num = local_num.replace(':', '_')
 						remote_num = remote_num.replace(':', '_')
 						
@@ -36,32 +54,64 @@ class AudioManager:
 								f"{timestamp}_{direction}_{local_num}-{remote_num}.wav"
 						)
 
-						wav_file = wave.open(filename, 'wb')
-						wav_file.setnchannels(channels)
-						wav_file.setsampwidth(2)
-						wav_file.setframerate(sample_rate)
+						# WAV 파일 생성
+						try:
+								wav_file = wave.open(filename, 'wb')
+								wav_file.setnchannels(channels)
+								wav_file.setsampwidth(2)
+								wav_file.setframerate(sample_rate)
+						except wave.Error as e:
+								logging.error(f"WAV 파일 생성 실패 (wave 에러): {str(e)}")
+								return False
+						except IOError as e:
+								logging.error(f"WAV 파일 생성 실패 (IO 에러): {str(e)}")
+								return False
 						
 						self.wav_files[stream_key] = wav_file
 						return True
 						
 				except Exception as e:
 						logging.error(f"WAV 파일 생성 실패: {str(e)}")
+						import traceback
+						logging.error(traceback.format_exc())
 						return False
 
 		def write_audio_data(self, stream_key, payload_type, voice_data):
 				"""오디오 데이터 WAV 파일에 쓰기"""
+				if not voice_data:
+						logging.warning("빈 음성 데이터")
+						return False
+						
 				try:
-						if stream_key in self.wav_files:
-								# G.711 디코딩
-								decoded_data = (audioop.alaw2lin(voice_data, 2) 
-															if payload_type == 8 
-															else audioop.ulaw2lin(voice_data, 2))
+						if stream_key not in self.wav_files:
+								logging.error(f"존재하지 않는 스트림 키: {stream_key}")
+								return False
+								
+						if not self.wav_files[stream_key]:
+								logging.error(f"WAV 파일이 닫혔거나 초기화되지 않음: {stream_key}")
+								return False
+								
+						if payload_type not in [0, 8]:  # G.711 코덱 검증
+								logging.error(f"지원하지 않는 페이로드 타입: {payload_type}")
+								return False
+								
+						# G.711 디코딩 및 쓰기
+						decoded_data = (audioop.alaw2lin(voice_data, 2) 
+														if payload_type == 8 
+														else audioop.ulaw2lin(voice_data, 2))
 															
-								self.wav_files[stream_key].writeframes(decoded_data)
-								return True
+						self.wav_files[stream_key].writeframes(decoded_data)
+						return True
+								
+				except audioop.error as e:
+						logging.error(f"오디오 디코딩 실패: {str(e)}")
+						return False
+								
 				except Exception as e:
 						logging.error(f"오디오 데이터 쓰기 실패: {str(e)}")
-				return False
+						import traceback
+						logging.error(traceback.format_exc())
+						return False
 
 		def close_wav_file(self, stream_key):
 				"""WAV 파일 닫기"""
@@ -79,17 +129,32 @@ class PacketAnalyzer:
 		@staticmethod
 		def is_rtp_packet(payload):
 				"""RTP 패킷 검증"""
+				if not payload:
+						logging.warning("빈 페이로드")
+						return False
+						
 				try:
 						if len(payload) < 12:  # RTP 헤더 최소 크기
+								logging.warning(f"RTP 헤더 크기가 너무 작음: {len(payload)} bytes")
 								return False
 
 						version = (payload[0] >> 6) & 0x03
 						payload_type = payload[1] & 0x7F
 						
-						return version == 2 and payload_type in [0, 8]  # G.711 코덱 확인
+						if version != 2:
+								logging.warning(f"지원하지 않는 RTP 버전: {version}")
+								return False
+								
+						if payload_type not in [0, 8]:
+								logging.warning(f"지원하지 않는 페이로드 타입: {payload_type}")
+								return False
+								
+						return True
 						
 				except Exception as e:
 						logging.error(f"RTP 패킷 검증 실패: {str(e)}")
+						import traceback
+						logging.error(traceback.format_exc())
 						return False
 
 		@staticmethod
@@ -118,45 +183,117 @@ class StreamManager:
 				
 		def create_stream(self, stream_key, direction, local_num, remote_num):
 				"""새 스트림 생성"""
-				self.streams[stream_key] = {
-						'start_time': datetime.datetime.now(),
-						'last_packet_time': datetime.datetime.now(),  # 마지막 패킷 시간 추가
-						'packets': 0,
-						'last_sequence': 0,
-						'codec': None,
-						'status': '녹음중.',
-						'result': '',
-						'direction': direction,
-						'local_num': local_num,
-						'remote_num': remote_num
-				}
-				return self.streams[stream_key]
+				try:
+						if not stream_key:
+								logging.error("스트림 키가 없음")
+								return None
+								
+						if stream_key in self.streams:
+								logging.warning(f"이미 존재하는 스트림: {stream_key}")
+								return self.streams[stream_key]
+								
+						if not all(isinstance(x, str) for x in [direction, local_num, remote_num]):
+								logging.error("유효하지 않은 매개변수 타입")
+								return None
+								
+						self.streams[stream_key] = {
+								'start_time': datetime.datetime.now(),
+								'last_packet_time': datetime.datetime.now(),
+								'packets': 0,
+								'last_sequence': 0,
+								'codec': None,
+								'status': '녹음중.',
+								'result': '',
+								'direction': direction,
+								'local_num': local_num,
+								'remote_num': remote_num
+						}
+						return self.streams[stream_key]
+						
+				except Exception as e:
+						logging.error(f"스트림 생성 실패: {str(e)}")
+						import traceback
+						logging.error(traceback.format_exc())
+						return None
 
 		def update_stream(self, stream_key, sequence=None, codec=None):
 				"""스트림 정보 업데이트"""
-				if stream_key in self.streams:
+				try:
+						if not stream_key:
+								logging.error("스트림 키가 없음")
+								return False
+								
+						if stream_key not in self.streams:
+								logging.error(f"존재하지 않는 스트림: {stream_key}")
+								return False
+								
 						self.streams[stream_key]['last_packet_time'] = datetime.datetime.now()
+						
 						if sequence is not None:
-								self.streams[stream_key]['last_sequence'] = sequence
+								try:
+										sequence = int(sequence)
+										self.streams[stream_key]['last_sequence'] = sequence
+								except (ValueError, TypeError):
+										logging.warning(f"유효하지 않은 시퀀스 번호: {sequence}")
+									
 						if codec is not None:
 								self.streams[stream_key]['codec'] = codec
+							
 						self.streams[stream_key]['packets'] += 1
+						return True
+						
+				except Exception as e:
+						logging.error(f"스트림 업데이트 실패: {str(e)}")
+						import traceback
+						logging.error(traceback.format_exc())
+						return False
 
 		def check_stream_timeout(self):
 				"""스트림 타임아웃 체크"""
-				current_time = datetime.datetime.now()
-				for stream_key, stream_info in list(self.streams.items()):
-						if stream_info['status'] == '녹음중.':
-								time_diff = (current_time - stream_info['last_packet_time']).total_seconds()
-								if time_diff > self.TIMEOUT_SECONDS:
-										self.close_stream(stream_key)
-										return stream_key  # 종료된 스트림 키 반환
-				return None
+				try:
+						current_time = datetime.datetime.now()
+						timed_out_streams = []
+						
+						for stream_key, stream_info in list(self.streams.items()):
+								try:
+										if stream_info['status'] == '녹음중.':
+												time_diff = (current_time - stream_info['last_packet_time']).total_seconds()
+												if time_diff > self.TIMEOUT_SECONDS:
+														self.close_stream(stream_key)
+														timed_out_streams.append(stream_key)
+								except KeyError as e:
+										logging.error(f"스트림 정보 누락: {str(e)}")
+								except Exception as e:
+										logging.error(f"스트림 {stream_key} 타임아웃 체크 실패: {str(e)}")
+								
+						return timed_out_streams[0] if timed_out_streams else None
+						
+				except Exception as e:
+						logging.error(f"스트림 타임아웃 체크 실패: {str(e)}")
+						import traceback
+						logging.error(traceback.format_exc())
+						return None
 
 		def close_stream(self, stream_key):
 				"""스트림 종료"""
-				if stream_key in self.streams:
+				try:
+						if not stream_key:
+								logging.error("스트림 키가 없음")
+								return False
+								
+						if stream_key not in self.streams:
+								logging.error(f"존재하지 않는 스트림: {stream_key}")
+								return False
+								
 						self.streams[stream_key]['status'] = '녹음완료'
+						self.streams[stream_key]['end_time'] = datetime.datetime.now()
+						return True
+						
+				except Exception as e:
+						logging.error(f"스트림 종료 실패: {str(e)}")
+						import traceback
+						logging.error(traceback.format_exc())
+						return False
 
 class PacketMonitor(QMainWindow):
 		"""패킷 모니터링 메인 클래스"""

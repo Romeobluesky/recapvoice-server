@@ -125,9 +125,46 @@ class Dashboard(QMainWindow):
 		block_update_signal = Signal(str, str, str)
 
 		def __init__(self):
-				super().__init__()
-				self.cleanup_existing_dumpcap()  # 프로그램 시작 시 기존 Dumpcap 프로세스 정리
-				self.play_intro_video()
+				try:
+						super().__init__()
+						self.cleanup_existing_dumpcap()  # 프로그램 시작 시 기존 Dumpcap 프로세스 정리
+						
+						# 필수 디렉토리 확인 및 생성
+						required_dirs = ['images', 'logs']
+						for dir_name in required_dirs:
+								try:
+										if not os.path.exists(dir_name):
+												os.makedirs(dir_name)
+								except PermissionError:
+										self.log_error(f"디렉토리 생성 권한 없음: {dir_name}")
+										raise
+								except Exception as e:
+										self.log_error(f"디렉토리 생성 실패: {dir_name}", e)
+										raise
+						
+						# 설정 파일 확인
+						if not os.path.exists('settings.ini'):
+								self.log_error("settings.ini 파일이 없습니다")
+								raise FileNotFoundError("settings.ini 파일이 필요합니다")
+						
+						# 로그 파일 초기화
+						try:
+								with open('voip_monitor.log', 'a', encoding='utf-8') as f:
+										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
+						except Exception as e:
+								self.log_error("로그 파일 초기화 실패", e)
+								raise
+						
+						# 인트로 비디오 재생
+						try:
+								self.play_intro_video()
+						except Exception as e:
+								self.log_error("인트로 비디오 재생 실패", e)
+								self.initialize_main_window()
+						
+				except Exception as e:
+						self.log_error("대시보드 초기화 실패", e)
+						raise
 
 		def play_intro_video(self):
 				try:
@@ -381,13 +418,117 @@ class Dashboard(QMainWindow):
 						print(f"네트워크 인터페이스 로드 실패: {e}")
 
 		def start_packet_capture(self):
-				if not self.capture_thread or not self.capture_thread.is_alive():
+				"""패킷 캡처 시작"""
+				try:
+						if not self.selected_interface:
+								self.log_error("선택된 네트워크 인터페이스가 없습니다")
+								return
+						
+						if hasattr(self, 'capture_thread') and self.capture_thread and self.capture_thread.is_alive():
+								self.log_error("패킷 캡처가 이미 실행 중입니다")
+								return
+						
+						# 시스템 리소스 체크
+						try:
+								cpu_percent = psutil.cpu_percent()
+								memory = psutil.virtual_memory()
+								if cpu_percent > 80 or memory.percent > 80:
+										self.log_error("시스템 리소스 부족", additional_info={
+												"cpu": f"{cpu_percent}%",
+												"memory": f"{memory.percent}%"
+										})
+										return
+						except Exception as e:
+								self.log_error("시스템 리소스 체크 실패", e)
+								return
+						
+						# Wireshark 경로 확인
+						config = load_config()
+						if not config:
+								self.log_error("설정 파일을 로드할 수 없습니다")
+								return
+						
+						wireshark_path = get_wireshark_path()
+						if not os.path.exists(wireshark_path):
+								self.log_error("Wireshark가 설치되어 있지 않습니다")
+								return
+						
+						# 캡처 스레드 시작
 						self.capture_thread = threading.Thread(
 								target=self.capture_packets,
 								args=(self.selected_interface,),
 								daemon=True
 						)
 						self.capture_thread.start()
+						self.log_error("패킷 캡처 시작됨", additional_info={"interface": self.selected_interface})
+						
+				except Exception as e:
+						self.log_error("패킷 캡처 시작 실패", e)
+
+		def capture_packets(self, interface):
+				"""패킷 캡처 실행"""
+				if not interface:
+						self.log_error("유효하지 않은 인터페이스")
+						return
+						
+				capture = None
+				loop = None
+				
+				try:
+						# 이벤트 루프 설정
+						loop = asyncio.new_event_loop()
+						asyncio.set_event_loop(loop)
+						
+						# 캡처 필터 설정
+						capture = pyshark.LiveCapture(
+								interface=interface,
+								display_filter='sip or (udp and (udp.port >= 10000 and udp.port <= 20000))'
+						)
+						
+						# 패킷 캡처 시작
+						for packet in capture.sniff_continuously():
+								try:
+										# 메모리 사용량 모니터링
+										process = psutil.Process()
+										memory_percent = process.memory_percent()
+										if memory_percent > 80:
+												self.log_error("높은 메모리 사용량", additional_info={"memory_percent": memory_percent})
+												
+										if hasattr(packet, 'sip'):
+												self.analyze_sip_packet(packet)
+										elif hasattr(packet, 'udp') and self.is_rtp_packet(packet):
+												self.handle_rtp_packet(packet)
+												
+								except Exception as packet_error:
+										self.log_error("패킷 처리 중 오류", packet_error)
+										continue
+										
+				except KeyboardInterrupt:
+						self.log_error("사용자에 의한 캡처 중단")
+				except Exception as capture_error:
+						self.log_error("캡처 프로세스 오류", capture_error)
+						
+				finally:
+						try:
+								if capture:
+										if loop and not loop.is_closed():
+												loop.run_until_complete(capture.close_async())
+										else:
+												capture.close()
+								else:
+										self.log_error("캡처 프로세스가 초기화되지 않았습니다")
+						except Exception as close_error:
+								self.log_error("캡처 종료 실패", close_error)
+								
+						try:
+								if loop and not loop.is_closed():
+										loop.close()
+								else:
+										self.log_error("이벤트 루프가 초기화되지 않았습니다")
+						except Exception as loop_error:
+								self.log_error("이벤트 루프 종료 실패", loop_error)
+								
+						self.cleanup_existing_dumpcap()  # 캡처 종료 후 프로세스 정리
 
 		def _create_header(self):
 				header = QWidget()
@@ -1755,108 +1896,6 @@ class Dashboard(QMainWindow):
 												self.log_error("Dumpcap 프로세스 종료 실패", e)
 				except Exception as e:
 						self.log_error("Dumpcap 프로세스 정리 중 오류", e)
-
-		def capture_packets(self, interface):
-				if hasattr(self, '_capture_running') and self._capture_running:
-						self.log_error("캡처가 이미 실행 중입니다")
-						return
-						
-				self._capture_running = True
-				self.cleanup_existing_dumpcap()  # 기존 Dumpcap 프로세스 정리
-				
-				try:
-						self.log_error("패킷 캡처 시작 시도", additional_info={"interface": interface})
-						
-						# 인터페이스 유효성 검사
-						if not interface:
-								self.log_error("유효하지 않은 인터페이스")
-								return
-								
-						# 시스템 리소스 확인
-						cpu_percent = psutil.cpu_percent()
-						memory = psutil.virtual_memory()
-						self.log_error("시스템 리소스 상태", additional_info={
-								"cpu": f"{cpu_percent}%",
-								"memory": f"{memory.percent}%"
-						})
-						
-						# 캡처 초기화
-						capture = None
-						loop = None
-						
-						try:
-								loop = asyncio.new_event_loop()
-								asyncio.set_event_loop(loop)
-								
-								# Wireshark 설정 확인
-								wireshark_path = get_wireshark_path()
-								if not os.path.exists(wireshark_path):
-										self.log_error("Wireshark 경로 오류", additional_info={"path": wireshark_path})
-										return
-										
-								capture = pyshark.LiveCapture(
-										interface=interface,
-										display_filter='sip or (udp and (udp.port >= 10000 and udp.port <= 20000))'
-								)
-								
-								# 패킷 캡처 시작
-								for packet in capture.sniff_continuously():
-										try:
-												# 메모리 사용량 모니터링
-												process = psutil.Process()
-												if process.memory_percent() > 80:  # 메모리 사용량이 80% 이상이면 경고
-														self.log_error("높은 메모리 사용량 감지", 
-																additional_info={"memory_percent": process.memory_percent()})
-												
-												if 'SIP' in packet:
-														self.analyze_sip_packet(packet)
-												elif 'UDP' in packet and self.is_rtp_packet(packet):
-														self.handle_rtp_packet(packet)
-														
-										except Exception as packet_error:
-												self.log_error("패킷 처리 중 오류", packet_error)
-												continue
-												
-						except KeyboardInterrupt:
-								self.log_error("사용자에 의한 캡처 중단")
-						except Exception as capture_error:
-								self.log_error("캡처 프로세스 오류", capture_error)
-								
-						finally:
-								self.cleanup_capture(capture, loop)
-								
-				except Exception as e:
-						self.log_error("캡처 스레드 치명적 오류", e)
-						
-		def cleanup_capture(self, capture, loop):
-				"""캡처 리소스 정리"""
-				try:
-						if capture:
-								try:
-										if loop and not loop.is_closed():
-												async def close_capture():
-														await capture.close_async()
-												loop.run_until_complete(close_capture())
-										else:
-												capture.close()
-								except Exception as close_error:
-										self.log_error("캡처 종료 실패", close_error)
-										
-						if loop and not loop.is_closed():
-								try:
-										tasks = asyncio.all_tasks(loop) if hasattr(asyncio, 'all_tasks') else []
-										for task in tasks:
-												task.cancel()
-										loop.stop()
-										loop.close()
-								except Exception as loop_error:
-										self.log_error("이벤트 루프 종료 실패", loop_error)
-										
-						# Dumpcap 프로세스 정리 추가
-						self.cleanup_existing_dumpcap()
-						
-				except Exception as cleanup_error:
-						self.log_error("리소스 정리 중 오류", cleanup_error)
 
 		def handle_rtp_packet(self, packet):
 				try:
