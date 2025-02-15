@@ -4,7 +4,7 @@ import subprocess
 import datetime
 
 class WavMerger:
-	def merge_and_save(self, phone_ip, timestamp, time_str, local_num, remote_num, in_file, out_file, save_dir):
+	def merge_and_save(self, time_str, local_num, remote_num, in_file, out_file, save_dir):
 		try:
 			# 날짜 형식 추가
 			today = datetime.datetime.now().strftime("%Y%m%d")

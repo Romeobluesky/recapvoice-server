@@ -81,7 +81,7 @@ class WavChatExtractor:
 
 		return text
 
-	def extract_chat_to_html(self, phone_ip, timestamp, time_str, local_num, remote_num, in_file, out_file, save_dir):
+	def extract_chat_to_html(self, time_str, local_num, remote_num, in_file, out_file, save_dir):
 		"""WAV 파일에서 채팅 내용을 추출하여 HTML로 저장"""
 		try:
 			# 날짜 형식 추가

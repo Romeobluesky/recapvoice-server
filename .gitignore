@@ -213,6 +213,7 @@ instance/
 .scrapy
 
 # Sphinx documentation
+docs/packet/
 docs/_build/
 docs/default_packet.txt
 docs/Session Initiation Protocol (202).txt

@@ -14,7 +14,7 @@ import sys
 import time
 import traceback  # 추가된 import
 import platform  # 추가된 import
-
+import re
 # 기존 창 활성화를 위한 메시지 전송
 import win32gui
 import win32con
@@ -43,7 +43,7 @@ from config_loader import load_config, get_wireshark_path
 from voip_monitor import VoipMonitor
 from packet_monitor import PacketMonitor
 from wav_merger import WavMerger
-from wav_chat_extractor import WavChatExtractor
+
 from settings_popup import SettingsPopup
 
 # MongoDB 관련 import
@@ -63,6 +63,9 @@ def resource_path(relative_path):
 		if hasattr(sys, '_MEIPASS'):
 				return os.path.join(sys._MEIPASS, relative_path)
 		return os.path.join(os.path.abspath('.'), relative_path)
+
+def is_extension(number):
+		return len(str(number)) == 4 and str(number)[0] in '123456789'
 
 # -------------------------------------------------------------------
 # 상태 전이 관리를 위한 FSM 클래스 (예시)
@@ -271,14 +274,15 @@ class Dashboard(QMainWindow):
 								self.duration_timer.timeout.connect(self.update_call_duration)
 								self.duration_timer.start(1000)
 								self.wav_merger = WavMerger()
-								self.chat_extractor = WavChatExtractor()
 						except Exception as e:
 								self.log_error("타이머 및 유틸리티 초기화 실패", e)
 
 						try:
 								self.mongo_client = MongoClient('mongodb://localhost:27017/')
 								self.db = self.mongo_client['packetwave']
+								self.members = self.db['members']
 								self.filesinfo = self.db['filesinfo']
+								self.internalnumber = self.db['internalnumber']
 						except Exception as e:
 								self.log_error("MongoDB 연결 실패", e)
 
@@ -1194,7 +1198,6 @@ class Dashboard(QMainWindow):
 										status="대기중"
 								)
 								self.calls_layout.addWidget(block)
-								print(f"대기중 블록 생성됨: {extension}")
 				except Exception as e:
 						print(f"대기중 블록 생성 중 오류: {e}")
 
@@ -1227,17 +1230,51 @@ class Dashboard(QMainWindow):
 						if not hasattr(sip_layer, 'call_id'):
 								self.log_error("Call-ID가 없는 SIP 패킷")
 								return
-								
+
 						call_id = sip_layer.call_id
-						
+						#내선번호만 추출
+						try:
+								if hasattr(sip_layer, 'from'):
+										from_header = str(sip_layer.From)
+										# "07086661427,1427" 형식에서 콤마 뒤의 내선번호 추출
+										if ',' in from_header:
+												internal_number = from_header.split(',')[1].split('"')[0]
+										else:
+												internal_number = sip_layer.from_user
+								else:
+										internal_number = sip_layer.from_user
+						except Exception as e:
+								self.log_error("내선번호 추출 실패", e)
+								internal_number = sip_layer.from_user
+
 						try:
 								if hasattr(sip_layer, 'request_line'):
 										request_line = str(sip_layer.request_line)
 										self.log_error("SIP 패킷 분석", additional_info={
 												"request_line": request_line,
-												"call_id": call_id
+												"call_id": call_id,
+												"internal_number": internal_number
 										})
 
+										_number = internal_number
+										ip_address = call_id.split('@')[1]
+
+										# mongodb interalnumber 에서 내선번호 정보 확인 
+										number_doc = self.internalnumber.find_one({'internal_number': _number})
+										if number_doc:
+												# 있으면 업데이트
+												self.internalnumber.update_one(
+														{'internal_number': _number},
+														{'$set': {'ip_address': ip_address}}
+												)
+										else:
+											# 없으면 등록
+												number_docs = {
+														'internal_number': _number,
+														'ip_address': ip_address
+												}
+												self.internalnumber.insert_one(number_docs)
+												
 										# INVITE 처리
 										if 'INVITE' in request_line:
 												try:
@@ -1247,7 +1284,7 @@ class Dashboard(QMainWindow):
 																		"request_line": request_line
 																})
 																return
-																
+																	
 														from_number = self.extract_number(sip_layer.from_user)
 														to_number = self.extract_number(sip_layer.to_user)
 														
@@ -1283,7 +1320,8 @@ class Dashboard(QMainWindow):
 																				'from_number': from_number,
 																				'to_number': to_number,
 																				'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
-																				'media_endpoints': []
+																				'media_endpoints': [],
+																				'packet': packet  # 패킷 정보 저장
 																		}
 																		after_state = dict(self.active_calls[call_id])
 																		self.log_error("통화 상태 업데이트", additional_info={
@@ -1459,19 +1497,20 @@ class Dashboard(QMainWindow):
 								log_file.write(f"업데이트 전: {before_update}\n")
 								log_file.write(f"업데이트 후: {after_update}\n")
 								
-								# 관련 통화 상태도 업데이트
-								for active_call_id, call_info in self.active_calls.items():
-										if (call_info.get('from_number') == forwarding_ext and 
-												call_info.get('to_number') == forwarding_ext):
-												before_related = dict(call_info)
-												call_info.update({
-														'status': '통화중',
-														'result': '돌려주기'
-												})
-												after_related = dict(call_info)
-												log_file.write(f"관련 통화 업데이트 (Call-ID: {active_call_id}):\n")
-												log_file.write(f"업데이트 전: {before_related}\n")
-												log_file.write(f"업데이트 후: {after_related}\n")
+								# 발신번호가 내선이 아닐 경우에만 발,수신번호 크로스 변경경
+								if not is_extension(external_number):
+									for active_call_id, call_info in self.active_calls.items():
+											if (call_info.get('from_number') == forwarding_ext and 
+													call_info.get('to_number') == forwarding_ext):
+													before_related = dict(call_info)
+													call_info.update({
+															'status': '통화중',
+															'result': '돌려주기'
+													})
+													after_related = dict(call_info)
+													log_file.write(f"관련 통화 업데이트 (Call-ID: {active_call_id}):\n")
+													log_file.write(f"업데이트 전: {before_related}\n")
+													log_file.write(f"업데이트 후: {after_related}\n")
 				
 				log_file.write("=== 돌려주기 처리 완료 ===\n\n")
 
@@ -1535,29 +1574,72 @@ class Dashboard(QMainWindow):
 						table = self.findChild(QTableWidget, "log_list_table")
 						if not table:
 								return
+						
 						with self.active_calls_lock:
+								# 유효한 통화 데이터만 필터링
+								valid_calls = [
+										(call_id, call_info) 
+										for call_id, call_info in self.active_calls.items()
+										if call_info and all(
+												call_info.get(key) is not None 
+												for key in ['start_time', 'direction', 'from_number', 'to_number', 'status']
+										)
+								]
+								
+								# 시간 순으로 정렬
 								sorted_calls = sorted(
-										self.active_calls.items(),
+										valid_calls,
 										key=lambda x: x[1]['start_time'],
 										reverse=True
 								)
-						table.setRowCount(0)
-						table.setRowCount(len(sorted_calls))
-						for row, (call_id, call_info) in enumerate(sorted_calls):
-								time_item = QTableWidgetItem(call_info['start_time'].strftime('%Y-%m-%d %H:%M:%S'))
-								direction_item = QTableWidgetItem(call_info.get('direction', ''))
-								from_item = QTableWidgetItem(str(call_info.get('from_number', '')))
-								to_item = QTableWidgetItem(str(call_info.get('to_number', '')))
-								status_item = QTableWidgetItem(call_info.get('status', ''))
-								result_item = QTableWidgetItem(call_info.get('result', ''))
-								callid_item = QTableWidgetItem(call_id)
-								items = [time_item, direction_item, from_item, to_item, status_item, result_item, callid_item]
-								for col, item in enumerate(items):
-										item.setTextAlignment(Qt.AlignCenter)
-										table.setItem(row, col, item)
+								
+						if sorted_calls:  # 유효한 데이터가 있을 때만 테이블 업데이트
+								table.setRowCount(len(sorted_calls))
+								for row, (call_id, call_info) in enumerate(sorted_calls):
+										try:
+												# 시간
+												time_item = QTableWidgetItem(call_info['start_time'].strftime('%Y-%m-%d %H:%M:%S'))
+												table.setItem(row, 0, time_item)
+												
+												# 통화 방향
+												direction_item = QTableWidgetItem(str(call_info.get('direction', '')))
+												table.setItem(row, 1, direction_item)
+												
+												# 발신번호
+												from_item = QTableWidgetItem(str(call_info.get('from_number', '')))
+												table.setItem(row, 2, from_item)
+												
+												# 수신번호
+												to_item = QTableWidgetItem(str(call_info.get('to_number', '')))
+												table.setItem(row, 3, to_item)
+												
+												# 상태
+												status_item = QTableWidgetItem(str(call_info.get('status', '')))
+												table.setItem(row, 4, status_item)
+												
+												# 결과
+												result_item = QTableWidgetItem(str(call_info.get('result', '')))
+												table.setItem(row, 5, result_item)
+												
+												# Call-ID
+												callid_item = QTableWidgetItem(str(call_id))
+												table.setItem(row, 6, callid_item)
+												
+												# 각 셀을 가운데 정렬
+												for col in range(7):
+														item = table.item(row, col)
+														if item:
+																item.setTextAlignment(Qt.AlignCenter)
+										except Exception as cell_error:
+												print(f"셀 업데이트 중 오류: {cell_error}")
+												continue
+						
 						table.viewport().update()
+						
 				except Exception as e:
-						print(f"VoIP 상태 업데이트 중 오류: {e}")
+						print(f"통화 상태 업데이트 중 오류: {e}")
+						import traceback
+						print(traceback.format_exc())
 
 		def update_packet_status(self):
 				try:
@@ -1624,7 +1706,7 @@ class Dashboard(QMainWindow):
 										call_info['media_endpoints'].append(endpoint_info)
 								call_info['media_endpoints_set']['local'].add(src_endpoint)
 								call_info['media_endpoints_set']['remote'].add(dst_endpoint)
-								print(f"OUT 패킷: {src_endpoint} -> {dst_endpoint}")
+								#print(f"OUT 패킷: {src_endpoint} -> {dst_endpoint}")
 								return "OUT"
 						elif dst_ip == pbx_ip:
 								endpoint_info = {"ip": dst_ip, "port": packet.udp.dstport}
@@ -1632,7 +1714,7 @@ class Dashboard(QMainWindow):
 										call_info['media_endpoints'].append(endpoint_info)
 								call_info['media_endpoints_set']['local'].add(dst_endpoint)
 								call_info['media_endpoints_set']['remote'].add(src_endpoint)
-								print(f"IN 패킷: {src_endpoint} -> {dst_endpoint}")
+								#print(f"IN 패킷: {src_endpoint} -> {dst_endpoint}")
 								return "IN"
 						if src_endpoint in call_info['media_endpoints_set']['local']:
 								return "OUT"
@@ -1826,14 +1908,13 @@ class Dashboard(QMainWindow):
 																stream_info_out = self.stream_manager.finalize_stream(out_key)
 														if stream_info_in and stream_info_out:
 																try:
+																		# 파일 경로에서 파일명 뒷자리 제거
 																		file_dir = stream_info_in['file_dir']
-																		timestamp = os.path.basename(file_dir)
+																		timestamp = os.path.basename(file_dir)[:-2]
 																		local_num = self.active_calls[call_id]['from_number']
 																		remote_num = self.active_calls[call_id]['to_number']
 
 																		merged_file = self.wav_merger.merge_and_save(
-																				stream_info_in['phone_ip'],
-																				timestamp,
 																				timestamp,
 																				local_num,
 																				remote_num,
@@ -1841,30 +1922,23 @@ class Dashboard(QMainWindow):
 																				stream_info_out['filepath'],
 																				file_dir
 																		)
+																		html_file = None
 																		if merged_file:
-																				html_file = self.chat_extractor.extract_chat_to_html(
-																						stream_info_in['phone_ip'],
-																						timestamp,
-																						timestamp,
-																						local_num,
-																						remote_num,
-																						stream_info_in['filepath'],
-																						stream_info_out['filepath'],
-																						file_dir
+																				# active_calls에서 저장된 packet 정보 가져오기
+																				packet = self.active_calls[call_id].get('packet', None)
+																				self._save_to_mongodb(
+																						merged_file, html_file, 
+																						local_num, remote_num, call_id, packet
 																				)
-																				if html_file:
-																						self._save_to_mongodb(
-																								merged_file, html_file, 
-																								local_num, remote_num, call_id
-																						)
-																						try:
-																								if os.path.exists(stream_info_in['filepath']):
-																										os.remove(stream_info_in['filepath'])
-																								if os.path.exists(stream_info_out['filepath']):
-																										os.remove(stream_info_out['filepath'])
-																						except Exception as e:
-																								print(f"파일 삭제 중 오류: {e}")
-
+																				
+																		# 파일 삭제
+																		try:
+																				if os.path.exists(stream_info_in['filepath']):
+																						os.remove(stream_info_in['filepath'])
+																				if os.path.exists(stream_info_out['filepath']):
+																						os.remove(stream_info_out['filepath'])
+																		except Exception as e:
+																				print(f"파일 삭제 중 오류: {e}")
 																except Exception as e:
 																		print(f"파일 처리 중 오류: {e}")
 
@@ -1902,12 +1976,21 @@ class Dashboard(QMainWindow):
 						if not hasattr(self, 'stream_manager'):
 								self.stream_manager = RTPStreamManager()
 								self.log_error("RTP 스트림 매니저 생성")
-								
+						
+						# SIP 정보 확인 및 처리
+						if hasattr(packet, 'sip'):
+								self.analyze_sip_packet(packet)
+								return
+
+						# UDP 페이로드가 없으면 처리하지 않음
+						if not hasattr(packet, 'udp') or not hasattr(packet.udp, 'payload'):
+								return
+
 						active_calls = []
 						with self.active_calls_lock:
-								for call_id, call_info in self.active_calls.items():
-										if call_info.get('status') == '통화중':
-												active_calls.append((call_id, call_info))
+								for cid, info in self.active_calls.items():
+										if info.get('status') == '통화중':
+												active_calls.append((cid, info))
 												
 						if not active_calls:
 								return
@@ -1918,40 +2001,66 @@ class Dashboard(QMainWindow):
 										# 파일 경로 생성 전에 phone_ip 유효성 검사
 										if '@' not in call_id:
 												self.log_error("유효하지 않은 call_id 형식", additional_info={"call_id": call_id})
-												continue
-												
+												continue										
+
 										phone_ip = call_id.split('@')[1].split(';')[0].split(':')[0]
+										
 										if not phone_ip:
 												self.log_error("phone_ip를 추출할 수 없음", additional_info={"call_id": call_id})
 												continue
 
 										direction = self.determine_stream_direction(packet, call_id)
+
 										if not direction:
 												continue
 												
-										if hasattr(packet.udp, 'payload'):
-												payload_hex = packet.udp.payload.replace(':', '')
-												try:
-														payload = bytes.fromhex(payload_hex)
-														version = (payload[0] >> 6) & 0x03
-														payload_type = payload[1] & 0x7F
-														sequence = int.from_bytes(payload[2:4], byteorder='big')
-														audio_data = payload[12:]
-														
-														if len(audio_data) == 0:
-																continue
-																
-														stream_key = self.stream_manager.create_stream(
-																call_id, direction, call_info, phone_ip
-														)
-														
-														if stream_key:
-																self.stream_manager.process_packet(
-																		stream_key, audio_data, sequence, payload_type
-																)
-												except Exception as payload_error:
-														self.log_error("페이로드 분석 오류", payload_error)
+										# SIP 정보가 있는 경우 로그 기록
+										if 'packet' in call_info and hasattr(call_info['packet'], 'sip'):
+												sip_info = call_info['packet'].sip
+												from_user = getattr(sip_info, 'from_user', 'unknown')
+												to_user = getattr(sip_info, 'to_user', 'unknown')
+
+												if(len(from_user) > 4):
+														# 정규식 분할 결과가 비어있을 수 있으므로 안전하게 처리
+														from_user = re.split(r'[a-zA-Z]+', from_user)
+												if(len(to_user) > 4):
+														to_user = re.split(r'[a-zA-Z]+', to_user)
+												
+												#내선 간 통화인 경우
+												if is_extension(to_user):
+														# mongodb 찾기
+														internalnumber_doc = self.internalnumber.find_one({"internal_number": to_user})
+														if internalnumber_doc:
+																phone_ip_str = internalnumber_doc.get('ip_address', '')
+														else:
+																phone_ip_str = phone_ip
+												# 내부 외부 간 통화인 경우
+												else:
+														phone_ip_str = phone_ip
+
+										payload_hex = packet.udp.payload.replace(':', '')
+										try:
+												payload = bytes.fromhex(payload_hex)
+												version = (payload[0] >> 6) & 0x03
+												payload_type = payload[1] & 0x7F
+												sequence = int.from_bytes(payload[2:4], byteorder='big')
+												audio_data = payload[12:]
+												
+												if len(audio_data) == 0:
 														continue
+														
+												stream_key = self.stream_manager.create_stream(
+														call_id, direction, call_info, phone_ip_str
+												)
+												
+												if stream_key:
+														self.stream_manager.process_packet(
+																stream_key, audio_data, sequence, payload_type
+														)
+
+										except Exception as payload_error:
+												self.log_error("페이로드 분석 오류", payload_error)
+												continue
 								except Exception as call_error:
 										self.log_error("통화별 RTP 처리 오류", call_error, {"call_id": call_id})
 										continue
@@ -1960,42 +2069,7 @@ class Dashboard(QMainWindow):
 						self.log_error("RTP 패킷 처리 중 심각한 오류", e)
 						self.log_error("상세 오류 정보", additional_info={"traceback": traceback.format_exc()})
 
-		def save_wav_file(self, filepath, audio_data, payload_type):
-				try:
-						if len(audio_data) == 0:
-								print("오디오 데이터가 없습니다.")
-								return
-						with wave.open(filepath, 'wb') as wav_file:
-								wav_file.setnchannels(1)
-								wav_file.setsampwidth(2)
-								wav_file.setframerate(8000)
-								if payload_type == 8:
-										decoded_data = audioop.alaw2lin(bytes(audio_data), 2)
-								else:
-										decoded_data = audioop.ulaw2lin(bytes(audio_data), 2)
-								amplified_data = audioop.mul(decoded_data, 2, 4.0)
-								wav_file.writeframes(amplified_data)
-								print(f"WAV 파일 저장 완료: {filepath}")
-								print(f"원본 데이터 크기: {len(audio_data)} bytes")
-								print(f"디코딩된 데이터 크기: {len(decoded_data)} bytes")
-								print(f"최종 데이터 크기: {len(amplified_data)} bytes")
-				except Exception as e:
-						print(f"WAV 파일 저장 중 오류: {e}")
-
-		def decode_alaw(self, audio_data):
-				try:
-						return audioop.alaw2lin(audio_data, 2)
-				except Exception as e:
-						print(f"A-law 디코딩 오류: {e}")
-						return audio_data
-
-		def decode_ulaw(self, audio_data):
-				try:
-						return audioop.ulaw2lin(audio_data, 2)
-				except Exception as e:
-						print(f"μ-law 디코딩 오류: {e}")
-						return audio_data
-
+	
 		def update_call_duration(self):
 				try:
 						with self.active_calls_lock:
@@ -2118,10 +2192,8 @@ class Dashboard(QMainWindow):
 						print(f"관리사이트 열기 실패: {e}")
 						QMessageBox.warning(self, "오류", "관리사이트를 열 수 없습니다.")
 
-		def _save_to_mongodb(self, merged_file, html_file, local_num, remote_num, call_id):
+		def _save_to_mongodb(self, merged_file, html_file, local_num, remote_num, call_id, packet):
 				try:
-						self.members = self.db['members']
-
 						max_id_doc = self.filesinfo.find_one(sort=[("id", -1)])
 						next_id = 1 if max_id_doc is None else max_id_doc["id"] + 1
 						now_kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
@@ -2133,49 +2205,71 @@ class Dashboard(QMainWindow):
 						duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 						filesize = os.path.getsize(merged_file)
 
-						# 내선번호 판단 함수
-						def is_extension(number):
-								return len(str(number)) == 4 and str(number)[0] in '123456789'
-
 						# per_lv8, per_lv9 값 가져오기
 						per_lv8 = ""
 						per_lv9 = ""
+						per_lv8_update = ""
+						per_lv9_update = ""
 
+						is_transfer = False
 						# 통화 유형에 따른 권한 설정
+						# 내선 간 통화인 경우
 						if is_extension(local_num) and is_extension(remote_num):
-								# 내선 -> 내선 통화
-								per_lv8_update = ""
-								per_lv9_update = ""																								
+								if packet and hasattr(packet, 'sip'):
+										sip_layer = packet.sip
+										
+										# 내선 간 통화 이면서 method 가 REFER 인 경우
+										# 돌려주기
+										if hasattr(sip_layer, 'method') and sip_layer.method == 'REFER':
+												# TODO: 돌려주기 처리
+												return
+										elif hasattr(sip_layer, 'method') and sip_layer.method == 'INVITE':
+												# Message Header에서 X-xfer-pressed와 Proxy-Authorization 확인
+												# 당겨받기 3자통화
+												 if hasattr(sip_layer, 'msg_hdr'):
+															msg_hdr = sip_layer.msg_hdr
+														
+															# X-xfer-pressed: True 찾기
+															if 'X-xfer-pressed: True' in msg_hdr:
+																	# 내선 -> 내선 통화일때때 데이타베이스 수신내선,발신내선,파일명 같은 데이타 찾기
+																	file_path_str = merged_file
+																	file_name_str = os.path.basename(file_path_str)
+																	# wav 파일명만 추출
+																	fileinfo_doc = self.filesinfo.find_one({"from_number": local_num, "to_number": remote_num, "filename": {"$regex": file_name_str}})
 
-								# 통화 유형에 따른 권한 설정
-								if is_extension(local_num) and is_extension(remote_num):
-									# 내선 -> 내선 통화
-									# 데이타베이스 수신내선,발신내선,파일명, 통화시간이 같은 데이타 찾기
-									file_path_str = merged_file
-									file_name_str = os.path.basename(file_path_str)
-									# wav 파일명만 추출
-									fileinfo_doc = self.filesinfo.find_one({"from_number": local_num, "to_number": remote_num, "filename": {"$regex": file_name_str}, "playtime": duration_formatted})
+																	if fileinfo_doc:
+																			member_doc_update = self.members.find_one({"extension_num": local_num})
+																			if member_doc_update:
+																					per_lv8_update = member_doc_update.get('per_lv8', '')
+																					per_lv9_update = member_doc_update.get('per_lv9', '')
 
-									if fileinfo_doc:
-											member_doc_update = self.members.find_one({"extension_num": remote_num})
-											if member_doc_update:
-													per_lv8_update = member_doc_update.get('per_lv8', '')
-													per_lv9_update = member_doc_update.get('per_lv9', '')
+																					result = self.filesinfo.update_one({"from_number": local_num, "to_number": remote_num, "filename": {"$regex": file_name_str}}, {"$set": {"per_lv8": per_lv8_update, "per_lv9": per_lv9_update}})
 
-											result = self.filesinfo.update_one({"from_number": local_num, "to_number": remote_num, "filename": {"$regex": file_name_str}, "playtime": duration_formatted}, {"$set": {"per_lv8": per_lv8_update, "per_lv9": per_lv9_update}})
+																			member_doc = self.members.find_one({"extension_num": remote_num})
+																			if member_doc:
+																					if member_doc_update:
+																						per_lv8 = member_doc.get('per_lv8', '')
+																						per_lv9 = member_doc.get('per_lv9', '')
 
-								member_doc = self.members.find_one({"extension_num": local_num})
-								if member_doc:
-										per_lv8 = member_doc.get('per_lv8', '')
-										per_lv9 = member_doc.get('per_lv9', '')
+																			# 로깅 추가
+																			self.log_error("SIP 메시지 헤더 확인3", additional_info={
+																					"msg_hdr": msg_hdr,
+																					"from_number": local_num,
+																					"to_number": remote_num,
+																					"filename": {"$regex": file_name_str},
+																					"per_lv8_update": per_lv8_update,
+																					"per_lv9_update": per_lv9_update,
+																					"per_lv8": per_lv8,
+																					"per_lv9": per_lv9																					
+																			})																							
 
-						elif is_extension(remote_num):
+						elif is_extension(remote_num) and not is_extension(local_num):
 								# 외부 -> 내선 통화
 								member_doc = self.members.find_one({"extension_num": remote_num})
 								if member_doc:
 										per_lv8 = member_doc.get('per_lv8', '')
 										per_lv9 = member_doc.get('per_lv9', '')
-						elif is_extension(local_num):
+						elif is_extension(local_num) and not is_extension(remote_num):
 								# 내선 -> 외부 통화
 								member_doc = self.members.find_one({"extension_num": local_num})
 								if member_doc:
@@ -2205,11 +2299,13 @@ class Dashboard(QMainWindow):
 
 				except Exception as e:
 						print(f"MongoDB 저장 중 오류: {e}")
+						print(traceback.format_exc())
 
 		def setup_tray_icon(self):
 				try:
 						self.tray_icon = QSystemTrayIcon(self)
 						app_icon = QIcon()
+						
 						app_icon.addFile(resource_path("images/recapvoice_squere.ico"), QSize(16, 16))
 						app_icon.addFile(resource_path("images/recapvoice_squere.ico"), QSize(24, 24))
 						app_icon.addFile(resource_path("images/recapvoice_squere.ico"), QSize(32, 32))
@@ -2266,6 +2362,13 @@ class Dashboard(QMainWindow):
 
 		def quit_application(self):
 				try:
+						# voip_monitor.log 파일을 0바이트로 초기화
+						try:
+								with open('voip_monitor.log', 'w') as f:
+										f.truncate(0)
+						except Exception as log_error:
+								print(f"로그 파일 초기화 중 오류: {log_error}")
+
 						self.tray_icon.hide()
 						QApplication.quit()
 				except Exception as e:
