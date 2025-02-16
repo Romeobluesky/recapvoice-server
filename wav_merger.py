@@ -19,6 +19,9 @@ class WavMerger:
 				'-i', in_file,  # 첫 번째 입력 파일
 				'-i', out_file,  # 두 번째 입력 파일
 				'-filter_complex', 'amix=inputs=2:duration=longest:dropout_transition=0',  # 오디오 믹싱
+				'-ar', '16000',  # 샘플레이트 16kHz
+				'-ac', '1',      # 모노 채널
+				'-c:a', 'pcm_s16le',  # 16비트 PCM 인코딩
 				'-y',  # 기존 파일 덮어쓰기
 				merged_filepath
 			]

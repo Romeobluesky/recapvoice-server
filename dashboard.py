@@ -242,16 +242,30 @@ class Dashboard(QMainWindow):
 								self.active_calls = {}
 								self.call_state_machines = {}
 								self.capture_thread = None
+								
+								# 타이머 설정
 								self.voip_timer = QTimer()
 								self.voip_timer.timeout.connect(self.update_voip_status)
 								self.voip_timer.start(1000)
+								
 								self.streams = {}
 								self.packet_timer = QTimer()
 								self.packet_timer.timeout.connect(self.update_packet_status)
 								self.packet_timer.start(1000)
+								
+								# 리소스 모니터링 타이머 설정
+								self.resource_timer = QTimer()
+								self.resource_timer.timeout.connect(self.monitor_system_resources)
+								self.resource_timer.start(30000)  # 30초마다 체크
+								
 								self.sip_registrations = {}
 								self.first_registration = False
 								self.packet_get = 0
+								
+								# 메모리 캐시 초기화
+								import gc
+								gc.collect()
+								
 						except Exception as e:
 								self.log_error("기본 설정 초기화 실패", e)
 								raise
@@ -1250,31 +1264,32 @@ class Dashboard(QMainWindow):
 						try:
 								if hasattr(sip_layer, 'request_line'):
 										request_line = str(sip_layer.request_line)
-										self.log_error("SIP 패킷 분석", additional_info={
-												"request_line": request_line,
-												"call_id": call_id,
-												"internal_number": internal_number
-										})
+										#self.log_error("SIP 패킷 분석", additional_info={
+												#"request_line": request_line,
+												#"call_id": call_id,
+												#"internal_number": internal_number
+										#})
+										# 내선번호가 4자리 숫자인 경우 데이타베이스 업데이트
+										if(is_extension(internal_number)):
+												_number = internal_number
+												ip_address = call_id.split('@')[1]
 
-										_number = internal_number
-										ip_address = call_id.split('@')[1]
-
-										# mongodb interalnumber 에서 내선번호 정보 확인 
-										number_doc = self.internalnumber.find_one({'internal_number': _number})
-										if number_doc:
-												# 있으면 업데이트
-												self.internalnumber.update_one(
-														{'internal_number': _number},
-														{'$set': {'ip_address': ip_address}}
-												)
-										else:
-											# 없으면 등록
-												number_docs = {
-														'internal_number': _number,
-														'ip_address': ip_address
-												}
-												self.internalnumber.insert_one(number_docs)
-												
+												# mongodb interalnumber 에서 내선번호 정보 확인 
+												number_doc = self.internalnumber.find_one({'internal_number': _number})
+												if number_doc:
+														# 있으면 업데이트
+														self.internalnumber.update_one(
+																{'internal_number': _number},
+																{'$set': {'ip_address': ip_address}}
+														)
+												else:
+													# 없으면 등록
+														number_docs = {
+																'internal_number': _number,
+																'ip_address': ip_address
+														}
+														self.internalnumber.insert_one(number_docs)
+											
 										# INVITE 처리
 										if 'INVITE' in request_line:
 												try:
@@ -1570,6 +1585,10 @@ class Dashboard(QMainWindow):
 								})
 
 		def update_voip_status(self):
+				# UI 업데이트를 별도 스레드에서 처리
+				QTimer.singleShot(0, self._update_voip_status_internal)
+
+		def _update_voip_status_internal(self):
 				try:
 						table = self.findChild(QTableWidget, "log_list_table")
 						if not table:
@@ -1591,9 +1610,9 @@ class Dashboard(QMainWindow):
 										valid_calls,
 										key=lambda x: x[1]['start_time'],
 										reverse=True
-								)
-								
-						if sorted_calls:  # 유효한 데이터가 있을 때만 테이블 업데이트
+								)[:100]  # 최근 100개만 표시
+						
+						if sorted_calls:
 								table.setRowCount(len(sorted_calls))
 								for row, (call_id, call_info) in enumerate(sorted_calls):
 										try:
@@ -2384,41 +2403,54 @@ class Dashboard(QMainWindow):
 						
 						# CPU 사용량 모니터링
 						cpu_percent = process.cpu_percent(interval=1.0)
-						if cpu_percent > 80:  # CPU 사용량이 80% 이상인 경우
-								self.log_error("높은 CPU 사용량 감지", additional_info={
-										"cpu_percent": cpu_percent,
-										"threads": len(process.threads()),
-										"open_files": len(process.open_files()),
-										"connections": len(process.net_connections())  # connections() -> net_connections()로 변경
-								})
+						memory_info = process.memory_info()
+						memory_percent = process.memory_percent()
+						
+						# 리소스 사용량이 높을 때 정리 작업 수행
+						if memory_percent > 80 or cpu_percent > 80:
+								# active_calls 정리
+								current_time = datetime.datetime.now()
+								with self.active_calls_lock:
+										to_remove = []
+										for call_id, call_info in self.active_calls.items():
+												if 'start_time' in call_info:
+														if (current_time - call_info['start_time']).total_seconds() > 86400:  # 24시간 이상 된 통화
+																to_remove.append(call_id)
+										for call_id in to_remove:
+												del self.active_calls[call_id]
 								
-						# 스레드 상태 모니터링
-						thread_count = len(process.threads())
-						if thread_count > 100:  # 스레드가 비정상적으로 많은 경우
-								self.log_error("비정상적인 스레드 수 감지", additional_info={
-										"thread_count": thread_count,
-										"thread_ids": [t.id for t in process.threads()]
-								})
+								# RTP 스트림 정리
+								if hasattr(self, 'stream_manager'):
+										current_time = time.time()
+										for stream_key in list(self.active_streams.keys()):
+												stream_info = self.active_streams.get(stream_key)
+												if stream_info and current_time - stream_info.get('last_write_time', 0) > 1800:  # 30분 이상 된 스트림
+														self.finalize_stream(stream_key)
+														if stream_key in self.active_streams:
+																del self.active_streams[stream_key]
 								
-						# 파일 디스크립터 모니터링
-						open_files = process.open_files()
-						if len(open_files) > 1000:  # 열린 파일이 너무 많은 경우
-								self.log_error("과도한 파일 디스크립터", additional_info={
-										"open_files_count": len(open_files),
-										"file_paths": [f.path for f in open_files[:10]]  # 처음 10개만 로깅
-								})
-								
-						# 네트워크 연결 모니터링
-						try:
-								connections = process.net_connections()  # connections() -> net_connections()로 변경
-								if len(connections) > 100:  # 연결이 너무 많은 경우
-										self.log_error("과도한 네트워크 연결", additional_info={
-												"connection_count": len(connections),
-												"connection_status": [c.status for c in connections]
-										})
-						except psutil.AccessDenied:
-								self.log_error("네트워크 연결 모니터링 권한 없음")
-								
+								# 가비지 컬렉션 강제 실행
+								import gc
+								gc.collect()
+						
+						# 로그 파일 크기 체크 및 관리
+						log_file_path = 'voip_monitor.log'
+						if os.path.exists(log_file_path) and os.path.getsize(log_file_path) > 10 * 1024 * 1024:  # 10MB 초과
+								backup_path = f'voip_monitor_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+								try:
+										os.rename(log_file_path, backup_path)
+								except Exception as e:
+										self.log_error("로그 파일 백업 실패", e)
+						
+						# 리소스 사용량 로깅
+						self.log_error("시스템 리소스 상태", additional_info={
+								"cpu_percent": f"{cpu_percent}%",
+								"memory_used": f"{memory_info.rss / (1024 * 1024):.2f}MB",
+								"memory_percent": f"{memory_percent}%",
+								"active_calls": len(self.active_calls),
+								"active_streams": len(self.active_streams) if hasattr(self, 'stream_manager') else 0
+						})
+						
 				except Exception as e:
 						self.log_error("리소스 모니터링 오류", e)
 
