@@ -2853,10 +2853,8 @@ class RTPStreamManager:
 				except Exception as e:
 						print(f"파일 정보 저장 실패: {e}")
 
-# 프로그램이 실행 중인지 확인하는 함수
+# 실행 중인 프로그램의 창 상태 확인 함수
 def get_window_state(app_name):
-    """ 실행 중인 프로그램의 창 상태를 반환하는 함수 """
-    from PySide6.QtWidgets import QApplication
     app = QApplication.instance()
     if app:
         for widget in app.topLevelWidgets():
@@ -2869,7 +2867,7 @@ def get_window_state(app_name):
                     return "VISIBLE"
     return None
 
-# 트레이에 숨겨진 프로그램을 복원하는 함수
+# 트레이에서 창 복원 함수
 def restore_from_tray():
     """ 트레이에서 창을 복원하는 함수 """
     app = QApplication.instance()
@@ -2878,33 +2876,34 @@ def restore_from_tray():
             if widget.windowTitle() == "Recap Voice":
                 widget.setWindowState(Qt.WindowNoState)  # 최소화 해제
                 widget.show()
-                widget.activateWindow()
+                widget.raise_()  # 창을 최상위로 이동
+                widget.activateWindow()  # 창 활성화
+                widget.setWindowState(Qt.WindowActive)  # 윈도우 활성화
                 return
+
+# 실행 중인 프로그램 찾기
+def find_recap_voice_window():
+    def callback(hwnd, windows):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            if "Recap Voice" in title:
+                windows.append(hwnd)
+        return True
+    windows = []
+    win32gui.EnumWindows(callback, windows)
+    return windows[0] if windows else None
 
 if __name__ == "__main__":
     try:
-        # 뮤텍스 생성 시도
         mutex = win32event.CreateMutex(None, 1, 'RecapVoiceMutex')
         if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-            # 이미 실행 중인 프로그램 찾기
-            def find_recap_voice_window():
-                def callback(hwnd, windows):
-                    if win32gui.IsWindowVisible(hwnd):
-                        title = win32gui.GetWindowText(hwnd)
-                        if "Recap Voice" in title:
-                            windows.append(hwnd)
-                    return True
-                windows = []
-                win32gui.EnumWindows(callback, windows)
-                return windows[0] if windows else None
-
             hwnd = find_recap_voice_window()
             if hwnd:
-                # 창이 최소화되어 있거나 트레이에 있는 경우 복원
                 if win32gui.IsIconic(hwnd):  # 최소화 상태 확인
-                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # 창 복원
+                win32gui.BringWindowToTop(hwnd)  # 창을 최상위로 이동
                 win32gui.SetForegroundWindow(hwnd)  # 창을 전면으로 가져오기
-                
+
             msg = QMessageBox()
             msg.setWindowTitle("Recap Voice")
             msg.setIcon(QMessageBox.Icon.Information)
@@ -2912,45 +2911,15 @@ if __name__ == "__main__":
             msg.exec()
             sys.exit(0)
 
-        with open('window_debug.log', 'a', encoding='utf-8') as f:
-            f.write(f"\n[{datetime.datetime.now()}] 프로그램 시작\n")
-
-        # QApplication 인스턴스 생성
         app = QApplication([])
         app.setApplicationName("Recap Voice")
         window = Dashboard()
-
-        # 전역 예외 핸들러 설정
-        def handle_exception(exc_type, exc_value, exc_traceback):
-            window.log_error("치명적인 오류 발생",
-                error=exc_value,
-                additional_info={
-                    "type": str(exc_type),
-                    "traceback": "".join(traceback.format_tb(exc_traceback))
-                }
-            )
-            print("치명적인 오류가 발생했습니다. voip_monitor.log를 확인하세요.")
-            sys.exit(1)
-
-        sys.excepthook = handle_exception
-
-        # 메모리 모니터링
-        def check_memory_usage():
-            process = psutil.Process()
-            memory_info = process.memory_info()
-            window.log_error("메모리 사용량 체크", additional_info={
-                "rss": f"{memory_info.rss / 1024 / 1024:.2f} MB",
-                "vms": f"{memory_info.vms / 1024 / 1024:.2f} MB"
-            })
-
-        memory_timer = QTimer()
-        memory_timer.timeout.connect(check_memory_usage)
-        memory_timer.start(60000)  # 1분마다 체크
 
         window.show()
         app.exec()
 
     except Exception as e:
+        traceback.print_exc()
         with open('voip_monitor.log', 'a', encoding='utf-8') as f:
             f.write(f"\n=== 프로그램 시작 실패 ===\n")
             f.write(f"시간: {datetime.datetime.now()}\n")
