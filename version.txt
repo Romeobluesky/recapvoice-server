@@ -14,7 +14,7 @@ VSVersionInfo(
       StringTable(
         u'040904B0',
         [StringStruct(u'CompanyName', u'Xpower Networks'),
-         StringStruct(u'FileDescription', u'Recap Voice Application'),
+         StringStruct(u'FileDescription', u'Recap Voice'),
          StringStruct(u'FileVersion', u'1.504'),
          StringStruct(u'InternalName', u'recap_voice'),
          StringStruct(u'LegalCopyright', u'Copyright (c) 2024'),

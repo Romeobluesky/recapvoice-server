@@ -1,53 +1,47 @@
 #!/mvenv/Scripts/activate
 # -*- coding: utf-8 -*-
-import atexit
-import subprocess
-import audioop
-import wave
-import os
-import psutil
-import configparser
-import threading
 import asyncio
+import atexit
+import audioop
+import configparser
 import datetime
-import sys
-import time
-import traceback  # 추가된 import
-import platform  # 추가된 import
+import gc
+import os
+import platform
+import psutil
 import re
-# 기존 창 활성화를 위한 메시지 전송
-import win32gui
-import win32con
-import win32process
-import win32event
-import win32api
-import winerror
-
+import subprocess
+import sys
+import threading
+import time
+import traceback
+import wave
+import ctypes
 # 서드파티 라이브러리
-import requests
+from enum import Enum, auto
 import pyshark
+import requests
 from pydub import AudioSegment
-
-# PySide6 라이브러리
-from PySide6.QtWidgets import *
+from pymongo import MongoClient
 from PySide6.QtCore import *
 from PySide6.QtGui import *
-from PySide6.QtNetwork import *
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtNetwork import *
+from PySide6.QtWidgets import *
+import win32api
+import win32con
+import win32event
+import win32gui
+import win32process
+import winerror
 
 # 로컬 모듈
 from config_loader import load_config, get_wireshark_path
-from voip_monitor import VoipMonitor
 from packet_monitor import PacketMonitor
-from wav_merger import WavMerger
-
 from settings_popup import SettingsPopup
-
-# MongoDB 관련 import
-from pymongo import MongoClient
+from voip_monitor import VoipMonitor
+from wav_merger import WavMerger
 
 # 종료할 프로세스 목록
 processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe', 'Dumpcap.exe']
@@ -66,10 +60,10 @@ def resource_path(relative_path):
 
 def is_extension(number):
 		return len(str(number)) == 4 and str(number)[0] in '123456789'
-
+		
 # -------------------------------------------------------------------
 # 상태 전이 관리를 위한 FSM 클래스 (예시)
-from enum import Enum, auto
+
 class CallState(Enum):
 		IDLE = auto()         # 대기중
 		TRYING = auto()       # 시도중
@@ -240,6 +234,7 @@ class Dashboard(QMainWindow):
 								self.settings_popup = SettingsPopup()
 								self.active_calls_lock = threading.RLock()
 								self.active_calls = {}
+								self.active_streams = set()  # active_streams 속성 추가
 								self.call_state_machines = {}
 								self.capture_thread = None
 								
@@ -263,7 +258,6 @@ class Dashboard(QMainWindow):
 								self.packet_get = 0
 								
 								# 메모리 캐시 초기화
-								import gc
 								gc.collect()
 								
 						except Exception as e:
@@ -366,9 +360,7 @@ class Dashboard(QMainWindow):
 								self.thread_lock = threading.Lock()
 								
 								# 의존성 및 시스템 제한 체크
-								self.check_dependencies()
 								self.check_system_limits()
-								self.setup_crash_handler()
 						except Exception as e:
 								self.log_error("시스템 모니터링 설정 실패", e)
 
@@ -1657,7 +1649,6 @@ class Dashboard(QMainWindow):
 						
 				except Exception as e:
 						print(f"통화 상태 업데이트 중 오류: {e}")
-						import traceback
 						print(traceback.format_exc())
 
 		def update_packet_status(self):
@@ -2157,7 +2148,6 @@ class Dashboard(QMainWindow):
 		def stop_client(self):
 				try:
 						processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe']
-						import os
 						for process in processes_to_kill:
 								os.system(f'taskkill /f /im {process}')
 								print(f"프로세스 종료 시도: {process}")
@@ -2230,21 +2220,13 @@ class Dashboard(QMainWindow):
 						per_lv8_update = ""
 						per_lv9_update = ""
 
-						is_transfer = False
+						sip_layer = packet.sip
 						# 통화 유형에 따른 권한 설정
 						# 내선 간 통화인 경우
 						if is_extension(local_num) and is_extension(remote_num):
 								if packet and hasattr(packet, 'sip'):
-										sip_layer = packet.sip
-										
-										# 내선 간 통화 이면서 method 가 REFER 인 경우
-										# 돌려주기
-										if hasattr(sip_layer, 'method') and sip_layer.method == 'REFER':
-												# TODO: 돌려주기 처리
-												return
-										elif hasattr(sip_layer, 'method') and sip_layer.method == 'INVITE':
-												# Message Header에서 X-xfer-pressed와 Proxy-Authorization 확인
-												# 당겨받기 3자통화
+										if hasattr(sip_layer, 'method') and sip_layer.method == 'INVITE':
+												
 												 if hasattr(sip_layer, 'msg_hdr'):
 															msg_hdr = sip_layer.msg_hdr
 														
@@ -2280,20 +2262,72 @@ class Dashboard(QMainWindow):
 																					"per_lv9_update": per_lv9_update,
 																					"per_lv8": per_lv8,
 																					"per_lv9": per_lv9																					
-																			})																							
+																			})
 
 						elif is_extension(remote_num) and not is_extension(local_num):
 								# 외부 -> 내선 통화
-								member_doc = self.members.find_one({"extension_num": remote_num})
-								if member_doc:
-										per_lv8 = member_doc.get('per_lv8', '')
-										per_lv9 = member_doc.get('per_lv9', '')
+								if packet and hasattr(packet, 'sip'):
+										if hasattr(sip_layer, 'method') and sip_layer.method == 'REFER':
+												# 외부에서 온 전화를 돌려주기
+												if len(sip_layer.from_user) > 4 and len(sip_layer.from_user) < 9:
+														local_num_str = re.split(r'[a-zA-Z]+', sip_layer.from_user)
+														remote_num_str = re.split(r'[a-zA-Z]+', sip_layer.to_user)
+
+														if hasattr(sip_layer, 'msg_hdr'):
+																msg_hdr = sip_layer.msg_hdr
+
+																member_doc = self.members.find_one({"extension_num": remote_num_str})
+																if member_doc:
+																		per_lv8 = member_doc.get('per_lv8', '')
+																		per_lv9 = member_doc.get('per_lv9', '')
+																		local_num = local_num_str
+																		remote_num = remote_num_str
+												# 로깅 추가
+												self.log_error("SIP 메시지 헤더 확인4", additional_info={
+														"msg_hdr": msg_hdr,
+														"from_number": local_num,
+														"to_number": remote_num,
+														"per_lv8": per_lv8,
+														"per_lv9": per_lv9																					
+												})
+										else:
+												member_doc = self.members.find_one({"extension_num": remote_num})
+												if member_doc:
+														per_lv8 = member_doc.get('per_lv8', '')
+														per_lv9 = member_doc.get('per_lv9', '')
+
 						elif is_extension(local_num) and not is_extension(remote_num):
-								# 내선 -> 외부 통화
-								member_doc = self.members.find_one({"extension_num": local_num})
-								if member_doc:
-										per_lv8 = member_doc.get('per_lv8', '')
-										per_lv9 = member_doc.get('per_lv9', '')
+								if packet and hasattr(packet, 'sip'):
+										if hasattr(sip_layer, 'method') and sip_layer.method == 'REFER':
+										# 내선 -> 외부 통화
+												if len(sip_layer.to_user) > 9 and len(sip_layer.to_user) < 12:
+														# 내부에서 온 전화를 돌려주기	
+														# "07086661427,1427" 형식에서 콤마 뒤의 내선번호 추출
+														local_num_str = sip_layer.from_user.split(',')[1].split('"')[0]
+														# <sip:01077141436@112.222.225.104:5060> 형식에서 01077141436 추출
+														remote_num_str = re.findall(r'<sip:(\d+)@', sip_layer.to_user)
+
+														if hasattr(sip_layer, 'msg_hdr'):
+																msg_hdr = sip_layer.msg_hdr
+																member_doc = self.members.find_one({"extension_num": local_num_str})
+																if member_doc:
+																		per_lv8 = member_doc.get('per_lv8', '')
+																		per_lv9 = member_doc.get('per_lv9', '')
+																		local_num = remote_num_str
+																		remote_num = local_num_str
+												# 로깅 추가
+												self.log_error("SIP 메시지 헤더 확인5", additional_info={
+														"msg_hdr": msg_hdr,
+														"from_number": local_num,
+														"to_number": remote_num,
+														"per_lv8": per_lv8,
+														"per_lv9": per_lv9																					
+												})
+										else:
+												member_doc = self.members.find_one({"extension_num": local_num})
+												if member_doc:
+														per_lv8 = member_doc.get('per_lv8', '')
+														per_lv9 = member_doc.get('per_lv9', '')
 
 						doc = {
 								"id": next_id,
@@ -2354,20 +2388,35 @@ class Dashboard(QMainWindow):
 						print(traceback.format_exc())
 
 		def closeEvent(self, event):
-				if self.tray_icon.isVisible():
-						event.ignore()
-						self.hide()
-						# 아래 showMessage 부분을 제거하여 알림이 표시되지 않도록 함
-						# self.tray_icon.showMessage(
-						#     "Recap Voice",
-						#     "프로그램이 트레이로 최소화되었습니다.",
-						#     QSystemTrayIcon.Information,
-						#     2000
-						# )
+				try:
+						if self.tray_icon and self.tray_icon.isVisible():
+								# 창 숨기기 전에 현재 상태 저장
+								self.was_maximized = self.isMaximized()
+								
+								# 창을 숨기기만 하고 종료하지 않음
+								self.hide()
+								
+								# 이벤트 무시 (프로그램 종료 방지)
+								event.ignore()
+						else:
+								# 트레이 아이콘이 없는 경우에만 완전 종료
+								self.cleanup()
+								event.accept()
+				except Exception as e:
+						self.log_error("창 닫기 처리 중 오류", e)
+						event.accept()
 
 		def show_window(self):
-				self.show()
-				self.activateWindow()
+				try:
+						if self.was_maximized:
+								self.showMaximized()
+						else:
+								self.showNormal()
+						
+						self.activateWindow()
+						self.raise_()
+				except Exception as e:
+						self.log_error("창 복원 중 오류", e)
 
 		def show_settings(self):
 				try:
@@ -2399,56 +2448,16 @@ class Dashboard(QMainWindow):
 
 		def monitor_system_resources(self):
 				try:
-						process = psutil.Process()
+						cpu_percent = psutil.cpu_percent()
+						memory_info = psutil.Process().memory_info()
+						memory_percent = psutil.Process().memory_percent()
 						
-						# CPU 사용량 모니터링
-						cpu_percent = process.cpu_percent(interval=1.0)
-						memory_info = process.memory_info()
-						memory_percent = process.memory_percent()
-						
-						# 리소스 사용량이 높을 때 정리 작업 수행
-						if memory_percent > 80 or cpu_percent > 80:
-								# active_calls 정리
-								current_time = datetime.datetime.now()
-								with self.active_calls_lock:
-										to_remove = []
-										for call_id, call_info in self.active_calls.items():
-												if 'start_time' in call_info:
-														if (current_time - call_info['start_time']).total_seconds() > 86400:  # 24시간 이상 된 통화
-																to_remove.append(call_id)
-										for call_id in to_remove:
-												del self.active_calls[call_id]
-								
-								# RTP 스트림 정리
-								if hasattr(self, 'stream_manager'):
-										current_time = time.time()
-										for stream_key in list(self.active_streams.keys()):
-												stream_info = self.active_streams.get(stream_key)
-												if stream_info and current_time - stream_info.get('last_write_time', 0) > 1800:  # 30분 이상 된 스트림
-														self.finalize_stream(stream_key)
-														if stream_key in self.active_streams:
-																del self.active_streams[stream_key]
-								
-								# 가비지 컬렉션 강제 실행
-								import gc
-								gc.collect()
-						
-						# 로그 파일 크기 체크 및 관리
-						log_file_path = 'voip_monitor.log'
-						if os.path.exists(log_file_path) and os.path.getsize(log_file_path) > 10 * 1024 * 1024:  # 10MB 초과
-								backup_path = f'voip_monitor_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-								try:
-										os.rename(log_file_path, backup_path)
-								except Exception as e:
-										self.log_error("로그 파일 백업 실패", e)
-						
-						# 리소스 사용량 로깅
 						self.log_error("시스템 리소스 상태", additional_info={
 								"cpu_percent": f"{cpu_percent}%",
 								"memory_used": f"{memory_info.rss / (1024 * 1024):.2f}MB",
 								"memory_percent": f"{memory_percent}%",
 								"active_calls": len(self.active_calls),
-								"active_streams": len(self.active_streams) if hasattr(self, 'stream_manager') else 0
+								"active_streams": len(self.active_streams)
 						})
 						
 				except Exception as e:
@@ -2477,38 +2486,6 @@ class Dashboard(QMainWindow):
 						self.log_error("스레드 생성 오류", e)
 						return None
 
-		def check_dependencies(self):
-				try:
-						# 라이브러리 버전 체크
-						import pkg_resources
-						required = {
-								'pyshark': '0.4.5',  # 최소 요구 버전
-								'PySide6': '6.0.0',
-								'psutil': '5.8.0',
-								'pymongo': '3.12.0'
-						}
-						
-						for package, min_version in required.items():
-								version = pkg_resources.get_distribution(package).version
-								self.log_error(f"라이브러리 버전 체크", additional_info={
-										"package": package,
-										"current_version": version,
-										"required_version": min_version
-								})
-								
-						# Wireshark 버전 체크
-						try:
-								import subprocess
-								result = subprocess.run(['tshark', '--version'], capture_output=True, text=True)
-								self.log_error("Wireshark 버전", additional_info={
-										"version_info": result.stdout.split('\n')[0]
-								})
-						except Exception as e:
-								self.log_error("Wireshark 버전 체크 실패", e)
-						
-				except Exception as e:
-						self.log_error("의존성 체크 중 오류", e)
-
 		def check_system_limits(self):
 				try:
 						# Windows 환경에서는 psutil을 사용하여 시스템 리소스 정보 확인
@@ -2526,27 +2503,6 @@ class Dashboard(QMainWindow):
 						})
 				except Exception as e:
 						self.log_error("시스템 리소스 확인 중 오류", e)
-
-		def setup_crash_handler(self):
-				try:
-						import faulthandler
-						faulthandler.enable()
-						crash_log = open('crash.log', 'w')
-						faulthandler.enable(file=crash_log)
-						
-						# Windows 전용 예외 핸들러
-						if os.name == 'nt':
-								import ctypes
-								def windows_exception_handler(ex_type, value, tb):
-										if ex_type is ctypes.c_int:
-												self.log_error("심각한 시스템 오류", additional_info={
-														"error_code": value,
-														"traceback": traceback.format_tb(tb)
-												})
-								sys.excepthook = windows_exception_handler
-								
-				except Exception as e:
-						self.log_error("크래시 핸들러 설정 실패", e)
 
 class FlowLayout(QLayout):
 		def __init__(self, parent=None, margin=0, spacing=-1):
@@ -2897,69 +2853,108 @@ class RTPStreamManager:
 				except Exception as e:
 						print(f"파일 정보 저장 실패: {e}")
 
-if __name__ == "__main__":
-		try:
-				# 중복 실행 체크를 위한 뮤텍스 생성
-				mutex = win32event.CreateMutex(None, False, "RecapVoice_Mutex")
-				if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-						# 이미 실행 중인 경우
-						from PySide6.QtWidgets import QMessageBox, QApplication
-						app = QApplication(sys.argv)
-						QMessageBox.information(
-								None, 
-								"Recap Voice",
-								"Recap Voice가 이미 실행 중입니다.\n트레이 아이콘에서 프로그램을 열 수 있습니다.",
-								QMessageBox.Ok
-						)
-						
-						def enum_windows_callback(hwnd, _):
-								if win32gui.GetWindowText(hwnd) == "Recap Voice":
-										# 트레이 아이콘의 "열기" 메뉴 실행과 동일한 효과
-										win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-										win32gui.SetForegroundWindow(hwnd)
-								return True
-								
-						win32gui.EnumWindows(enum_windows_callback, None)
-						sys.exit(0)
-						
-				app = QApplication([])
-				window = Dashboard()
-				
-				# 전역 예외 핸들러 설정
-				def handle_exception(exc_type, exc_value, exc_traceback):
-						window.log_error("치명적인 오류 발생", 
-								error=exc_value, 
-								additional_info={
-										"type": str(exc_type),
-										"traceback": "".join(traceback.format_tb(exc_traceback))
-								}
-						)
-						print("치명적인 오류가 발생했습니다. voip_monitor.log를 확인하세요.")
-						sys.exit(1)
+# 프로그램이 실행 중인지 확인하는 함수
+def get_window_state(app_name):
+    """ 실행 중인 프로그램의 창 상태를 반환하는 함수 """
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app:
+        for widget in app.topLevelWidgets():
+            if widget.windowTitle() == app_name:
+                if widget.isMinimized():
+                    return "MINIMIZED"
+                elif not widget.isVisible():
+                    return "TRAY"
+                else:
+                    return "VISIBLE"
+    return None
 
-				sys.excepthook = handle_exception
-				
-				# 메모리 모니터링
-				def check_memory_usage():
-						process = psutil.Process()
-						memory_info = process.memory_info()
-						window.log_error("메모리 사용량 체크", additional_info={
-								"rss": f"{memory_info.rss / 1024 / 1024:.2f} MB",
-								"vms": f"{memory_info.vms / 1024 / 1024:.2f} MB"
-						})
-						
-				memory_timer = QTimer()
-				memory_timer.timeout.connect(check_memory_usage)
-				memory_timer.start(60000)  # 1분마다 체크
-				
-				window.show()
-				app.exec()
-				
-		except Exception as e:
-				with open('voip_monitor.log', 'a', encoding='utf-8') as f:
-						f.write(f"\n=== 프로그램 시작 실패 ===\n")
-						f.write(f"시간: {datetime.datetime.now()}\n")
-						f.write(f"오류: {str(e)}\n")
-						f.write(traceback.format_exc())
-						f.write("\n")
-				sys.exit(1)
+# 트레이에 숨겨진 프로그램을 복원하는 함수
+def restore_from_tray():
+    """ 트레이에서 창을 복원하는 함수 """
+    app = QApplication.instance()
+    if app:
+        for widget in app.topLevelWidgets():
+            if widget.windowTitle() == "Recap Voice":
+                widget.setWindowState(Qt.WindowNoState)  # 최소화 해제
+                widget.show()
+                widget.activateWindow()
+                return
+
+if __name__ == "__main__":
+    try:
+        # 뮤텍스 생성 시도
+        mutex = win32event.CreateMutex(None, 1, 'RecapVoiceMutex')
+        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            # 이미 실행 중인 프로그램 찾기
+            def find_recap_voice_window():
+                def callback(hwnd, windows):
+                    if win32gui.IsWindowVisible(hwnd):
+                        title = win32gui.GetWindowText(hwnd)
+                        if "Recap Voice" in title:
+                            windows.append(hwnd)
+                    return True
+                windows = []
+                win32gui.EnumWindows(callback, windows)
+                return windows[0] if windows else None
+
+            hwnd = find_recap_voice_window()
+            if hwnd:
+                # 창이 최소화되어 있거나 트레이에 있는 경우 복원
+                if win32gui.IsIconic(hwnd):  # 최소화 상태 확인
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(hwnd)  # 창을 전면으로 가져오기
+                
+            msg = QMessageBox()
+            msg.setWindowTitle("Recap Voice")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("Recap Voice가 이미 실행 중입니다.")
+            msg.exec()
+            sys.exit(0)
+
+        with open('window_debug.log', 'a', encoding='utf-8') as f:
+            f.write(f"\n[{datetime.datetime.now()}] 프로그램 시작\n")
+
+        # QApplication 인스턴스 생성
+        app = QApplication([])
+        app.setApplicationName("Recap Voice")
+        window = Dashboard()
+
+        # 전역 예외 핸들러 설정
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            window.log_error("치명적인 오류 발생",
+                error=exc_value,
+                additional_info={
+                    "type": str(exc_type),
+                    "traceback": "".join(traceback.format_tb(exc_traceback))
+                }
+            )
+            print("치명적인 오류가 발생했습니다. voip_monitor.log를 확인하세요.")
+            sys.exit(1)
+
+        sys.excepthook = handle_exception
+
+        # 메모리 모니터링
+        def check_memory_usage():
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            window.log_error("메모리 사용량 체크", additional_info={
+                "rss": f"{memory_info.rss / 1024 / 1024:.2f} MB",
+                "vms": f"{memory_info.vms / 1024 / 1024:.2f} MB"
+            })
+
+        memory_timer = QTimer()
+        memory_timer.timeout.connect(check_memory_usage)
+        memory_timer.start(60000)  # 1분마다 체크
+
+        window.show()
+        app.exec()
+
+    except Exception as e:
+        with open('voip_monitor.log', 'a', encoding='utf-8') as f:
+            f.write(f"\n=== 프로그램 시작 실패 ===\n")
+            f.write(f"시간: {datetime.datetime.now()}\n")
+            f.write(f"오류: {str(e)}\n")
+            f.write(traceback.format_exc())
+            f.write("\n")
+        sys.exit(1)

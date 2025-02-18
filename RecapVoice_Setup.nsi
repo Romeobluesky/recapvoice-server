@@ -13,8 +13,8 @@ VIAddVersionKey "ProductName" "Recap Voice"
 VIAddVersionKey "CompanyName" "Xpower Networks"
 VIAddVersionKey "FileVersion" "1.504"
 VIAddVersionKey "ProductVersion" "1.504"
-VIAddVersionKey "LegalCopyright" "Copyright (c) 2024"
-VIAddVersionKey "FileDescription" "Recap Voice Application"
+VIAddVersionKey "LegalCopyright" "Copyright (c) 2025"
+VIAddVersionKey "FileDescription" "Recap Voice"
 VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
 
 # MUI 설정
@@ -22,7 +22,6 @@ VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
 !include "LogicLib.nsh"
 !include "WinCore.nsh"
 !include "WinMessages.nsh"
-!include "nsisunz.nsh"
 !include "StrFunc.nsh"
 
 # MUI 설정
@@ -118,7 +117,7 @@ Section "MainSection"
    # 설치 디렉토리 내에 녹음 파일 저장 디렉토리 생성
    SetShellVarContext all
    CreateDirectory "$INSTDIR\RecapVoiceRecord"
-   ExecWait 'cmd.exe /C icacls "$INSTDIR\RecapVoiceRecord" /grant Everyone:(OI)(CI)F'
+   nsExec::ExecToStack 'icacls "$INSTDIR\RecapVoiceRecord" /grant Everyone:(OI)(CI)F'
    
    # dist 폴더의 settings.ini 파일을 먼저 복사
    File "dist\Recap Voice\settings.ini"
@@ -139,10 +138,17 @@ Section "MainSection"
    DetailPrint "Copying packetwave_client..."
    CreateDirectory "$INSTDIR\packetwave_client"
    SetOutPath "$INSTDIR\packetwave_client"
-   File /r "packetwave_client\*.*"
+   File /r /x "models" "packetwave_client\*.*"
+   
+   # 설치 프로그램과 같은 위치의 models 폴더를 복사
+   DetailPrint "Copying whispermodels folder..."
+   CopyFiles "$EXEDIR\models\*.*" "$INSTDIR\packetwave_client\models"
+   
    SetOutPath "$INSTDIR"
    
-   # 환경변수 설정 (중요도 순서대로)
+   # 기존 PATH 값 보존하면서 새로운 경로 추가
+   Push "C:\Program Files\nodejs"
+   Call AddToPath
    Push "C:\Program Files\Npcap"
    Call AddToPath
    Push "C:\Program Files\Wireshark"
@@ -153,10 +159,6 @@ Section "MainSection"
    Call AddToPath
    Push "$INSTDIR\mongodb\bin"
    Call AddToPath
-   # Node.js 경로 추가
-   Push "C:\Program Files\nodejs\"
-   Call AddToPath
-   # Node.js 모듈 경로 추가
    Push "$INSTDIR\packetwave_client\node_modules"
    Call AddToPath
    
@@ -234,8 +236,9 @@ Function AddToPath
    Exch $0  ; 추가할 경로
    Push $1  ; 현재 PATH 값
    Push $2  ; 임시 변수
+   Push $3  ; 문자열 길이 저장용
    
-   # 현재 PATH 값 읽기
+   # 현재 시스템의 PATH 값을 가져옴
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
    
    # 이미 경로가 존재하는지 확인
@@ -250,21 +253,36 @@ Function AddToPath
       Goto done
       
    NotFound:
-      # 마지막 문자가 세미콜론인지 확인
-      ${If} $1 != ""
-         StrCpy $2 $1 1 -1
-         ${If} $2 != ";"
-            StrCpy $1 "$1;"
-         ${EndIf}
+      # 새로운 PATH 길이 계산
+      StrLen $3 $1
+      StrLen $2 $0
+      IntOp $3 $3 + $2
+      IntOp $3 $3 + 1  # 세미콜론 길이 추가
+      
+      # PATH 길이 체크 (8000자 제한, 여유 공간 확보)
+      ${If} $3 > 8000
+         MessageBox MB_OK|MB_ICONEXCLAMATION "PATH 환경변수가 너무 깁니다. 새로운 경로를 추가할 수 없습니다."
+         Goto done
       ${EndIf}
       
-      # 새 경로 추가
-      StrCpy $1 "$1$0;"
+      # 새 경로 추가 (기존 PATH 유지)
+      ${If} $1 != ""
+         StrCpy $2 $1 1 -1  # 마지막 문자 확인
+         ${If} $2 != ";"
+            StrCpy $1 "$1;"  # 세미콜론 추가
+         ${EndIf}
+         StrCpy $1 "$1$0"  # 새 경로 추가
+      ${Else}
+         StrCpy $1 "$0"
+      ${EndIf}
+      
+      # PATH 환경 변수 업데이트
       WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $1
       SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
       DetailPrint "'$0' 경로가 PATH에 추가되었습니다."
 
 done:
+   Pop $3
    Pop $2
    Pop $1
    Pop $0
@@ -301,15 +319,24 @@ Section "Uninstall"
    ExecWait 'taskkill /f /im "nginx.exe" /t'
    ExecWait 'taskkill /f /im "mongod.exe" /t'
    ExecWait 'taskkill /f /im "node.exe" /t'
+   ExecWait 'taskkill /f /im "Dumpcap.exe" /t'
+
    Sleep 2000  # 프로세스가 완전히 종료되길 기다림
 
    # 환경 변수 제거
+   DetailPrint "Removing environment variables..."
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
    !insertmacro un.RemovePath "$INSTDIR\nginx"
    !insertmacro un.RemovePath "$INSTDIR\mongodb\bin"
+   !insertmacro un.RemovePath "$INSTDIR\packetwave_client\node_modules"
+   !insertmacro un.RemovePath "C:\Program Files\nodejs"
    !insertmacro un.RemovePath "C:\Program Files\Npcap"
    !insertmacro un.RemovePath "C:\Program Files\Wireshark"
    !insertmacro un.RemovePath "C:\Program Files\ffmpeg\bin"
+   
+   # 환경 변수 변경사항 적용
+   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+   DetailPrint "Environment variables removed successfully"
    
    # 바탕화면 아이콘 제거
    SetShellVarContext all

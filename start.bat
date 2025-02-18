@@ -58,7 +58,11 @@ if %ERRORLEVEL% neq 0 (
 )
 
 cd /d "!WORK_DIR!\packetwave_client"
-npm run start:dev
+if "!env_mode!"=="development" (
+    npm run start:dev
+) else (
+    npm run start
+)
 if %ERRORLEVEL% neq 0 (
     echo Failed to start NestJS
     goto error
@@ -69,9 +73,7 @@ goto :end
 :error
 echo Error occurred. Check the logs for details.
 pause
-exit /b 1
-
-:end
+exit /b 1:end
 echo All services started successfully.
 if "!env_mode!"=="development" (
     echo Running in development mode
@@ -80,3 +82,4 @@ if "!env_mode!"=="development" (
     echo Running in production mode
 )
 exit /b 0
+

@@ -1,4 +1,14 @@
 # PowerShell 스크립트
+
+# models 폴더 임시 이동
+Write-Host "Moving models folder temporarily..."
+$modelsPath = "packetwave_client\models"
+$tempModelsPath = "models_temp"
+if (Test-Path $modelsPath) {
+    Move-Item -Path $modelsPath -Destination $tempModelsPath -Force
+    Write-Host "Models folder moved to temporary location"
+}
+
 $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--name `"Recap Voice`" " + `
     "--icon=`"images\recapvoice_squere.ico`" " + `
@@ -6,29 +16,26 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--add-data `"settings.ini;.`" " + `
     "--add-data `"start.bat;.`" " + `
     "--add-data `"LICENCE.txt;.`" " + `
-    "--add-data `"version.txt;.`" " + `
     "--add-data `"voip_monitor.log;.`" " + `
     "--add-data `"crash.log;.`" " + `
+    "--add-data `"sequence_errors.log;.`" " + `
     "--add-data `"docs;docs`" " + `
     "--add-data `"apply_schemas.py;.`" " + `
     "--add-data `"config_loader.py;.`" " + `
     "--add-data `"packet_monitor.py;.`" " + `
     "--add-data `"settings_popup.py;.`" " + `
     "--add-data `"voip_monitor.py;.`" " + `
-    "--add-data `"wav_chat_extractor.py;.`" " + `
     "--add-data `"wav_merger.py;.`" " + `
     "--add-data `"styles\styles.qss;styles`" " + `
     "--add-data `"images;images`" " + `
     "--add-data `"sounds;sounds`" " + `
+    "--exclude-module `"packetwave_client\models`" " + `
+    "--add-data `"packetwave_client;packetwave_client`" " + `
     "--version-file `"version.txt`" " + `
     "--hidden-import `"pymongo`" " + `
     "--hidden-import `"pydub`" " + `
-    "--hidden-import `"speech_recognition`" " + `
     "--hidden-import `"ffmpeg`" " + `
-    "--hidden-import `"mysql.connector`" " + `
     "--hidden-import `"psutil`" " + `
-    "--hidden-import `"google.cloud.speech`" " + `
-    "--hidden-import `"grpc`" " + `
     "--hidden-import `"termcolor`" " + `
     "--hidden-import `"PySide6.QtMultimedia`" " + `
     "--hidden-import `"PySide6.QtMultimediaWidgets`" " + `
@@ -37,23 +44,45 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--hidden-import `"audioop`" " + `
     "--hidden-import `"wave`" " + `
     "--hidden-import `"asyncio`" " + `
+    "--hidden-import `"ctypes`" " + `
     "--hidden-import `"atexit`" " + `
     "--hidden-import `"platform`" " + `
-    "--collect-all `"PySide6`" " + `
-    "--collect-all `"pyshark`" " + `
-    "--collect-all `"scapy`" " + `
-    "--collect-all `"requests`" " + `
-    "--collect-all `"pydub`" " + `
     "--hidden-import `"win32process`" " + `
     "--hidden-import `"win32api`" " + `
     "--hidden-import `"win32gui`" " + `
     "--hidden-import `"win32con`" " + `
     "--hidden-import `"win32com`" " + `
+    "--hidden-import `"win32event`" " + `
+    "--hidden-import `"winerror`" " + `
+    "--collect-all `"PySide6`" " + `
+    "--collect-all `"pyshark`" " + `
+    "--collect-all `"scapy`" " + `
+    "--collect-all `"requests`" " + `
+    "--collect-all `"pydub`" " + `
+    "--collect-all `"psutil`" " + `
+    "--hidden-import `"psutil._psutil_windows`" " + `
+    "--hidden-import `"psutil._pswindows`" " + `
+    "--version-file `"version.txt`" " + `
     "dashboard.py"
 
 # 명령어 실행
 Write-Host "Executing PyInstaller command..."
 Invoke-Expression $pyinstaller_cmd
+
+# models 폴더 원래 위치로 복원
+Write-Host "Restoring models folder..."
+if (Test-Path $tempModelsPath) {
+    if (-not (Test-Path "packetwave_client")) {
+        New-Item -ItemType Directory -Path "packetwave_client" -Force
+    }
+    # 기존 models 폴더가 있다면 제거
+    if (Test-Path $modelsPath) {
+        Remove-Item -Path $modelsPath -Recurse -Force
+    }
+    # 정확한 경로로 복원
+    Move-Item -Path $tempModelsPath -Destination $modelsPath -Force
+    Write-Host "Models folder restored to original location: $modelsPath"
+}
 
 # 빌드 완료 후 파일 복사
 $distPath = "dist\Recap Voice"
