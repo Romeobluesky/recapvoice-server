@@ -44,16 +44,11 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--hidden-import `"audioop`" " + `
     "--hidden-import `"wave`" " + `
     "--hidden-import `"asyncio`" " + `
-    "--hidden-import `"ctypes`" " + `
     "--hidden-import `"atexit`" " + `
     "--hidden-import `"platform`" " + `
     "--hidden-import `"win32process`" " + `
-    "--hidden-import `"win32api`" " + `
     "--hidden-import `"win32gui`" " + `
     "--hidden-import `"win32con`" " + `
-    "--hidden-import `"win32com`" " + `
-    "--hidden-import `"win32event`" " + `
-    "--hidden-import `"winerror`" " + `
     "--collect-all `"PySide6`" " + `
     "--collect-all `"pyshark`" " + `
     "--collect-all `"scapy`" " + `

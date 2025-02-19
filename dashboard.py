@@ -16,7 +16,7 @@ import threading
 import time
 import traceback
 import wave
-import ctypes
+
 # 서드파티 라이브러리
 from enum import Enum, auto
 import pyshark
@@ -29,12 +29,9 @@ from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtNetwork import *
 from PySide6.QtWidgets import *
-import win32api
 import win32con
-import win32event
 import win32gui
 import win32process
-import winerror
 
 # 로컬 모듈
 from config_loader import load_config, get_wireshark_path
@@ -43,14 +40,6 @@ from settings_popup import SettingsPopup
 from voip_monitor import VoipMonitor
 from wav_merger import WavMerger
 
-# 종료할 프로세스 목록
-processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe', 'Dumpcap.exe']
-
-def kill_processes():
-		for process in processes_to_kill:
-				subprocess.call(['taskkill', '/f', '/im', process])
-
-atexit.register(kill_processes)
 
 def resource_path(relative_path):
 		"""리소스 파일의 절대 경로를 반환"""
@@ -121,9 +110,13 @@ class Dashboard(QMainWindow):
 		block_creation_signal = Signal(str)
 		block_update_signal = Signal(str, str, str)
 
+		_instance = None  # 클래스 변수로 인스턴스 추적
+
 		def __init__(self):
 				try:
 						super().__init__()
+						Dashboard._instance = self
+						self.setup_single_instance()
 						self.cleanup_existing_dumpcap()  # 프로그램 시작 시 기존 Dumpcap 프로세스 정리
 						
 						# 필수 디렉토리 확인 및 생성
@@ -162,6 +155,43 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						self.log_error("대시보드 초기화 실패", e)
 						raise
+
+		def setup_single_instance(self):
+				"""단일 인스턴스 관리 설정"""
+				try:
+						self.instance_server = QLocalServer(self)
+						self.instance_client = QLocalSocket(self)
+						
+						# 기존 서버 정리
+						QLocalServer.removeServer("RecapVoiceInstance")
+						
+						# 서버 시작
+						self.instance_server.listen("RecapVoiceInstance")
+						self.instance_server.newConnection.connect(self.handle_instance_connection)
+						
+				except Exception as e:
+						self.log_error("단일 인스턴스 설정 실패", e)
+
+		def handle_instance_connection(self):
+				"""새로운 인스턴스 연결 처리"""
+				try:
+						socket = self.instance_server.nextPendingConnection()
+						if socket.waitForReadyRead(1000):
+								if socket.read(4) == b"show":
+										self.restore_window()
+				except Exception as e:
+						self.log_error("인스턴스 연결 처리 실패", e)
+
+		def restore_window(self):
+				"""창 복원 통합 메서드"""
+				try:
+						if self.isMinimized():
+								self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+						self.show()
+						self.activateWindow()
+						self.raise_()
+				except Exception as e:
+						self.log_error("창 복원 실패", e)
 
 		def play_intro_video(self):
 				try:
@@ -2430,6 +2460,12 @@ class Dashboard(QMainWindow):
 
 		def quit_application(self):
 				try:
+						# 외부 프로세스 종료
+						processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe', 'Dumpcap.exe']
+						for process in processes_to_kill:
+								os.system(f'taskkill /f /im {process}')
+								print(f"프로세스 종료 시도: {process}")
+
 						# voip_monitor.log 파일을 0바이트로 초기화
 						try:
 								with open('voip_monitor.log', 'w') as f:
@@ -2853,77 +2889,38 @@ class RTPStreamManager:
 				except Exception as e:
 						print(f"파일 정보 저장 실패: {e}")
 
-# 실행 중인 프로그램의 창 상태 확인 함수
-def get_window_state(app_name):
-    app = QApplication.instance()
-    if app:
-        for widget in app.topLevelWidgets():
-            if widget.windowTitle() == app_name:
-                if widget.isMinimized():
-                    return "MINIMIZED"
-                elif not widget.isVisible():
-                    return "TRAY"
-                else:
-                    return "VISIBLE"
-    return None
+def main():
+		try:
+					app = QApplication(sys.argv)
+					app.setApplicationName("Recap Voice")
+					
+					# 단일 인스턴스 확인
+					client = QLocalSocket()
+					client.connectToServer("RecapVoiceInstance")
+					
+					if client.waitForConnected(500):
+							# 이미 실행 중인 경우
+							client.write(b"show")
+							client.disconnectFromServer()
+							app.quit()
+							sys.exit(0)
+							
+					# 새 인스턴스 시작
+					window = Dashboard()
+					window.show()
+					
+					# 바탕화면 아이콘 클릭 시 단일 인스턴스 처리
+					app.setQuitOnLastWindowClosed(False)
+					app.exec()
 
-# 트레이에서 창 복원 함수
-def restore_from_tray():
-    """ 트레이에서 창을 복원하는 함수 """
-    app = QApplication.instance()
-    if app:
-        for widget in app.topLevelWidgets():
-            if widget.windowTitle() == "Recap Voice":
-                widget.setWindowState(Qt.WindowNoState)  # 최소화 해제
-                widget.show()
-                widget.raise_()  # 창을 최상위로 이동
-                widget.activateWindow()  # 창 활성화
-                widget.setWindowState(Qt.WindowActive)  # 윈도우 활성화
-                return
-
-# 실행 중인 프로그램 찾기
-def find_recap_voice_window():
-    def callback(hwnd, windows):
-        if win32gui.IsWindowVisible(hwnd):
-            title = win32gui.GetWindowText(hwnd)
-            if "Recap Voice" in title:
-                windows.append(hwnd)
-        return True
-    windows = []
-    win32gui.EnumWindows(callback, windows)
-    return windows[0] if windows else None
-
+		except Exception as e:
+				traceback.print_exc()
+				with open('voip_monitor.log', 'a', encoding='utf-8') as f:
+						f.write(f"\n=== 프로그램 시작 실패 ===\n")
+						f.write(f"시간: {datetime.datetime.now()}\n")
+						f.write(f"오류: {str(e)}\n")
+						f.write(traceback.format_exc())
+						f.write("\n")
+				sys.exit(1)
 if __name__ == "__main__":
-    try:
-        mutex = win32event.CreateMutex(None, 1, 'RecapVoiceMutex')
-        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-            hwnd = find_recap_voice_window()
-            if hwnd:
-                if win32gui.IsIconic(hwnd):  # 최소화 상태 확인
-                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # 창 복원
-                win32gui.BringWindowToTop(hwnd)  # 창을 최상위로 이동
-                win32gui.SetForegroundWindow(hwnd)  # 창을 전면으로 가져오기
-
-            msg = QMessageBox()
-            msg.setWindowTitle("Recap Voice")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("Recap Voice가 이미 실행 중입니다.")
-            msg.exec()
-            sys.exit(0)
-
-        app = QApplication([])
-        app.setApplicationName("Recap Voice")
-        window = Dashboard()
-
-        window.show()
-        app.exec()
-
-    except Exception as e:
-        traceback.print_exc()
-        with open('voip_monitor.log', 'a', encoding='utf-8') as f:
-            f.write(f"\n=== 프로그램 시작 실패 ===\n")
-            f.write(f"시간: {datetime.datetime.now()}\n")
-            f.write(f"오류: {str(e)}\n")
-            f.write(traceback.format_exc())
-            f.write("\n")
-        sys.exit(1)
+		main()

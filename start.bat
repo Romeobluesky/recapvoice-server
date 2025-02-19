@@ -28,6 +28,23 @@ if not exist "!WORK_DIR!\nginx\nginx.exe" (
     goto error
 )
 
+:: Nginx 방화벽 허용 설정 (기존 규칙 삭제 후 재등록)
+echo Configuring Windows Firewall for Nginx...
+
+:: 기존 방화벽 규칙 삭제
+netsh advfirewall firewall delete rule name="Nginx HTTP" >nul 2>&1
+netsh advfirewall firewall delete rule name="Nginx HTTPS" >nul 2>&1
+
+:: 방화벽 인바운드 규칙 추가
+netsh advfirewall firewall add rule name="Nginx HTTP" dir=in action=allow program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+netsh advfirewall firewall add rule name="Nginx HTTPS" dir=in action=allow protocol=TCP localport=443 action=allow program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+
+:: 방화벽 아웃바운드 규칙 추가
+netsh advfirewall firewall add rule name="Nginx HTTP" dir=out action=allow program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+netsh advfirewall firewall add rule name="Nginx HTTPS" dir=out action=allow protocol=TCP localport=443 action=allow program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+
+echo Windows Firewall configuration completed.
+
 :: 작업 디렉토리 생성
 if not exist "!WORK_DIR!\logs" mkdir "!WORK_DIR!\logs"
 if not exist "!WORK_DIR!\temp" mkdir "!WORK_DIR!\temp"
@@ -73,7 +90,9 @@ goto :end
 :error
 echo Error occurred. Check the logs for details.
 pause
-exit /b 1:end
+exit /b 1
+
+:end
 echo All services started successfully.
 if "!env_mode!"=="development" (
     echo Running in development mode
@@ -82,4 +101,3 @@ if "!env_mode!"=="development" (
     echo Running in production mode
 )
 exit /b 0
-
