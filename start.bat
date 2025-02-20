@@ -29,7 +29,7 @@ if not exist "!WORK_DIR!\nginx\nginx.exe" (
 )
 
 :: 배포 모드일 때만 방화벽 설정
-if "!env_mode!"=="production" (
+if not "!env_mode!"=="development" (
     :: Nginx 방화벽 허용 설정 (기존 규칙 삭제 후 재등록)
     echo Configuring Windows Firewall for Nginx...
 
