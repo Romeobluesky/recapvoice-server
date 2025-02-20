@@ -28,25 +28,58 @@ if not exist "!WORK_DIR!\nginx\nginx.exe" (
     goto error
 )
 
-:: 배포 모드일 때만 방화벽 설정
-if not "!env_mode!"=="development" (
-    :: Nginx 방화벽 허용 설정 (기존 규칙 삭제 후 재등록)
-    echo Configuring Windows Firewall for Nginx...
+:: Nginx 방화벽 허용 설정
+echo Configuring Windows Firewall for Nginx...
 
-    :: 기존 방화벽 규칙 삭제
-    netsh advfirewall firewall delete rule name="Nginx HTTP" >nul 2>&1
-    netsh advfirewall firewall delete rule name="Nginx HTTPS" >nul 2>&1
-
-    :: 방화벽 인바운드 규칙 추가
-    netsh advfirewall firewall add rule name="Nginx HTTP" dir=in action=allow protocol=TCP localport=80 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
-    netsh advfirewall firewall add rule name="Nginx HTTPS" dir=in action=allow protocol=TCP localport=443 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
-
-    :: 방화벽 아웃바운드 규칙 추가
-    netsh advfirewall firewall add rule name="Nginx HTTP" dir=out action=allow protocol=TCP localport=80 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
-    netsh advfirewall firewall add rule name="Nginx HTTPS" dir=out action=allow protocol=TCP localport=443 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
-
-    echo Windows Firewall configuration completed.
+:: HTTP TCP 규칙 확인 및 설정
+netsh advfirewall firewall show rule name="Nginx HTTP TCP" >nul 2>&1
+if !ERRORLEVEL! EQU 0 (
+    echo Updating existing Nginx HTTP TCP firewall rules...
+    netsh advfirewall firewall set rule name="Nginx HTTP TCP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=TCP localport=80 action=allow dir=in enable=yes
+    netsh advfirewall firewall set rule name="Nginx HTTP TCP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=TCP localport=80 action=allow dir=out enable=yes
+) else (
+    echo Creating new Nginx HTTP TCP firewall rules...
+    netsh advfirewall firewall add rule name="Nginx HTTP TCP" dir=in action=allow protocol=TCP localport=80 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+    netsh advfirewall firewall add rule name="Nginx HTTP TCP" dir=out action=allow protocol=TCP localport=80 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
 )
+
+:: HTTP UDP 규칙 확인 및 설정
+netsh advfirewall firewall show rule name="Nginx HTTP UDP" >nul 2>&1
+if !ERRORLEVEL! EQU 0 (
+    echo Updating existing Nginx HTTP UDP firewall rules...
+    netsh advfirewall firewall set rule name="Nginx HTTP UDP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=UDP localport=80 action=allow dir=in enable=yes
+    netsh advfirewall firewall set rule name="Nginx HTTP UDP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=UDP localport=80 action=allow dir=out enable=yes
+) else (
+    echo Creating new Nginx HTTP UDP firewall rules...
+    netsh advfirewall firewall add rule name="Nginx HTTP UDP" dir=in action=allow protocol=UDP localport=80 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+    netsh advfirewall firewall add rule name="Nginx HTTP UDP" dir=out action=allow protocol=UDP localport=80 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+)
+
+:: HTTPS TCP 규칙 확인 및 설정
+netsh advfirewall firewall show rule name="Nginx HTTPS TCP" >nul 2>&1
+if !ERRORLEVEL! EQU 0 (
+    echo Updating existing Nginx HTTPS TCP firewall rules...
+    netsh advfirewall firewall set rule name="Nginx HTTPS TCP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=TCP localport=443 action=allow dir=in enable=yes
+    netsh advfirewall firewall set rule name="Nginx HTTPS TCP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=TCP localport=443 action=allow dir=out enable=yes
+) else (
+    echo Creating new Nginx HTTPS TCP firewall rules...
+    netsh advfirewall firewall add rule name="Nginx HTTPS TCP" dir=in action=allow protocol=TCP localport=443 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+    netsh advfirewall firewall add rule name="Nginx HTTPS TCP" dir=out action=allow protocol=TCP localport=443 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+)
+
+:: HTTPS UDP 규칙 확인 및 설정
+netsh advfirewall firewall show rule name="Nginx HTTPS UDP" >nul 2>&1
+if !ERRORLEVEL! EQU 0 (
+    echo Updating existing Nginx HTTPS UDP firewall rules...
+    netsh advfirewall firewall set rule name="Nginx HTTPS UDP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=UDP localport=443 action=allow dir=in enable=yes
+    netsh advfirewall firewall set rule name="Nginx HTTPS UDP" new program="!WORK_DIR!\nginx\nginx.exe" protocol=UDP localport=443 action=allow dir=out enable=yes
+) else (
+    echo Creating new Nginx HTTPS UDP firewall rules...
+    netsh advfirewall firewall add rule name="Nginx HTTPS UDP" dir=in action=allow protocol=UDP localport=443 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+    netsh advfirewall firewall add rule name="Nginx HTTPS UDP" dir=out action=allow protocol=UDP localport=443 program="!WORK_DIR!\nginx\nginx.exe" enable=yes
+)
+
+echo Windows Firewall configuration completed.
 
 :: 작업 디렉토리 생성
 if not exist "!WORK_DIR!\logs" mkdir "!WORK_DIR!\logs"
