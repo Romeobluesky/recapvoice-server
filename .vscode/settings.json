@@ -2,7 +2,6 @@
 	"files.eol": "\n",
 	"editor.insertSpaces": false,
 	"editor.tabSize": 2,
-	"pyqt-integration.qtdesigner.path": "D:\\work_vsc\\python\\myenv\\Lib\\site-packages\\qt5_applications\\Qt\\bin\\designer.exe",
 	"editor.wordWrap": "on",
 
 	"files.associations": {
@@ -10,7 +9,8 @@
 	},
 	"[nsis]": {
 		"files.encoding": "euckr"
-	}
+	},
+	"postman.settings.dotenv-detection-notification-visibility": false
 }
 
 

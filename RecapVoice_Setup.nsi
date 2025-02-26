@@ -1,5 +1,5 @@
 !define APP_NAME "Recap Voice"
-!define VERSION "1.601"
+!define VERSION "1.702"
 !define INSTALL_DIR "$PROGRAMFILES\${APP_NAME}"
 
 Name "${APP_NAME}"
@@ -8,11 +8,11 @@ InstallDir "${INSTALL_DIR}"
 RequestExecutionLevel admin
 
 # 버전 정보 추가
-VIProductVersion "1.5.0.4"
+VIProductVersion "1.7.0.2"
 VIAddVersionKey "ProductName" "Recap Voice"
 VIAddVersionKey "CompanyName" "Xpower Networks"
-VIAddVersionKey "FileVersion" "1.601"
-VIAddVersionKey "ProductVersion" "1.601"
+VIAddVersionKey "FileVersion" "1.702"
+VIAddVersionKey "ProductVersion" "1.702"
 VIAddVersionKey "LegalCopyright" "Copyright (c) 2025"
 VIAddVersionKey "FileDescription" "Recap Voice"
 VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
