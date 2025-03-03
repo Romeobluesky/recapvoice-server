@@ -353,7 +353,12 @@ Section "Uninstall"
    MessageBox MB_YESNO "음성 녹음 파일이 저장된 폴더를 삭제하시겠습니까?" IDNO skip_delete_records
    SetShellVarContext all
    RMDir /r "$INSTDIR\RecapVoiceRecord"
+   Goto records_deletion_done
+   
    skip_delete_records:
+   DetailPrint "음성 녹음 파일을 보존합니다."
+   
+   records_deletion_done:
    
    # 제어판에서 프로그램 제거
    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
