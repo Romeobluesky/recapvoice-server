@@ -1,5 +1,5 @@
 ---
 description: 
-globs: 
+globs: packetwave_client/*.*
 alwaysApply: false
 ---

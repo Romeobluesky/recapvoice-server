@@ -1,16 +1,15 @@
 import os
 import psutil
 import configparser
+import socket
+import requests
+
 from PySide6.QtWidgets import (
 	QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton,
 	QHBoxLayout, QCheckBox, QComboBox, QProgressBar, QGroupBox, QFileDialog,
 	QMessageBox
 )
 from PySide6.QtCore import Qt, Signal
-import socket
-
-import requests
-
 class SettingsPopup(QDialog):
 	# 상수 정의
 	WINDOW_SIZE = (600, 300)
@@ -45,8 +44,8 @@ class SettingsPopup(QDialog):
 				'port': '8080'
 			}
 			self.config['Extension'] = {
-				'rep_number': '',
-				'id_code': 'DIFK-2345-EF78-AFE6',
+				'rep_number': '000-0000-0000',
+				'id_code': 'DIFK-0000-0000-0000',
 				'get_interface_length': '4'
 			}
 			self.config['OtherSettings'] = {
