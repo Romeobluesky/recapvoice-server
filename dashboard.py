@@ -585,17 +585,18 @@ class Dashboard(QMainWindow):
 				self.phone_number.setText(config.get('Extension', 'rep_number', fallback=''))
 				phone_layout.addWidget(phone_text)
 				phone_layout.addWidget(self.phone_number)
-				id_section = QWidget()
-				id_layout = QHBoxLayout(id_section)
-				id_layout.setAlignment(Qt.AlignRight)
-				id_layout.setContentsMargins(0, 0, 0, 0)
-				id_text = QLabel("ID CODE | ")
-				self.id_code = QLabel()
-				self.id_code.setText(config.get('Extension', 'id_code', fallback=''))
-				id_layout.addWidget(id_text)
-				id_layout.addWidget(self.id_code)
+				license_section = QWidget()
+				license_layout = QHBoxLayout(license_section)
+				license_layout.setAlignment(Qt.AlignRight)
+				license_layout.setContentsMargins(0, 0, 0, 0)
+				license_text = QLabel("라이선스 NO. | ")
+				self.license_number = QLabel()
+				self.license_number.setText(config.get('Extension', 'license_no', fallback=''))
+				license_layout.addWidget(license_text)
+				license_layout.addWidget(self.license_number)
+
 				header_layout.addWidget(phone_section, 1)
-				header_layout.addWidget(id_section, 1)
+				header_layout.addWidget(license_section, 1)
 				return header
 
 		def _create_sidebar(self):
@@ -1188,6 +1189,8 @@ class Dashboard(QMainWindow):
 				try:
 						if 'Extension' in settings_data:
 								self.phone_number.setText(settings_data['Extension']['rep_number'])
+								if 'license_no' in settings_data['Extension']:
+										self.license_number.setText(settings_data['Extension']['license_no'])
 						if 'Network' in settings_data:
 								self.ip_value.setText(settings_data['Network']['ap_ip'])
 								self.mirror_ip_value.setText(settings_data['Network']['ip'])

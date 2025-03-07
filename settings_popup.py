@@ -77,9 +77,13 @@ class SettingsPopup(QDialog):
 		main_layout = QVBoxLayout()
 		self.apply_stylesheet()
 
-		# UI 구성요 추가
+		# UI 구성요소 추가
 		main_layout.addWidget(self.create_company_section())
+		# 섹션 간 간격 추가
+		main_layout.addSpacing(10)
 		main_layout.addWidget(self.create_record_section())
+		# 동일한 간격 추가
+		main_layout.addSpacing(10)
 		main_layout.addLayout(self.create_button_section())
 
 		self.setLayout(main_layout)
@@ -97,22 +101,47 @@ class SettingsPopup(QDialog):
 	def create_company_section(self):
 		"""회사 정보 섹션 생성"""
 		company_group = QGroupBox()
-		layout = QHBoxLayout()
-
+		
+		# 기존 수직 레이아웃 대신 수직 레이아웃으로 변경
+		layout = QVBoxLayout()
+		
+		# 첫 번째 행: 대표번호와 AP 서버 IP
+		first_row = QHBoxLayout()
+		
 		# 대표번호 입력필드
 		self.rep_number_input = QLineEdit()
 		self.rep_number_input.setText(self.config['Extension'].get('rep_number', ''))
-
+		
 		# AP 서버 IP 입력필드
 		self.ap_ip_input = QLineEdit()
 		self.ap_ip_input.setText(self.get_public_ip())
 		self.ap_ip_input.setReadOnly(True)
-
-		layout.addWidget(QLabel('대표 번호:'))
-		layout.addWidget(self.rep_number_input)
-		layout.addWidget(QLabel('AP 서버 IP:'))
-		layout.addWidget(self.ap_ip_input)
-
+		
+		first_row.addWidget(QLabel('대표번호:'))
+		first_row.addWidget(self.rep_number_input)
+		first_row.addWidget(QLabel('공인서버 IP:'))
+		first_row.addWidget(self.ap_ip_input)
+		
+		# 두 번째 행: 라이선스 No.와 하드웨어 ID
+		second_row = QHBoxLayout()
+		
+		# 라이선스 No. 입력필드
+		self.license_input = QLineEdit()
+		self.license_input.setText(self.config['Extension'].get('license_no', ''))
+		
+		# 하드웨어 ID 입력필드
+		self.hardware_id_input = QLineEdit()
+		self.hardware_id_input.setText(self.config['Extension'].get('hardware_id', ''))
+		
+		second_row.addWidget(QLabel('라이선스:'))
+		second_row.addWidget(self.license_input)
+		second_row.addWidget(QLabel('하드웨어 ID:'))
+		second_row.addWidget(self.hardware_id_input)
+		
+		# 두 행을 메인 레이아웃에 추가
+		layout.addLayout(first_row)
+		layout.addLayout(second_row)
+		
 		company_group.setLayout(layout)
 		return company_group
 
@@ -321,7 +350,9 @@ class SettingsPopup(QDialog):
 		# 설정값 업데이트
 		settings_data = {
 			'Extension': {
-				'rep_number': self.rep_number_input.text()
+				'rep_number': self.rep_number_input.text(),
+				'license_no': self.license_input.text(),
+				'hardware_id': self.hardware_id_input.text()
 			},
 			'Network': {
 				'ip': self.ip_combo.currentText(),
@@ -329,7 +360,7 @@ class SettingsPopup(QDialog):
 			},
 			'OtherSettings': {
 				'disk_persent': self.disk_percent_input.text(),
-				'disk_alarm': str(self.alarm_checkbox.isChecked()).lower()
+				'disk_alarm': 'true' if self.alarm_checkbox.isChecked() else 'false'
 			},
 			'Recording': {
 				'save_path': self.path_input.text(),
@@ -343,7 +374,7 @@ class SettingsPopup(QDialog):
 			if section not in self.config:
 				self.config[section] = {}
 			for key, value in values.items():
-				self.config[section][key] = value
+				self.config[section][key] = str(value)
 
 		# 파일 저장
 		with open('settings.ini', 'w', encoding='utf-8') as configfile:
