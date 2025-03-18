@@ -3,6 +3,8 @@ import psutil
 import configparser
 import socket
 import requests
+import uuid
+import netifaces  # 새로운 라이브러리 추가 필요
 
 from PySide6.QtWidgets import (
 	QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -27,7 +29,7 @@ class SettingsPopup(QDialog):
 		super().__init__(parent)
 		# 설정 파일 로드 또는 생성
 		self.config = configparser.ConfigParser()
-		
+
 		if not os.path.exists('settings.ini') or os.path.getsize('settings.ini') == 0:
 			# 기본 설정값 설정
 			self.config['Environment'] = {
@@ -46,13 +48,14 @@ class SettingsPopup(QDialog):
 			self.config['Extension'] = {
 				'rep_number': '000-0000-0000',
 				'id_code': 'DIFK-0000-0000-0000',
-				'get_interface_length': '4'
+				'get_interface_length': '4',
+				'hardware_id': self.get_mac_address()
 			}
 			self.config['OtherSettings'] = {
 				'disk_persent': '70',
 				'disk_alarm': 'true'
 			}
-			
+
 			# 설정 파일 저장
 			with open('settings.ini', 'w', encoding='utf-8') as configfile:
 				self.config.write(configfile)
@@ -98,50 +101,100 @@ class SettingsPopup(QDialog):
 			print(f"An error occurred: {e}")
 			return None
 
+	def get_mac_address(self):
+		"""이더넷 인터페이스의 MAC 주소 반환 (대문자로)"""
+		try:
+			# 모든 네트워크 인터페이스 가져오기
+			interfaces = netifaces.interfaces()
+			
+			# 이더넷 인터페이스 찾기
+			for interface in interfaces:
+				# 루프백 인터페이스 제외
+				if interface == 'lo' or interface.startswith('lo'):
+					continue
+					
+				# 인터페이스 주소 정보 가져오기
+				addresses = netifaces.ifaddresses(interface)
+				
+				# MAC 주소(AF_LINK) 정보가 있는지 확인
+				if netifaces.AF_LINK in addresses:
+					mac = addresses[netifaces.AF_LINK][0]['addr']
+					# IPv4 주소가 있는 인터페이스인지 확인 (이더넷 연결 확인)
+					if netifaces.AF_INET in addresses:
+						# MAC 주소를 대문자로 변환하고 하이픈으로 변경하여 반환
+						return mac.replace(':', '-').upper()
+			
+			# 이더넷 인터페이스를 찾지 못한 경우 첫 번째 MAC 주소 반환
+			for interface in interfaces:
+				if interface == 'lo' or interface.startswith('lo'):
+					continue
+					
+				addresses = netifaces.ifaddresses(interface)
+				if netifaces.AF_LINK in addresses:
+					mac = addresses[netifaces.AF_LINK][0]['addr']
+					# MAC 주소를 대문자로 변환하고 하이픈으로 변경하여 반환
+					return mac.replace(':', '-').upper()
+					
+			# 백업 방법: 기존 방식 사용
+			mac = uuid.UUID(int=uuid.getnode()).hex[-12:]
+			# MAC 주소를 하이픈으로 구분하여 반환
+			return "-".join([mac[e:e+2] for e in range(0, 11, 2)]).upper()
+			
+		except Exception as e:
+			print(f"MAC 주소 가져오기 오류: {e}")
+			# 오류 발생 시 기존 방식 사용
+			mac = uuid.UUID(int=uuid.getnode()).hex[-12:]
+			# MAC 주소를 하이픈으로 구분하여 반환
+			return "-".join([mac[e:e+2] for e in range(0, 11, 2)]).upper()
+
 	def create_company_section(self):
 		"""회사 정보 섹션 생성"""
 		company_group = QGroupBox()
-		
+
 		# 기존 수직 레이아웃 대신 수직 레이아웃으로 변경
 		layout = QVBoxLayout()
-		
+
 		# 첫 번째 행: 대표번호와 AP 서버 IP
 		first_row = QHBoxLayout()
-		
+
 		# 대표번호 입력필드
 		self.rep_number_input = QLineEdit()
 		self.rep_number_input.setText(self.config['Extension'].get('rep_number', ''))
-		
+
 		# AP 서버 IP 입력필드
 		self.ap_ip_input = QLineEdit()
 		self.ap_ip_input.setText(self.get_public_ip())
 		self.ap_ip_input.setReadOnly(True)
-		
+
 		first_row.addWidget(QLabel('대표번호:'))
 		first_row.addWidget(self.rep_number_input)
 		first_row.addWidget(QLabel('공인서버 IP:'))
 		first_row.addWidget(self.ap_ip_input)
-		
+
 		# 두 번째 행: 라이선스 No.와 하드웨어 ID
 		second_row = QHBoxLayout()
-		
+
 		# 라이선스 No. 입력필드
 		self.license_input = QLineEdit()
 		self.license_input.setText(self.config['Extension'].get('license_no', ''))
-		
+
 		# 하드웨어 ID 입력필드
 		self.hardware_id_input = QLineEdit()
-		self.hardware_id_input.setText(self.config['Extension'].get('hardware_id', ''))
-		
+		# 항상 현재 MAC 주소를 가져와서 설정 (설정 파일 값 무시)
+		mac_address = self.get_mac_address()
+		self.hardware_id_input.setText(mac_address)
+		# 하드웨어 ID 필드를 읽기 전용으로 설정하여 사용자가 수정할 수 없게 함
+		self.hardware_id_input.setReadOnly(True)
+
 		second_row.addWidget(QLabel('라이선스:'))
 		second_row.addWidget(self.license_input)
 		second_row.addWidget(QLabel('하드웨어 ID:'))
 		second_row.addWidget(self.hardware_id_input)
-		
+
 		# 두 행을 메인 레이아웃에 추가
 		layout.addLayout(first_row)
 		layout.addLayout(second_row)
-		
+
 		company_group.setLayout(layout)
 		return company_group
 
@@ -347,12 +400,15 @@ class SettingsPopup(QDialog):
 
 	def save_settings(self):
 		"""설정 저장"""
+		# 현재 MAC 주소 가져오기 (저장 시에도 항상 최신 MAC 주소 사용)
+		current_mac = self.get_mac_address()
+		
 		# 설정값 업데이트
 		settings_data = {
 			'Extension': {
 				'rep_number': self.rep_number_input.text(),
 				'license_no': self.license_input.text(),
-				'hardware_id': self.hardware_id_input.text()
+				'hardware_id': current_mac  # 항상 현재 MAC 주소 사용
 			},
 			'Network': {
 				'ip': self.ip_combo.currentText(),

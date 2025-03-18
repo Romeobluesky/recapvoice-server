@@ -24,6 +24,10 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--add-data `"config_loader.py;.`" " + `
     "--add-data `"packet_monitor.py;.`" " + `
     "--add-data `"settings_popup.py;.`" " + `
+    "--add-data `"callstate_machine.py;.`" " + `
+    "--add-data `"flow_layout.py;.`" " + `
+    "--add-data `"packet_flowwidget.py;.`" " + `
+    "--add-data `"rtpstream_manager.py;.`" " + `
     "--add-data `"voip_monitor.py;.`" " + `
     "--add-data `"wav_merger.py;.`" " + `
     "--add-data `"styles\styles.qss;styles`" " + `
