@@ -1,4 +1,6 @@
 from enum import Enum, auto
+import threading
+import logging
 
 class CallState(Enum):
 		IDLE = auto()         # 대기중
@@ -9,13 +11,16 @@ class CallState(Enum):
 class CallStateMachine:
 		def __init__(self):
 				self.state = CallState.IDLE
+				self._lock = threading.Lock()
+				self._logger = logging.getLogger(__name__)
 
 		def update_state(self, new_state):
-				if self.is_valid_transition(new_state):
-						print(f"상태 전이: {self.state.name} -> {new_state.name}")
-						self.state = new_state
-				else:
-						print(f"잘못된 상태 전이 시도: {self.state.name} -> {new_state.name}")
+				with self._lock:
+						if self.is_valid_transition(new_state):
+								self._logger.info(f"상태 전이: {self.state.name} -> {new_state.name}")
+								self.state = new_state
+						else:
+								self._logger.warning(f"잘못된 상태 전이 시도: {self.state.name} -> {new_state.name}")
 
 		def is_valid_transition(self, new_state):
 				valid_transitions = {

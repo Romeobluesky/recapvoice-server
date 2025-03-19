@@ -38,8 +38,8 @@ from voip_monitor import VoipMonitor
 from wav_merger import WavMerger
 from rtpstream_manager import RTPStreamManager
 from flow_layout import FlowLayout
-from packet_flowwidget import PacketFlowWidget
 from callstate_machine import CallStateMachine
+from callstate_machine import CallState
 
 def resource_path(relative_path):
 		"""리소스 파일의 절대 경로를 반환"""
@@ -49,12 +49,6 @@ def resource_path(relative_path):
 
 def is_extension(number):
 		return len(str(number)) == 4 and str(number)[0] in '123456789'
-
-class CallState(Enum):
-		IDLE = auto()         # 대기중
-		TRYING = auto()       # 시도중
-		IN_CALL = auto()      # 통화중
-		TERMINATED = auto()   # 통화종료
 
 class Dashboard(QMainWindow):
 		# Signal: 내선번호, 상태, 수신번호 전달
@@ -581,12 +575,6 @@ class Dashboard(QMainWindow):
 				menu_layout = QVBoxLayout(menu_container)
 				menu_layout.setContentsMargins(0, 0, 0, 0)
 				menu_layout.setSpacing(5)
-				voip_btn = self._create_menu_button("VOIP MONITOR", "images/voip_icon.png")
-				voip_btn.clicked.connect(self.show_voip_monitor)
-				packet_btn = self._create_menu_button("PACKET MONITOR", "images/packet_icon.png")
-				packet_btn.clicked.connect(self.show_packet_monitor)
-				menu_layout.addWidget(voip_btn)
-				menu_layout.addWidget(packet_btn)
 				menu_layout.addStretch()
 				layout.addWidget(menu_container)
 				return sidebar
@@ -925,7 +913,7 @@ class Dashboard(QMainWindow):
 								background-color: #2d2d2d;
 						}
 						QWidget#sidebar {
-								background-color: #38ab89;
+								background-color: #0F3B7C;
 						}
 						QWidget {
 								font-family: 'Segoe UI', sans-serif;
@@ -1056,76 +1044,6 @@ class Dashboard(QMainWindow):
 						print(f"Error updating disk info: {e}")
 						self.disk_usage_label.setText(f'{drive_letter}드라이브 정보를 읽을 수 없습니다')
 
-		def show_voip_monitor(self):
-				try:
-						self.voip_window = VoipMonitor()
-						self.voip_window.setWindowFlags(Qt.Window)
-						self.voip_window.setAttribute(Qt.WA_QuitOnClose, False)
-						self.voip_window.show()
-						config = load_config()
-						if config.get('Environment', 'mode') == 'production':
-								wireshark_path = get_wireshark_path()
-								def hide_wireshark_windows():
-										try:
-												for proc in psutil.process_iter(['pid', 'name', 'exe']):
-														if proc.info['name'] in ['dumpcap.exe', 'tshark.exe']:
-																if proc.info['exe'] and wireshark_path in proc.info['exe']:
-																		def enum_windows_callback(hwnd, _):
-																				try:
-																						_, pid = win32process.GetWindowThreadProcessId(hwnd)
-																						if pid == proc.info['pid']:
-																								style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-																								style &= ~win32con.WS_VISIBLE
-																								win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
-																								win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-																				except:
-																						pass
-																				return True
-																		win32gui.EnumWindows(enum_windows_callback, None)
-										except Exception as e:
-												print(f"Error hiding windows: {e}")
-								self.hide_console_timer = QTimer()
-								self.hide_console_timer.timeout.connect(hide_wireshark_windows)
-								self.hide_console_timer.start(100)
-				except Exception as e:
-						print(f"Error opening VOIP Monitor: {e}")
-						QMessageBox.warning(self, "오류", "VOIP Monitor를 열 수 없습니다.")
-
-		def show_packet_monitor(self):
-				try:
-						self.packet_monitor = PacketMonitor()
-						self.packet_monitor.setWindowFlags(Qt.Window)
-						self.packet_monitor.setAttribute(Qt.WA_QuitOnClose, False)
-						self.packet_monitor.show()
-						config = load_config()
-						if config.get('Environment', 'mode') == 'production':
-								wireshark_path = get_wireshark_path()
-								def hide_wireshark_windows():
-										try:
-												for proc in psutil.process_iter(['pid', 'name', 'exe']):
-														if proc.info['name'] in ['dumpcap.exe', 'tshark.exe']:
-																if proc.info['exe'] and wireshark_path in proc.info['exe']:
-																		def enum_windows_callback(hwnd, _):
-																				try:
-																						_, pid = win32process.GetWindowThreadProcessId(hwnd)
-																						if pid == proc.info['pid']:
-																								style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-																								style &= ~win32con.WS_VISIBLE
-																								win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
-																								win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-																				except:
-																						pass
-																				return True
-																		win32gui.EnumWindows(enum_windows_callback, None)
-										except Exception as e:
-												print(f"Error hiding windows: {e}")
-								self.hide_console_timer = QTimer()
-								self.hide_console_timer.timeout.connect(hide_wireshark_windows)
-								self.hide_console_timer.start(100)
-				except Exception as e:
-						print(f"Error opening Packet Monitor: {e}")
-						QMessageBox.warning(self, "오류", "Packet Monitor를 열 수 없습니다.")
-
 		def show_settings(self):
 				try:
 						self.settings_popup = SettingsPopup(self)
@@ -1222,11 +1140,11 @@ class Dashboard(QMainWindow):
 								return
 
 						call_id = sip_layer.call_id
-						#내선번호만 추출
+
+						# 내선번호 추출 로직...
 						try:
 								if hasattr(sip_layer, 'from'):
 										from_header = str(sip_layer.From)
-										# "07086661427,1427" 형식에서 콤마 뒤의 내선번호 추출
 										if ',' in from_header:
 												internal_number = from_header.split(',')[1].split('"')[0]
 										else:
@@ -1240,31 +1158,6 @@ class Dashboard(QMainWindow):
 						try:
 								if hasattr(sip_layer, 'request_line'):
 										request_line = str(sip_layer.request_line)
-										#self.log_error("SIP 패킷 분석", additional_info={
-												#"request_line": request_line,
-												#"call_id": call_id,
-												#"internal_number": internal_number
-										#})
-										# 내선번호가 4자리 숫자인 경우 데이타베이스 업데이트
-										if(is_extension(internal_number)):
-												_number = internal_number
-												ip_address = call_id.split('@')[1]
-
-												# mongodb interalnumber 에서 내선번호 정보 확인
-												number_doc = self.internalnumber.find_one({'internal_number': _number})
-												if number_doc:
-														# 있으면 업데이트
-														self.internalnumber.update_one(
-																{'internal_number': _number},
-																{'$set': {'ip_address': ip_address}}
-														)
-												else:
-													# 없으면 등록
-														number_docs = {
-																'internal_number': _number,
-																'ip_address': ip_address
-														}
-														self.internalnumber.insert_one(number_docs)
 
 										# INVITE 처리
 										if 'INVITE' in request_line:
@@ -1294,17 +1187,39 @@ class Dashboard(QMainWindow):
 																extension = to_number
 
 														if extension:
-																self.log_error("내선 블록 생성 시도", additional_info={
-																		"extension": extension,
-																		"from_number": from_number,
-																		"to_number": to_number
-																})
 																self.block_creation_signal.emit(extension)
 
-														# 통화 정보 저장
+														# 통화 정보 저장 및 상태 전이
 														with self.active_calls_lock:
 																try:
 																		before_state = dict(self.active_calls) if call_id in self.active_calls else None
+																		
+																		# 상태 머신 관리
+																		if call_id in self.call_state_machines:
+																				current_state = self.call_state_machines[call_id].state
+																				# TERMINATED 상태에서만 IDLE로 리셋
+																				if current_state == CallState.TERMINATED:
+																						self.call_state_machines[call_id] = CallStateMachine()
+																		else:
+																				# 새로운 상태 머신 생성
+																				self.call_state_machines[call_id] = CallStateMachine()
+																		
+																		current_state = self.call_state_machines[call_id].state
+																		# IDLE 상태에서만 TRYING으로 전이 허용
+																		if current_state == CallState.IDLE:
+																				self.call_state_machines[call_id].update_state(CallState.TRYING)
+																				self.log_error("상태 전이 성공", additional_info={
+																						"call_id": call_id,
+																						"from_state": "IDLE",
+																						"to_state": "TRYING"
+																				})
+																		else:
+																				self.log_error("잘못된 상태 전이 시도 무시", additional_info={
+																						"call_id": call_id,
+																						"current_state": current_state.name,
+																						"attempted_state": "TRYING"
+																				})
+																		
 																		self.active_calls[call_id] = {
 																				'start_time': datetime.datetime.now(),
 																				'status': '시도중',
@@ -1312,16 +1227,9 @@ class Dashboard(QMainWindow):
 																				'to_number': to_number,
 																				'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
 																				'media_endpoints': [],
-																				'packet': packet  # 패킷 정보 저장
+																				'packet': packet
 																		}
-																		after_state = dict(self.active_calls[call_id])
-																		self.log_error("통화 상태 업데이트", additional_info={
-																				"before": before_state,
-																				"after": after_state
-																		})
 
-																		self.call_state_machines[call_id] = CallStateMachine()
-																		self.call_state_machines[call_id].update_state(CallState.TRYING)
 																except Exception as state_error:
 																		self.log_error("통화 상태 업데이트 실패", state_error)
 																		return
@@ -1410,13 +1318,33 @@ class Dashboard(QMainWindow):
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
 								before_state = dict(self.active_calls[call_id])
+								
+								# 상태 머신 업데이트 - IN_CALL 상태에서만 TERMINATED로 전이 허용
+								if call_id in self.call_state_machines:
+										current_state = self.call_state_machines[call_id].state
+										if current_state == CallState.IN_CALL:
+												self.call_state_machines[call_id].update_state(CallState.TERMINATED)
+												self.log_error("상태 전이 성공", additional_info={
+														"call_id": call_id,
+														"from_state": "IN_CALL",
+														"to_state": "TERMINATED"
+												})
+										else:
+												self.log_error("잘못된 상태 전이 시도 무시", additional_info={
+														"call_id": call_id,
+														"current_state": current_state.name,
+														"attempted_state": "TERMINATED"
+												})
+												return
+								
 								self.update_call_status(call_id, '통화종료', '정상종료')
 								extension = self.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])
 								self.log_error("BYE 처리", additional_info={
 										"extension": extension,
 										"before_state": before_state,
-										"after_state": after_state
+										"after_state": after_state,
+										"state_machine": self.call_state_machines[call_id].state.name if call_id in self.call_state_machines else "UNKNOWN"
 								})
 								if extension:
 										self.block_update_signal.emit(extension, "대기중", "")
@@ -1455,6 +1383,24 @@ class Dashboard(QMainWindow):
 												self.block_update_signal.emit(extension, "벨울림", received_number)
 								elif status_code == '200':
 										if self.active_calls[call_id]['status'] != '통화종료':
+												# 상태 머신 업데이트 - TRYING 상태에서만 IN_CALL로 전이 허용
+												if call_id in self.call_state_machines:
+														current_state = self.call_state_machines[call_id].state
+														if current_state == CallState.TRYING:
+																self.call_state_machines[call_id].update_state(CallState.IN_CALL)
+																self.log_error("상태 전이 성공", additional_info={
+																		"call_id": call_id,
+																		"from_state": "TRYING",
+																		"to_state": "IN_CALL"
+																})
+														else:
+																self.log_error("잘못된 상태 전이 시도 무시", additional_info={
+																		"call_id": call_id,
+																		"current_state": current_state.name,
+																		"attempted_state": "IN_CALL"
+																})
+																return
+												
 												self.update_call_status(call_id, '통화중')
 												extension = self.get_extension_from_call(call_id)
 												if extension:
@@ -1982,8 +1928,9 @@ class Dashboard(QMainWindow):
 
 						active_calls = []
 						with self.active_calls_lock:
+								# 상태가 '통화중'인 통화만 필터링
 								for cid, info in self.active_calls.items():
-										if info.get('status') == '통화중':
+										if info.get('status') == '통화중':  # '벨울림' 상태는 제외
 												active_calls.append((cid, info))
 
 						if not active_calls:

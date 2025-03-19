@@ -144,7 +144,7 @@ class RTPStreamManager:
 										return
 
 								try:
-										print(f"패킷 수신 - 시퀀스: {sequence}, 크기: {len(audio_data)} bytes")
+										##print(f"패킷 수신 - 시퀀스: {sequence}, 크기: {len(audio_data)} bytes")
 										
 										# 시퀀스 번호 검증
 										if stream_info['sequence'] > 0:
@@ -176,9 +176,9 @@ class RTPStreamManager:
 										stream_info['sequence'] = sequence
 										stream_info['packet_count'] += 1
 
-										print(f"버퍼 상태 - 현재크기: {len(stream_info['audio_data'])}, "
-													f"목표크기: {stream_info['current_buffer_size']}, "
-													f"내선통화: {stream_info['is_internal_call']}")
+										#print(f"버퍼 상태 - 현재크기: {len(stream_info['audio_data'])}, "
+										#			f"목표크기: {stream_info['current_buffer_size']}, "
+										#			f"내선통화: {stream_info['is_internal_call']}")
 
 										# 버퍼 크기 체크 및 WAV 파일 쓰기
 										if len(stream_info['audio_data']) >= stream_info['current_buffer_size']:
