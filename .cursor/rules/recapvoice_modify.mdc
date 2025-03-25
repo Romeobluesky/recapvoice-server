@@ -3,6 +3,11 @@ description:
 globs: 
 alwaysApply: false
 ---
+---
+description: 
+globs: 
+alwaysApply: false
+---
 # 2025-03-18
 ## 수정사항
 1. 대시보드 메인의 전화연결 상태 내 블록의 정렬 정의 지정

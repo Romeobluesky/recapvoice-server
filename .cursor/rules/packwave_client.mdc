@@ -3,6 +3,11 @@ description:
 globs: 
 alwaysApply: false
 ---
+---
+description: 
+globs: 
+alwaysApply: false
+---
 # 2025-03-18 클라이언트
 ## 수정사항
 1. 녹취파일 관리의 새로고침 기능 개선 : files.ejs
