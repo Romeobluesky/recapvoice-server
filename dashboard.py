@@ -16,11 +16,15 @@ import traceback
 import win32con
 import win32gui
 import win32process
+import time
+import argparse
 
 # 서드파티 라이브러리
 from enum import Enum, auto
 import pyshark
 import requests
+# import websockets  # 제거: 직접 사용하지 않음, WebSocketServer에서 사용
+import json
 from pydub import AudioSegment
 from pymongo import MongoClient
 from PySide6.QtCore import *
@@ -40,6 +44,7 @@ from rtpstream_manager import RTPStreamManager
 from flow_layout import FlowLayout
 from callstate_machine import CallStateMachine
 from callstate_machine import CallState
+from websocketserver import WebSocketServer
 
 def resource_path(relative_path):
 		"""리소스 파일의 절대 경로를 반환"""
@@ -64,6 +69,12 @@ class Dashboard(QMainWindow):
 						self.setup_single_instance()
 						self.cleanup_existing_dumpcap()  # 프로그램 시작 시 기존 Dumpcap 프로세스 정리
 
+						# 명령줄 인수에서 로그 레벨 가져오기
+						parser = argparse.ArgumentParser()
+						parser.add_argument("--log-level", choices=["debug", "info", "warning", "error"], default="info")
+						args, _ = parser.parse_known_args()
+						self.log_level = args.log_level
+						
 						# 필수 디렉토리 확인 및 생성
 						required_dirs = ['images', 'logs']
 						for dir_name in required_dirs:
@@ -84,10 +95,9 @@ class Dashboard(QMainWindow):
 
 						# 로그 파일 초기화
 						try:
-								with open('voip_monitor.log', 'a', encoding='utf-8') as f:
-										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
+								self.initialize_log_file()
 						except Exception as e:
-								self.log_error("로그 파일 초기화 실패", e)
+								print(f"로그 파일 초기화 실패: {e}")
 								raise
 
 						# 인트로 비디오 재생
@@ -99,6 +109,50 @@ class Dashboard(QMainWindow):
 
 				except Exception as e:
 						self.log_error("대시보드 초기화 실패", e)
+						raise
+
+		def initialize_log_file(self):
+				"""로그 파일을 초기화합니다."""
+				try:
+						# 로그 디렉토리 확인
+						log_dir = 'logs'
+						if not os.path.exists(log_dir):
+								os.makedirs(log_dir)
+						
+						# 오늘 날짜로 로그 파일 이름 생성
+						today = datetime.datetime.now().strftime("%Y%m%d")
+						log_file_path = os.path.join(log_dir, f'voip_monitor_{today}.log')
+						
+						# 현재 로그 파일로 심볼릭 링크 생성
+						current_log_path = 'voip_monitor.log'
+						if os.path.exists(current_log_path):
+								if os.path.islink(current_log_path):
+										os.remove(current_log_path)
+								else:
+										# 기존 파일이 있으면 백업
+										backup_path = f"{current_log_path}.bak"
+										if os.path.exists(backup_path):
+												os.remove(backup_path)
+										os.rename(current_log_path, backup_path)
+						
+						# 윈도우에서는 심볼릭 링크 대신 하드 링크 사용
+						if os.name == 'nt':
+								# 로그 파일 직접 생성
+								with open(log_file_path, 'a', encoding='utf-8') as f:
+										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
+								
+								# voip_monitor.log 파일도 직접 생성
+								with open(current_log_path, 'w', encoding='utf-8') as f:
+										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
+						else:
+								# Unix 시스템에서는 심볼릭 링크 사용
+								with open(log_file_path, 'a', encoding='utf-8') as f:
+										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
+								os.symlink(log_file_path, current_log_path)
+						
+						self.log_error("로그 파일 초기화 완료", level="info")
+				except Exception as e:
+						print(f"로그 파일 초기화 중 오류: {e}")
 						raise
 
 		def setup_single_instance(self):
@@ -345,6 +399,37 @@ class Dashboard(QMainWindow):
 						except Exception as e:
 								self.log_error("창 표시 실패", e)
 
+						# WebSocket 서버 시작
+						try:
+								websocket_port = 8765  # 기본 포트
+								max_retry = 3
+								retry_count = 0
+								
+								while retry_count < max_retry:
+										try:
+												print(f"WebSocket 서버 시작 시도 (포트: {websocket_port})...")
+												self.websocket_server = WebSocketServer(port=websocket_port, log_callback=self.log_error)
+												self.websocket_thread = threading.Thread(target=self.websocket_server.run_in_thread, daemon=True)
+												self.websocket_thread.start()
+												print(f"WebSocket 서버가 포트 {websocket_port}에서 시작되었습니다.")
+												break
+										except OSError as e:
+												if "Address already in use" in str(e) or "각 소켓 주소" in str(e):
+														retry_count += 1
+														websocket_port += 1
+														print(f"포트 {websocket_port-1}가 이미 사용 중입니다. 포트 {websocket_port}로 재시도합니다.")
+												else:
+														self.log_error("WebSocket 서버 시작 실패", e)
+														break
+										except Exception as e:
+												self.log_error("WebSocket 서버 시작 실패", e)
+												break
+								
+								if retry_count >= max_retry:
+										self.log_error(f"WebSocket 서버 시작 실패: 최대 재시도 횟수 ({max_retry})를 초과했습니다.")
+						except Exception as e:
+								self.log_error("WebSocket 서버 시작 중 예외 발생", e)
+
 				except Exception as e:
 						self.log_error("메인 윈도우 초기화 중 심각한 오류", e)
 						raise
@@ -356,6 +441,7 @@ class Dashboard(QMainWindow):
 				self.activateWindow()
 
 		def cleanup(self):
+				# 기존 cleanup 코드
 				if hasattr(self, 'capture') and self.capture:
 						try:
 								if hasattr(self, 'loop') and self.loop and self.loop.is_running():
@@ -364,6 +450,15 @@ class Dashboard(QMainWindow):
 										self.capture.close()
 						except Exception as e:
 								print(f"Cleanup error: {e}")
+				
+				# WebSocket 서버 정리
+				if hasattr(self, 'websocket_server') and self.websocket_server:
+						try:
+								if self.websocket_server.running:
+										asyncio.run(self.websocket_server.stop_server())
+										print("WebSocket 서버가 종료되었습니다.")
+						except Exception as e:
+								print(f"WebSocket server cleanup error: {e}")
 
 		def _init_ui(self):
 				main_widget = QWidget()
@@ -417,15 +512,18 @@ class Dashboard(QMainWindow):
 						try:
 								cpu_percent = psutil.cpu_percent()
 								memory = psutil.virtual_memory()
+								
+								# 리소스가 부족한 경우 로그만 남기고 진행
 								if cpu_percent > 80 or memory.percent > 80:
-										self.log_error("시스템 리소스 부족", additional_info={
+										resource_info = {
 												"cpu": f"{cpu_percent}%",
 												"memory": f"{memory.percent}%"
-										})
-										return
+										}
+										self.log_error("시스템 리소스 부족", additional_info=resource_info, level="warning", console_output=False)
+										# 리소스가 부족해도 계속 진행 - 종료하지 않음
 						except Exception as e:
-								self.log_error("시스템 리소스 체크 실패", e)
-								return
+								self.log_error("시스템 리소스 체크 실패", e, console_output=False)
+								# 실패해도 계속 진행
 
 						# Wireshark 경로 확인
 						config = load_config()
@@ -1109,10 +1207,44 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						print(f"대기중 블록 생성 중 오류: {e}")
 
-		def log_error(self, message, error=None, additional_info=None):
+		def log_error(self, message, error=None, additional_info=None, level="error", console_output=True):
+				"""로그 메시지를 파일에 기록하고 콘솔에 출력합니다."""
 				try:
+						# 로그 레벨 확인
+						log_levels = {
+								"debug": 0,
+								"info": 1,
+								"warning": 2,
+								"error": 3
+						}
+						
+						current_level = log_levels.get(level.lower(), 0)
+						min_level = log_levels.get(getattr(self, "log_level", "info").lower(), 1)
+						
+						# 설정된 최소 레벨보다 낮은 로그는 무시
+						if current_level < min_level:
+								return
+						
+						timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+						
+						# 콘솔 출력 (console_output이 True인 경우에만)
+						if console_output:
+								level_prefix = {
+										"debug": "[디버그]",
+										"info": "[정보]",
+										"warning": "[경고]",
+										"error": "[오류]"
+								}.get(level.lower(), "[정보]")
+								
+								print(f"\n[{timestamp}] {level_prefix} {message}")
+								
+								if additional_info:
+										print(f"추가 정보: {additional_info}")
+								if error:
+										print(f"에러 메시지: {str(error)}")
+						
+						# 파일 로깅
 						with open('voip_monitor.log', 'a', encoding='utf-8', buffering=1) as log_file:  # buffering=1: 라인 버퍼링
-								timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 								log_file.write(f"\n[{timestamp}] {message}\n")
 								if additional_info:
 										log_file.write(f"추가 정보: {additional_info}\n")
@@ -1188,6 +1320,34 @@ class Dashboard(QMainWindow):
 
 														if extension:
 																self.block_creation_signal.emit(extension)
+
+														# 내선번호로 전화가 왔을 때 WebSocket을 통해 클라이언트에 알림
+														if is_extension(to_number):
+																try:
+																		# WebSocket 서버가 있고 MongoDB가 연결되어 있는 경우에만 실행
+																		if hasattr(self, 'websocket_server') and self.db is not None:
+																				print(f"SIP 패킷 분석: 내선번호 {to_number}로 전화 수신 (발신: {from_number})")
+																				# 비동기 알림 전송을 위한 helper 함수
+																				async def send_notification():
+																						print(f"알림 전송 시작: 내선번호 {to_number}에 전화 수신 알림 (발신: {from_number})")
+																						await self.websocket_server.notify_client(to_number, from_number, call_id)
+																						print(f"알림 전송 완료: 내선번호 {to_number}")
+																				
+																				# 별도 스레드에서 비동기 함수 실행
+																				notification_thread = threading.Thread(
+																						target=lambda: asyncio.run(send_notification()),
+																						daemon=True
+																				)
+																				notification_thread.start()
+																				print(f"알림 전송 스레드 시작: {to_number}")
+																				self.log_error("클라이언트 알림 전송 시작", additional_info={
+																						"to": to_number,
+																						"from": from_number,
+																						"call_id": call_id
+																				})
+																except Exception as notify_error:
+																		print(f"클라이언트 알림 전송 실패: {str(notify_error)}")
+																		self.log_error("클라이언트 알림 전송 실패", notify_error)
 
 														# 통화 정보 저장 및 상태 전이
 														with self.active_calls_lock:
@@ -2361,6 +2521,15 @@ class Dashboard(QMainWindow):
 
 		def quit_application(self):
 				try:
+						# WebSocket 서버 종료
+						if hasattr(self, 'websocket_server') and self.websocket_server:
+								try:
+										if self.websocket_server.running:
+												asyncio.run(self.websocket_server.stop_server())
+												print("WebSocket 서버가 종료되었습니다.")
+								except Exception as e:
+										print(f"WebSocket server shutdown error: {e}")
+						
 						# 외부 프로세스 종료
 						processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe', 'Dumpcap.exe']
 						for process in processes_to_kill:
@@ -2389,16 +2558,24 @@ class Dashboard(QMainWindow):
 						memory_info = psutil.Process().memory_info()
 						memory_percent = psutil.Process().memory_percent()
 
-						self.log_error("시스템 리소스 상태", additional_info={
-								"cpu_percent": f"{cpu_percent}%",
-								"memory_used": f"{memory_info.rss / (1024 * 1024):.2f}MB",
-								"memory_percent": f"{memory_percent}%",
-								"active_calls": len(self.active_calls),
-								"active_streams": len(self.active_streams)
-						})
+						# 로그 파일에만 기록하고 콘솔에는 출력하지 않음
+						with open('voip_monitor.log', 'a', encoding='utf-8', buffering=1) as log_file:
+								timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+								log_file.write(f"\n[{timestamp}] 시스템 리소스 상태\n")
+								log_info = {
+										"cpu_percent": f"{cpu_percent}%",
+										"memory_used": f"{memory_info.rss / (1024 * 1024):.2f}MB",
+										"memory_percent": f"{memory_percent}%",
+										"active_calls": len(self.active_calls),
+										"active_streams": len(self.active_streams)
+								}
+								log_file.write(f"추가 정보: {log_info}\n\n")
+								log_file.flush()
+								os.fsync(log_file.fileno())
 
 				except Exception as e:
-						self.log_error("리소스 모니터링 오류", e)
+						# 오류는 기존 log_error 함수를 통해 기록하되, 콘솔 출력 없이
+						self.log_error("리소스 모니터링 오류", e, level="error", console_output=False)
 
 		def start_new_thread(self, target, name=None):
 				"""스레드 생성 및 관리"""
@@ -2427,7 +2604,7 @@ class Dashboard(QMainWindow):
 				try:
 						# Windows 환경에서는 psutil을 사용하여 시스템 리소스 정보 확인
 						process = psutil.Process()
-						self.log_error("시스템 리소스 제한", additional_info={
+						resource_info = {
 								"max_processes": len(process.children(recursive=True)),
 								"python_bits": platform.architecture()[0],
 								"python_version": sys.version,
@@ -2437,31 +2614,73 @@ class Dashboard(QMainWindow):
 								},
 								"cpu_percent": f"{process.cpu_percent()}%",
 								"open_files": len(process.open_files())
-						})
+						}
+						
+						# 콘솔에 출력하지 않고 로그 파일에만 기록
+						self.log_error("시스템 리소스 제한", additional_info=resource_info, level="info", console_output=False)
 				except Exception as e:
-						self.log_error("시스템 리소스 확인 중 오류", e)
+						# 오류도 콘솔에 출력하지 않음
+						self.log_error("시스템 리소스 확인 중 오류", e, level="error", console_output=False)
 
 def main():
 		try:
 					app = QApplication(sys.argv)
 					app.setApplicationName("Recap Voice")
 
-					# 단일 인스턴스 확인
-					client = QLocalSocket()
-					client.connectToServer("RecapVoiceInstance")
+					# 명령줄 인수 처리
+					parser = argparse.ArgumentParser(description="Recap Voice - VoIP SIP 신호 감지 및 클라이언트 알림 시스템")
+					parser.add_argument("--test", action="store_true", help="테스트 모드로 실행")
+					parser.add_argument("--log-level", choices=["debug", "info", "warning", "error"], default="info", help="로그 레벨 설정")
+					args = parser.parse_args()
 
-					if client.waitForConnected(500):
-							# 이미 실행 중인 경우
-							client.write(b"show")
-							client.disconnectFromServer()
-							app.quit()
-							sys.exit(0)
+					# 단일 인스턴스 확인 (테스트 모드가 아닐 때만)
+					if not args.test:
+							client = QLocalSocket()
+							client.connectToServer("RecapVoiceInstance")
+
+							if client.waitForConnected(500):
+									# 이미 실행 중인 경우
+									client.write(b"show")
+									client.disconnectFromServer()
+									app.quit()
+									sys.exit(0)
 
 					# 새 인스턴스 시작
 					window = Dashboard()
+					
+					# 테스트 모드 처리
+					if args.test:
+							print("\n" + "="*50)
+							print("테스트 모드로 실행합니다.")
+							print("="*50 + "\n")
+							
+							# 테스트 모듈 가져오기
+							try:
+									import test_sip_call
+									
+									print("대시보드 초기화 완료")
+									print("5초 후 테스트를 시작합니다...")
+									
+									for i in range(5, 0, -1):
+											print(f"{i}...")
+											time.sleep(1)
+									
+									# 테스트 실행
+									test_sip_call.simulate_sip_call(window)
+									
+									# 테스트 완료 후 종료
+									print("\n테스트가 완료되었습니다.")
+									print("프로그램을 종료합니다.")
+									sys.exit(0)
+							except ImportError:
+									print("테스트 모듈을 가져올 수 없습니다: test_sip_call.py")
+									print("일반 모드로 실행합니다.")
+							except Exception as e:
+									print(f"테스트 실행 중 오류 발생: {e}")
+									print("일반 모드로 실행합니다.")
+					
+					# 일반 모드로 실행
 					window.show()
-
-					# 바탕화면 아이콘 클릭 시 단일 인스턴스 처리
 					app.setQuitOnLastWindowClosed(False)
 					app.exec()
 
