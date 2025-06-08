@@ -98,11 +98,19 @@ if !ERRORLEVEL! neq 0 (
 
 :: MongoDB 시작
 echo Starting MongoDB...
-start "" /b "!WORK_DIR!\mongodb\bin\mongod.exe" --dbpath "!WORK_DIR!\mongodb\data\db" --logpath "!WORK_DIR!\mongodb\log\mongodb.log" --logappend
+
+start "" /b "!WORK_DIR!\mongodb\bin\mongod.exe" ^
+  --dbpath "!WORK_DIR!\mongodb\data\db" ^
+  --logpath "!WORK_DIR!\mongodb\log\mongodb.log" ^
+  --logappend ^
+  --port 27017 ^
+  --bind_ip 0.0.0.0,192.168.0.61
+
 if %ERRORLEVEL% neq 0 (
 	echo Failed to start MongoDB.
 	goto error
 )
+
 
 :: NestJS 시작
 echo Starting NestJS...
