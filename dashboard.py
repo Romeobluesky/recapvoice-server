@@ -314,14 +314,51 @@ class Dashboard(QMainWindow):
 						except Exception as e:
 								self.log_error("타이머 및 유틸리티 초기화 실패", e)
 
+						# MongoDB 연결 (타임아웃 설정 포함)
 						try:
-								self.mongo_client = MongoClient('mongodb://localhost:27017/')
-								self.db = self.mongo_client['packetwave']
+								# MongoDB 설정 읽기
+								config = load_config()
+								mongo_host = config.get('MongoDB', 'host', fallback='localhost')
+								mongo_port = config.getint('MongoDB', 'port', fallback=27017)
+								mongo_database = config.get('MongoDB', 'database', fallback='packetwave')
+								mongo_username = config.get('MongoDB', 'username', fallback='')
+								mongo_password = config.get('MongoDB', 'password', fallback='')
+								
+								# MongoDB 연결 문자열 생성
+								if mongo_username and mongo_password:
+										mongo_uri = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/"
+								else:
+										mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
+								
+								self.log_error(f"MongoDB 연결 시도: {mongo_uri}", level="info")
+								
+								# 짧은 타임아웃으로 연결 시도
+								self.mongo_client = MongoClient(
+										mongo_uri,
+										serverSelectionTimeoutMS=3000,  # 3초 타임아웃
+										connectTimeoutMS=3000,
+										socketTimeoutMS=3000
+								)
+								self.db = self.mongo_client[mongo_database]
 								self.members = self.db['members']
 								self.filesinfo = self.db['filesinfo']
 								self.internalnumber = self.db['internalnumber']
+								
+								# 연결 테스트
+								self.mongo_client.admin.command('ping')
+								self.log_error("MongoDB 연결 성공", level="info")
+								
 						except Exception as e:
-								self.log_error("MongoDB 연결 실패", e)
+								# 초기 연결 실패는 로그에 남기지 않음 (재시도에서 해결될 가능성 높음)
+								# MongoDB 없이도 프로그램이 계속 실행되도록 설정
+								self.mongo_client = None
+								self.db = None
+								self.members = None
+								self.filesinfo = None
+								self.internalnumber = None
+								
+								# 5초 후 재시도
+								QTimer.singleShot(5000, self.retry_mongodb_connection)
 
 						config = load_config()
 						if config.get('Environment', 'mode') == 'production':
@@ -439,6 +476,52 @@ class Dashboard(QMainWindow):
 				self.showMaximized()  # show() 대신 showMaximized() 사용
 				self.raise_()
 				self.activateWindow()
+
+		def retry_mongodb_connection(self):
+				"""MongoDB 재연결 시도"""
+				try:
+						# MongoDB 설정 읽기
+						config = load_config()
+						mongo_host = config.get('MongoDB', 'host', fallback='localhost')
+						mongo_port = config.getint('MongoDB', 'port', fallback=27017)
+						mongo_database = config.get('MongoDB', 'database', fallback='packetwave')
+						mongo_username = config.get('MongoDB', 'username', fallback='')
+						mongo_password = config.get('MongoDB', 'password', fallback='')
+						
+						# MongoDB 연결 문자열 생성
+						if mongo_username and mongo_password:
+								mongo_uri = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/"
+						else:
+								mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
+						
+						# 재시도 로그는 간단하게만
+						# self.log_error("MongoDB 재연결 시도", level="info")
+						
+						# 짧은 타임아웃으로 연결 시도
+						self.mongo_client = MongoClient(
+								mongo_uri,
+								serverSelectionTimeoutMS=3000,  # 3초 타임아웃
+								connectTimeoutMS=3000,
+								socketTimeoutMS=3000
+						)
+						self.db = self.mongo_client[mongo_database]
+						self.members = self.db['members']
+						self.filesinfo = self.db['filesinfo']
+						self.internalnumber = self.db['internalnumber']
+						
+						# 연결 테스트
+						self.mongo_client.admin.command('ping')
+						self.log_error("MongoDB 연결 성공", level="info")
+						
+				except Exception as e:
+						# 재시도도 실패한 경우에만 로그 기록
+						self.log_error("MongoDB 연결 최종 실패", e)
+						# 연결이 계속 실패하면 MongoDB 없이 동작
+						self.mongo_client = None
+						self.db = None
+						self.members = None
+						self.filesinfo = None
+						self.internalnumber = None
 
 		def cleanup(self):
 				# 기존 cleanup 코드
