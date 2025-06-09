@@ -1451,13 +1451,13 @@ class Dashboard(QMainWindow):
 																		# IDLE 상태에서만 TRYING으로 전이 허용
 																		if current_state == CallState.IDLE:
 																				self.call_state_machines[call_id].update_state(CallState.TRYING)
-																				self.log_error("상태 전이 성공", additional_info={
+																				self.log_error("상태 전이 성공", level="info", additional_info={
 																						"call_id": call_id,
 																						"from_state": "IDLE",
 																						"to_state": "TRYING"
 																				})
 																		else:
-																				self.log_error("잘못된 상태 전이 시도 무시", additional_info={
+																				self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 																						"call_id": call_id,
 																						"current_state": current_state.name,
 																						"attempted_state": "TRYING"
@@ -1521,7 +1521,7 @@ class Dashboard(QMainWindow):
 
 				except Exception as e:
 						self.log_error("SIP 패킷 분석 중 심각한 오류", e)
-						self.log_error("상세 오류 정보", additional_info={"traceback": traceback.format_exc()})
+						self.log_error("상세 오류 정보", level="info", additional_info={"traceback": traceback.format_exc()})
 
 		def _handle_refer_request(self, sip_layer, call_id, request_line):
 				"""REFER 요청 처리를 위한 헬퍼 메소드"""
@@ -1567,13 +1567,13 @@ class Dashboard(QMainWindow):
 										current_state = self.call_state_machines[call_id].state
 										if current_state == CallState.IN_CALL:
 												self.call_state_machines[call_id].update_state(CallState.TERMINATED)
-												self.log_error("상태 전이 성공", additional_info={
+												self.log_error("상태 전이 성공", level="info", additional_info={
 														"call_id": call_id,
 														"from_state": "IN_CALL",
 														"to_state": "TERMINATED"
 												})
 										else:
-												self.log_error("잘못된 상태 전이 시도 무시", additional_info={
+												self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 														"call_id": call_id,
 														"current_state": current_state.name,
 														"attempted_state": "TERMINATED"
@@ -1583,7 +1583,7 @@ class Dashboard(QMainWindow):
 								self.update_call_status(call_id, '통화종료', '정상종료')
 								extension = self.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])
-								self.log_error("BYE 처리", additional_info={
+								self.log_error("BYE 처리", level="info", additional_info={
 										"extension": extension,
 										"before_state": before_state,
 										"after_state": after_state,
@@ -1600,7 +1600,7 @@ class Dashboard(QMainWindow):
 								self.update_call_status(call_id, '통화종료', '발신취소')
 								extension = self.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])
-								self.log_error("CANCEL 처리", additional_info={
+								self.log_error("CANCEL 처리", level="info", additional_info={
 										"extension": extension,
 										"before_state": before_state,
 										"after_state": after_state
@@ -1631,13 +1631,13 @@ class Dashboard(QMainWindow):
 														current_state = self.call_state_machines[call_id].state
 														if current_state == CallState.TRYING:
 																self.call_state_machines[call_id].update_state(CallState.IN_CALL)
-																self.log_error("상태 전이 성공", additional_info={
+																self.log_error("상태 전이 성공", level="info", additional_info={
 																		"call_id": call_id,
 																		"from_state": "TRYING",
 																		"to_state": "IN_CALL"
 																})
 														else:
-																self.log_error("잘못된 상태 전이 시도 무시", additional_info={
+																self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 																		"call_id": call_id,
 																		"current_state": current_state.name,
 																		"attempted_state": "IN_CALL"
@@ -2148,7 +2148,7 @@ class Dashboard(QMainWindow):
 								if proc.info['name'] and 'dumpcap' in proc.info['name'].lower():
 										try:
 												proc.kill()
-												self.log_error("기존 Dumpcap 프로세스 종료", additional_info={"pid": proc.info['pid']})
+												self.log_error("기존 Dumpcap 프로세스 종료", level="info", additional_info={"pid": proc.info['pid']})
 										except Exception as e:
 												self.log_error("Dumpcap 프로세스 종료 실패", e)
 				except Exception as e:
@@ -2158,7 +2158,7 @@ class Dashboard(QMainWindow):
 				try:
 						if not hasattr(self, 'stream_manager'):
 								self.stream_manager = RTPStreamManager()
-								self.log_error("RTP 스트림 매니저 생성")
+								self.log_error("RTP 스트림 매니저 생성", level="info")
 
 						# SIP 정보 확인 및 처리
 						if hasattr(packet, 'sip'):
@@ -2427,7 +2427,7 @@ class Dashboard(QMainWindow):
 																						per_lv9 = member_doc.get('per_lv9', '')
 
 																			# 로깅 추가
-																			self.log_error("SIP 메시지 헤더 확인3", additional_info={
+																			self.log_error("SIP 메시지 헤더 확인3", level="info", additional_info={
 																					"msg_hdr": msg_hdr,
 																					"from_number": local_num,
 																					"to_number": remote_num,
@@ -2457,7 +2457,7 @@ class Dashboard(QMainWindow):
 																		local_num = local_num_str
 																		remote_num = remote_num_str
 												# 로깅 추가
-												self.log_error("SIP 메시지 헤더 확인4", additional_info={
+												self.log_error("SIP 메시지 헤더 확인4", level="info", additional_info={
 														"msg_hdr": msg_hdr,
 														"from_number": local_num,
 														"to_number": remote_num,
@@ -2490,7 +2490,7 @@ class Dashboard(QMainWindow):
 																		local_num = remote_num_str
 																		remote_num = local_num_str
 												# 로깅 추가
-												self.log_error("SIP 메시지 헤더 확인5", additional_info={
+												self.log_error("SIP 메시지 헤더 확인5", level="info", additional_info={
 														"msg_hdr": msg_hdr,
 														"from_number": local_num,
 														"to_number": remote_num,

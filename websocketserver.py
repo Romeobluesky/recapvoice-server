@@ -20,13 +20,13 @@ class WebSocketServer:
         self.running = False
         print(f"WebSocketServer 초기화: 포트 {port}")
     
-    def log(self, message, error=None):
+    def log(self, message, error=None, level="info"):
         """로그 메시지 기록"""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] WebSocketServer: {message}")
         
         if self.log_callback:
-            self.log_callback(message, error)
+            self.log_callback(message, error, level=level)
         
         if error:
             print(f"[{timestamp}] WebSocketServer 오류: {str(error)}")
@@ -38,27 +38,27 @@ class WebSocketServer:
         self.connected_clients[client_ip] = websocket
         print(f"[연결 성공] 클라이언트 연결됨: {client_ip}")
         print(f"[상태] 현재 연결된 클라이언트: {len(self.connected_clients)}개")
-        self.log(f"클라이언트 연결됨: {client_ip}")
+        self.log(f"클라이언트 연결됨: {client_ip}", level="info")
         
         try:
             async for message in websocket:
                 try:
                     data = json.loads(message)
                     print(f"[메시지 수신] 클라이언트({client_ip})로부터: {data}")
-                    self.log(f"클라이언트로부터 메시지 수신: {data}")
+                    self.log(f"클라이언트로부터 메시지 수신: {data}", level="info")
                     
                     # 클라이언트가 내선번호 등록 요청을 보낸 경우
                     if data.get('type') == 'register':
                         await self.handle_register(websocket, data, client_ip)
                 except json.JSONDecodeError:
                     print(f"[오류] 잘못된 JSON 형식: {message}")
-                    self.log(f"잘못된 JSON 형식: {message}")
+                    self.log(f"잘못된 JSON 형식: {message}", level="error")
                 except Exception as e:
                     print(f"[오류] 메시지 처리 중 오류 발생: {str(e)}")
-                    self.log("메시지 처리 중 오류 발생", e)
+                    self.log("메시지 처리 중 오류 발생", e, level="error")
         except websockets.exceptions.ConnectionClosed:
             print(f"[연결 종료] 클라이언트 연결 종료: {client_ip}")
-            self.log(f"클라이언트 연결 종료: {client_ip}")
+            self.log(f"클라이언트 연결 종료: {client_ip}", level="info")
         finally:
             if client_ip in self.connected_clients:
                 del self.connected_clients[client_ip]
@@ -109,12 +109,12 @@ class WebSocketServer:
                 'message': f'내선번호 {extension} 등록 완료'
             }))
             
-            self.log(f"내선번호 등록 완료: {extension} -> {client_ip}")
+            self.log(f"내선번호 등록 완료: {extension} -> {client_ip}", level="info")
             
         except Exception as e:
             print(f"[MongoDB 오류] 내선번호 등록 실패: {str(e)}")
             print(traceback.format_exc())
-            self.log(f"내선번호 등록 중 오류", e)
+            self.log(f"내선번호 등록 중 오류", e, level="error")
             await websocket.send(json.dumps({
                 'type': 'error',
                 'message': '서버 오류로 등록 실패'
@@ -132,13 +132,13 @@ class WebSocketServer:
             member = members.find_one({'extension_num': to_number})
             if not member:
                 print(f"[MongoDB] 내선번호 {to_number}에 대한 정보 없음")
-                self.log(f"내선번호 {to_number}에 대한 정보 없음")
+                self.log(f"내선번호 {to_number}에 대한 정보 없음", level="warning")
                 return
             
             ip = member.get('default_ip')
             if not ip:
                 print(f"[MongoDB] 내선번호 {to_number}에 대한 IP 주소 없음")
-                self.log(f"내선번호 {to_number}에 대한 IP 주소 없음")
+                self.log(f"내선번호 {to_number}에 대한 IP 주소 없음", level="warning")
                 return
             
             print(f"[알림 처리] 내선번호 {to_number}의 IP 주소: {ip}")
@@ -157,13 +157,13 @@ class WebSocketServer:
                 print(f"[알림 전송] 메시지 전송: {message}")
                 await self.connected_clients[ip].send(json.dumps(message))
                 print(f"[알림 완료] 내선번호 {to_number} (IP: {ip})에 알림 전송 완료")
-                self.log(f"알림 전송 완료: {to_number} (IP: {ip})")
+                self.log(f"알림 전송 완료: {to_number} (IP: {ip})", level="info")
             else:
                 print(f"[알림 실패] 클라이언트 연결 없음: 내선번호 {to_number} (IP: {ip})")
-                self.log(f"클라이언트 연결 없음: {ip}")
+                self.log(f"클라이언트 연결 없음: {ip}", level="warning")
         except Exception as e:
             print(f"[알림 오류] 알림 전송 중 오류: {str(e)}")
-            self.log("알림 전송 중 오류", e)
+            self.log("알림 전송 중 오류", e, level="error")
     
     def is_port_in_use(self, port):
         """지정된 포트가 사용 중인지 확인"""
@@ -182,14 +182,14 @@ class WebSocketServer:
         while retry_count < self.max_port_retry:
             if self.is_port_in_use(current_port):
                 print(f"[서버 경고] 포트 {current_port}가 이미 사용 중입니다.")
-                self.log(f"포트 {current_port}가 이미 사용 중입니다. 다른 포트 시도...")
+                self.log(f"포트 {current_port}가 이미 사용 중입니다. 다른 포트 시도...", level="warning")
                 retry_count += 1
                 current_port += 1
                 continue
             
             try:
                 print(f"[서버 시작] WebSocket 서버 시작: 포트 {current_port}")
-                self.log(f"WebSocket 서버 시작: 포트 {current_port}")
+                self.log(f"WebSocket 서버 시작: 포트 {current_port}", level="info")
                 self.server = await websockets.serve(self.handler, "0.0.0.0", current_port)
                 self.port = current_port  # 실제 사용 중인 포트 업데이트
                 self.running = True
@@ -197,7 +197,7 @@ class WebSocketServer:
                 return self.server
             except OSError as e:
                 print(f"[서버 오류] 포트 {current_port} 바인딩 실패: {str(e)}")
-                self.log(f"포트 {current_port} 바인딩 실패", e)
+                self.log(f"포트 {current_port} 바인딩 실패", e, level="error")
                 retry_count += 1
                 current_port += 1
         
@@ -210,7 +210,7 @@ class WebSocketServer:
             self.server.close()
             await self.server.wait_closed()
             print("[서버 종료] WebSocket 서버가 정상적으로 종료됨")
-            self.log("WebSocket 서버 중지됨")
+            self.log("WebSocket 서버 중지됨", level="info")
             self.running = False
     
     def run_in_thread(self):
@@ -220,15 +220,15 @@ class WebSocketServer:
         
         try:
             print("[스레드] WebSocket 서버 스레드 시작")
-            self.log("WebSocket 서버 스레드 시작")
+            self.log("WebSocket 서버 스레드 시작", level="info")
             server = loop.run_until_complete(self.start_server())
             loop.run_forever()
         except Exception as e:
             print(f"[스레드 오류] WebSocket 서버 실행 중 오류: {str(e)}")
-            self.log("WebSocket 서버 실행 중 오류", e)
+            self.log("WebSocket 서버 실행 중 오류", e, level="error")
         finally:
             if self.running:
                 loop.run_until_complete(self.stop_server())
             loop.close()
             print("[스레드] WebSocket 서버 스레드 종료")
-            self.log("WebSocket 서버 스레드 종료")
+            self.log("WebSocket 서버 스레드 종료", level="info")
