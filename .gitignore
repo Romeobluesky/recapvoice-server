@@ -342,3 +342,6 @@ setting.txt
 
 #settings.ini
 settings.ini
+
+#backupfile
+*.bak
