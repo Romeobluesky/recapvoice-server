@@ -5,6 +5,7 @@
 # Logs
 logs
 *.log
+voip_monitor.log.bak
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -342,6 +343,3 @@ setting.txt
 
 #settings.ini
 settings.ini
-
-#backupfile
-*.bak
