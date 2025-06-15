@@ -29,7 +29,6 @@ class SettingsPopup(QDialog):
 		super().__init__(parent)
 		# 설정 파일 로드 또는 생성
 		self.config = configparser.ConfigParser()
-
 		if not os.path.exists('settings.ini') or os.path.getsize('settings.ini') == 0:
 			# 기본 설정값 설정
 			self.config['Environment'] = {
@@ -44,6 +43,13 @@ class SettingsPopup(QDialog):
 				'ip': '192.168.0.64',
 				'ap_ip': '222.100.152.166',
 				'port': '8080'
+			}
+			self.config['MongoDB'] = {
+				'host': '192.168.0.61',
+				'port': '27017',
+				'database': 'packetwave',
+				'username': '',
+				'password': ''
 			}
 			self.config['Extension'] = {
 				'rep_number': '000-0000-0000',
@@ -61,6 +67,15 @@ class SettingsPopup(QDialog):
 				self.config.write(configfile)
 		else:
 			self.config.read('settings.ini', encoding='utf-8')
+			# MongoDB 섹션이 없을 경우 기본값으로 생성
+			if 'MongoDB' not in self.config:
+				self.config['MongoDB'] = {
+					'host': '192.168.0.61',
+					'port': '27017',
+					'database': 'packetwave',
+					'username': '',
+					'password': ''
+				}
 
 		# 인스턴스 변수 초기화
 		self.disk_info_label = None
@@ -106,16 +121,16 @@ class SettingsPopup(QDialog):
 		try:
 			# 모든 네트워크 인터페이스 가져오기
 			interfaces = netifaces.interfaces()
-			
+
 			# 이더넷 인터페이스 찾기
 			for interface in interfaces:
 				# 루프백 인터페이스 제외
 				if interface == 'lo' or interface.startswith('lo'):
 					continue
-					
+
 				# 인터페이스 주소 정보 가져오기
 				addresses = netifaces.ifaddresses(interface)
-				
+
 				# MAC 주소(AF_LINK) 정보가 있는지 확인
 				if netifaces.AF_LINK in addresses:
 					mac = addresses[netifaces.AF_LINK][0]['addr']
@@ -123,23 +138,23 @@ class SettingsPopup(QDialog):
 					if netifaces.AF_INET in addresses:
 						# MAC 주소를 대문자로 변환하고 하이픈으로 변경하여 반환
 						return mac.replace(':', '-').upper()
-			
+
 			# 이더넷 인터페이스를 찾지 못한 경우 첫 번째 MAC 주소 반환
 			for interface in interfaces:
 				if interface == 'lo' or interface.startswith('lo'):
 					continue
-					
+
 				addresses = netifaces.ifaddresses(interface)
 				if netifaces.AF_LINK in addresses:
 					mac = addresses[netifaces.AF_LINK][0]['addr']
 					# MAC 주소를 대문자로 변환하고 하이픈으로 변경하여 반환
 					return mac.replace(':', '-').upper()
-					
+
 			# 백업 방법: 기존 방식 사용
 			mac = uuid.UUID(int=uuid.getnode()).hex[-12:]
 			# MAC 주소를 하이픈으로 구분하여 반환
 			return "-".join([mac[e:e+2] for e in range(0, 11, 2)]).upper()
-			
+
 		except Exception as e:
 			print(f"MAC 주소 가져오기 오류: {e}")
 			# 오류 발생 시 기존 방식 사용
@@ -203,6 +218,9 @@ class SettingsPopup(QDialog):
 		record_group = QGroupBox()
 		layout = QVBoxLayout()
 
+		# Database IP
+		layout.addLayout(self.create_database_ip_section())
+
 		# Record IP
 		layout.addLayout(self.create_record_ip_section())
 		layout.addLayout(self.create_path_section())
@@ -234,6 +252,24 @@ class SettingsPopup(QDialog):
 
 		layout.addWidget(record_ip_label)
 		layout.addWidget(self.ip_combo)
+		layout.setSpacing(10)  # 위젯 간 간격 설정
+
+		return layout
+	def create_database_ip_section(self):
+		"""Database IP 섹션 생성"""
+		layout = QHBoxLayout()
+
+		# Database IP 라벨 생성 및 고정 너비 설정
+		db_ip_label = QLabel('Database IP:')
+		db_ip_label.setFixedWidth(80)  # 라벨 너비 고정
+
+		# Database IP용 별도 콤보박스
+		self.db_ip_combo = QComboBox()
+		self.db_ip_combo.setFixedHeight(26)
+		self.load_database_interfaces()
+
+		layout.addWidget(db_ip_label)
+		layout.addWidget(self.db_ip_combo)
 		layout.setSpacing(10)  # 위젯 간 간격 설정
 
 		return layout
@@ -402,7 +438,6 @@ class SettingsPopup(QDialog):
 		"""설정 저장"""
 		# 현재 MAC 주소 가져오기 (저장 시에도 항상 최신 MAC 주소 사용)
 		current_mac = self.get_mac_address()
-		
 		# 설정값 업데이트
 		settings_data = {
 			'Extension': {
@@ -413,6 +448,12 @@ class SettingsPopup(QDialog):
 			'Network': {
 				'ip': self.ip_combo.currentText(),
 				'ap_ip': self.ap_ip_input.text()
+			},			'MongoDB': {
+				'host': self.db_ip_combo.currentText(),
+				'port': self.config['MongoDB']['port'] if 'MongoDB' in self.config and 'port' in self.config['MongoDB'] else '27017',
+				'database': self.config['MongoDB']['database'] if 'MongoDB' in self.config and 'database' in self.config['MongoDB'] else 'packetwave',
+				'username': self.config['MongoDB']['username'] if 'MongoDB' in self.config and 'username' in self.config['MongoDB'] else '',
+				'password': self.config['MongoDB']['password'] if 'MongoDB' in self.config and 'password' in self.config['MongoDB'] else ''
 			},
 			'OtherSettings': {
 				'disk_persent': self.disk_percent_input.text(),
@@ -480,6 +521,30 @@ class SettingsPopup(QDialog):
 		index = self.ip_combo.findText(current_ip)
 		if index >= 0:
 			self.ip_combo.setCurrentIndex(index)
+	def load_database_interfaces(self):
+		"""Database IP용 이더넷 인터페이스 목록 로드"""
+		# 모든 네트워크 인터페이스 조회
+		interfaces = psutil.net_if_addrs()
+
+		# 이더넷 인터페이스만 필터링
+		ethernet_ips = []
+		for interface, addrs in interfaces.items():
+			for addr in addrs:
+				if addr.family == socket.AF_INET:  # IPv4 주소만
+					ethernet_ips.append(addr.address)
+
+		# 콤보박스에 추가
+		self.db_ip_combo.clear()
+		self.db_ip_combo.addItems(ethernet_ips)
+
+		# 현재 설정된 MongoDB host IP 선택
+		current_db_ip = ''
+		if 'MongoDB' in self.config and 'host' in self.config['MongoDB']:
+			current_db_ip = self.config['MongoDB']['host']
+
+		index = self.db_ip_combo.findText(current_db_ip)
+		if index >= 0:
+			self.db_ip_combo.setCurrentIndex(index)
 
 	def apply_stylesheet(self):
 		"""다크모드 스타일시트 적용"""
