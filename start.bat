@@ -96,6 +96,13 @@ if !ERRORLEVEL! neq 0 (
 	goto error
 )
 
+:: MongoDB 설정 읽기
+for /f "tokens=1,2 delims==" %%A in ('findstr /b "host" settings.ini') do (
+	set "mongodb_host=%%B"
+	set "mongodb_host=!mongodb_host: =!"
+	echo Found MongoDB host: !mongodb_host!
+)
+
 :: MongoDB 시작
 echo Starting MongoDB...
 
@@ -104,7 +111,7 @@ start "" /b "!WORK_DIR!\mongodb\bin\mongod.exe" ^
   --logpath "!WORK_DIR!\mongodb\log\mongodb.log" ^
   --logappend ^
   --port 27017 ^
-  --bind_ip 0.0.0.0,192.168.0.61
+  --bind_ip 0.0.0.0,!mongodb_host!
 
 if %ERRORLEVEL% neq 0 (
 	echo Failed to start MongoDB.
