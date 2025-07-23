@@ -74,7 +74,7 @@ class Dashboard(QMainWindow):
 						parser.add_argument("--log-level", choices=["debug", "info", "warning", "error"], default="info")
 						args, _ = parser.parse_known_args()
 						self.log_level = args.log_level
-						
+
 						# 필수 디렉토리 확인 및 생성
 						required_dirs = ['images', 'logs']
 						for dir_name in required_dirs:
@@ -118,11 +118,11 @@ class Dashboard(QMainWindow):
 						log_dir = 'logs'
 						if not os.path.exists(log_dir):
 								os.makedirs(log_dir)
-						
+
 						# 오늘 날짜로 로그 파일 이름 생성
 						today = datetime.datetime.now().strftime("%Y%m%d")
 						log_file_path = os.path.join(log_dir, f'voip_monitor_{today}.log')
-						
+
 						# 현재 로그 파일로 심볼릭 링크 생성
 						current_log_path = 'voip_monitor.log'
 						if os.path.exists(current_log_path):
@@ -134,13 +134,13 @@ class Dashboard(QMainWindow):
 										if os.path.exists(backup_path):
 												os.remove(backup_path)
 										os.rename(current_log_path, backup_path)
-						
+
 						# 윈도우에서는 심볼릭 링크 대신 하드 링크 사용
 						if os.name == 'nt':
 								# 로그 파일 직접 생성
 								with open(log_file_path, 'a', encoding='utf-8') as f:
 										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
-								
+
 								# voip_monitor.log 파일도 직접 생성
 								with open(current_log_path, 'w', encoding='utf-8') as f:
 										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
@@ -149,7 +149,7 @@ class Dashboard(QMainWindow):
 								with open(log_file_path, 'a', encoding='utf-8') as f:
 										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
 								os.symlink(log_file_path, current_log_path)
-						
+
 						self.log_error("로그 파일 초기화 완료", level="info")
 				except Exception as e:
 						print(f"로그 파일 초기화 중 오류: {e}")
@@ -323,15 +323,15 @@ class Dashboard(QMainWindow):
 								mongo_database = config.get('MongoDB', 'database', fallback='packetwave')
 								mongo_username = config.get('MongoDB', 'username', fallback='')
 								mongo_password = config.get('MongoDB', 'password', fallback='')
-								
+
 								# MongoDB 연결 문자열 생성
 								if mongo_username and mongo_password:
 										mongo_uri = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/"
 								else:
 										mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
-								
+
 								self.log_error(f"MongoDB 연결 시도: {mongo_uri}", level="info")
-								
+
 								# 짧은 타임아웃으로 연결 시도
 								self.mongo_client = MongoClient(
 										mongo_uri,
@@ -343,11 +343,11 @@ class Dashboard(QMainWindow):
 								self.members = self.db['members']
 								self.filesinfo = self.db['filesinfo']
 								self.internalnumber = self.db['internalnumber']
-								
+
 								# 연결 테스트
 								self.mongo_client.admin.command('ping')
 								self.log_error("MongoDB 연결 성공", level="info")
-								
+
 						except Exception as e:
 								# 초기 연결 실패는 로그에 남기지 않음 (재시도에서 해결될 가능성 높음)
 								# MongoDB 없이도 프로그램이 계속 실행되도록 설정
@@ -356,7 +356,7 @@ class Dashboard(QMainWindow):
 								self.members = None
 								self.filesinfo = None
 								self.internalnumber = None
-								
+
 								# 5초 후 재시도
 								QTimer.singleShot(5000, self.retry_mongodb_connection)
 
@@ -441,7 +441,7 @@ class Dashboard(QMainWindow):
 								websocket_port = 8765  # 기본 포트
 								max_retry = 3
 								retry_count = 0
-								
+
 								while retry_count < max_retry:
 										try:
 												print(f"WebSocket 서버 시작 시도 (포트: {websocket_port})...")
@@ -461,7 +461,7 @@ class Dashboard(QMainWindow):
 										except Exception as e:
 												self.log_error("WebSocket 서버 시작 실패", e)
 												break
-								
+
 								if retry_count >= max_retry:
 										self.log_error(f"WebSocket 서버 시작 실패: 최대 재시도 횟수 ({max_retry})를 초과했습니다.")
 						except Exception as e:
@@ -487,16 +487,16 @@ class Dashboard(QMainWindow):
 						mongo_database = config.get('MongoDB', 'database', fallback='packetwave')
 						mongo_username = config.get('MongoDB', 'username', fallback='')
 						mongo_password = config.get('MongoDB', 'password', fallback='')
-						
+
 						# MongoDB 연결 문자열 생성
 						if mongo_username and mongo_password:
 								mongo_uri = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/"
 						else:
 								mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
-						
+
 						# 재시도 로그는 간단하게만
 						# self.log_error("MongoDB 재연결 시도", level="info")
-						
+
 						# 짧은 타임아웃으로 연결 시도
 						self.mongo_client = MongoClient(
 								mongo_uri,
@@ -508,11 +508,11 @@ class Dashboard(QMainWindow):
 						self.members = self.db['members']
 						self.filesinfo = self.db['filesinfo']
 						self.internalnumber = self.db['internalnumber']
-						
+
 						# 연결 테스트
 						self.mongo_client.admin.command('ping')
 						self.log_error("MongoDB 연결 성공", level="info")
-						
+
 				except Exception as e:
 						# 재시도도 실패한 경우에만 로그 기록
 						self.log_error("MongoDB 연결 최종 실패", e)
@@ -533,7 +533,7 @@ class Dashboard(QMainWindow):
 										self.capture.close()
 						except Exception as e:
 								print(f"Cleanup error: {e}")
-				
+
 				# WebSocket 서버 정리
 				if hasattr(self, 'websocket_server') and self.websocket_server:
 						try:
@@ -595,7 +595,7 @@ class Dashboard(QMainWindow):
 						try:
 								cpu_percent = psutil.cpu_percent()
 								memory = psutil.virtual_memory()
-								
+
 								# 리소스가 부족한 경우 로그만 남기고 진행
 								if cpu_percent > 80 or memory.percent > 80:
 										resource_info = {
@@ -1300,16 +1300,16 @@ class Dashboard(QMainWindow):
 								"warning": 2,
 								"error": 3
 						}
-						
+
 						current_level = log_levels.get(level.lower(), 0)
 						min_level = log_levels.get(getattr(self, "log_level", "info").lower(), 1)
-						
+
 						# 설정된 최소 레벨보다 낮은 로그는 무시
 						if current_level < min_level:
 								return
-						
+
 						timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-						
+
 						# 콘솔 출력 (console_output이 True인 경우에만)
 						if console_output:
 								level_prefix = {
@@ -1318,14 +1318,14 @@ class Dashboard(QMainWindow):
 										"warning": "[경고]",
 										"error": "[오류]"
 								}.get(level.lower(), "[정보]")
-								
+
 								print(f"\n[{timestamp}] {level_prefix} {message}")
-								
+
 								if additional_info:
 										print(f"추가 정보: {additional_info}")
 								if error:
 										print(f"에러 메시지: {str(error)}")
-						
+
 						# 파일 로깅
 						with open('voip_monitor.log', 'a', encoding='utf-8', buffering=1) as log_file:  # buffering=1: 라인 버퍼링
 								log_file.write(f"\n[{timestamp}] {message}\n")
@@ -1415,7 +1415,7 @@ class Dashboard(QMainWindow):
 																						print(f"알림 전송 시작: 내선번호 {to_number}에 전화 수신 알림 (발신: {from_number})")
 																						await self.websocket_server.notify_client(to_number, from_number, call_id)
 																						print(f"알림 전송 완료: 내선번호 {to_number}")
-																				
+
 																				# 별도 스레드에서 비동기 함수 실행
 																				notification_thread = threading.Thread(
 																						target=lambda: asyncio.run(send_notification()),
@@ -1436,7 +1436,7 @@ class Dashboard(QMainWindow):
 														with self.active_calls_lock:
 																try:
 																		before_state = dict(self.active_calls) if call_id in self.active_calls else None
-																		
+
 																		# 상태 머신 관리
 																		if call_id in self.call_state_machines:
 																				current_state = self.call_state_machines[call_id].state
@@ -1446,7 +1446,7 @@ class Dashboard(QMainWindow):
 																		else:
 																				# 새로운 상태 머신 생성
 																				self.call_state_machines[call_id] = CallStateMachine()
-																		
+
 																		current_state = self.call_state_machines[call_id].state
 																		# IDLE 상태에서만 TRYING으로 전이 허용
 																		if current_state == CallState.IDLE:
@@ -1462,7 +1462,7 @@ class Dashboard(QMainWindow):
 																						"current_state": current_state.name,
 																						"attempted_state": "TRYING"
 																				})
-																		
+
 																		self.active_calls[call_id] = {
 																				'start_time': datetime.datetime.now(),
 																				'status': '시도중',
@@ -1561,7 +1561,7 @@ class Dashboard(QMainWindow):
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
 								before_state = dict(self.active_calls[call_id])
-								
+
 								# 상태 머신 업데이트 - IN_CALL 상태에서만 TERMINATED로 전이 허용
 								if call_id in self.call_state_machines:
 										current_state = self.call_state_machines[call_id].state
@@ -1579,7 +1579,7 @@ class Dashboard(QMainWindow):
 														"attempted_state": "TERMINATED"
 												})
 												return
-								
+
 								self.update_call_status(call_id, '통화종료', '정상종료')
 								extension = self.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])
@@ -1643,7 +1643,7 @@ class Dashboard(QMainWindow):
 																		"attempted_state": "IN_CALL"
 																})
 																return
-												
+
 												self.update_call_status(call_id, '통화중')
 												extension = self.get_extension_from_call(call_id)
 												if extension:
@@ -2612,7 +2612,7 @@ class Dashboard(QMainWindow):
 												print("WebSocket 서버가 종료되었습니다.")
 								except Exception as e:
 										print(f"WebSocket server shutdown error: {e}")
-						
+
 						# 외부 프로세스 종료
 						processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe', 'Dumpcap.exe']
 						for process in processes_to_kill:
@@ -2698,7 +2698,7 @@ class Dashboard(QMainWindow):
 								"cpu_percent": f"{process.cpu_percent()}%",
 								"open_files": len(process.open_files())
 						}
-						
+
 						# 콘솔에 출력하지 않고 로그 파일에만 기록
 						self.log_error("시스템 리소스 제한", additional_info=resource_info, level="info", console_output=False)
 				except Exception as e:
@@ -2730,27 +2730,27 @@ def main():
 
 					# 새 인스턴스 시작
 					window = Dashboard()
-					
+
 					# 테스트 모드 처리
 					if args.test:
 							print("\n" + "="*50)
 							print("테스트 모드로 실행합니다.")
 							print("="*50 + "\n")
-							
+
 							# 테스트 모듈 가져오기
 							try:
 									import test_sip_call
-									
+
 									print("대시보드 초기화 완료")
 									print("5초 후 테스트를 시작합니다...")
-									
+
 									for i in range(5, 0, -1):
 											print(f"{i}...")
 											time.sleep(1)
-									
+
 									# 테스트 실행
 									test_sip_call.simulate_sip_call(window)
-									
+
 									# 테스트 완료 후 종료
 									print("\n테스트가 완료되었습니다.")
 									print("프로그램을 종료합니다.")
@@ -2761,7 +2761,7 @@ def main():
 							except Exception as e:
 									print(f"테스트 실행 중 오류 발생: {e}")
 									print("일반 모드로 실행합니다.")
-					
+
 					# 일반 모드로 실행
 					window.show()
 					app.setQuitOnLastWindowClosed(False)
