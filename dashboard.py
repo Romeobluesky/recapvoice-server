@@ -1561,6 +1561,8 @@ class Dashboard(QMainWindow):
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
 								before_state = dict(self.active_calls[call_id])
+								from_number = self.active_calls[call_id].get('from_number', '')
+								to_number = self.active_calls[call_id].get('to_number', '')
 
 								# 상태 머신 업데이트 - IN_CALL 상태에서만 TERMINATED로 전이 허용
 								if call_id in self.call_state_machines:
@@ -1580,6 +1582,35 @@ class Dashboard(QMainWindow):
 												})
 												return
 
+								# 내선번호로 BYE 알림 전송
+								if is_extension(to_number):
+										try:
+												# WebSocket 서버가 있고 MongoDB가 연결되어 있는 경우에만 실행
+												if hasattr(self, 'websocket_server') and self.db is not None:
+														print(f"BYE 패킷 분석: 내선번호 {to_number}로 통화 종료 알림 (발신: {from_number})")
+														# 비동기 알림 전송을 위한 helper 함수
+														async def send_bye_notification():
+																print(f"BYE 알림 전송 시작: 내선번호 {to_number}에 통화 종료 알림 (발신: {from_number})")
+																await self.websocket_server.notify_client_call_end(to_number, from_number, call_id, "BYE")
+																print(f"BYE 알림 전송 완료: 내선번호 {to_number}")
+
+														# 별도 스레드에서 비동기 함수 실행
+														notification_thread = threading.Thread(
+																target=lambda: asyncio.run(send_bye_notification()),
+																daemon=True
+														)
+														notification_thread.start()
+														print(f"BYE 알림 전송 스레드 시작: {to_number}")
+														self.log_error("BYE 클라이언트 알림 전송 시작", additional_info={
+																"to": to_number,
+																"from": from_number,
+																"call_id": call_id,
+																"method": "BYE"
+														})
+										except Exception as notify_error:
+												print(f"BYE 클라이언트 알림 전송 실패: {str(notify_error)}")
+												self.log_error("BYE 클라이언트 알림 전송 실패", notify_error)
+
 								self.update_call_status(call_id, '통화종료', '정상종료')
 								extension = self.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])
@@ -1597,6 +1628,38 @@ class Dashboard(QMainWindow):
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
 								before_state = dict(self.active_calls[call_id])
+								from_number = self.active_calls[call_id].get('from_number', '')
+								to_number = self.active_calls[call_id].get('to_number', '')
+
+								# 내선번호로 CANCEL 알림 전송
+								if is_extension(to_number):
+										try:
+												# WebSocket 서버가 있고 MongoDB가 연결되어 있는 경우에만 실행
+												if hasattr(self, 'websocket_server') and self.db is not None:
+														print(f"CANCEL 패킷 분석: 내선번호 {to_number}로 통화 취소 알림 (발신: {from_number})")
+														# 비동기 알림 전송을 위한 helper 함수
+														async def send_cancel_notification():
+																print(f"CANCEL 알림 전송 시작: 내선번호 {to_number}에 통화 취소 알림 (발신: {from_number})")
+																await self.websocket_server.notify_client_call_end(to_number, from_number, call_id, "CANCEL")
+																print(f"CANCEL 알림 전송 완료: 내선번호 {to_number}")
+
+														# 별도 스레드에서 비동기 함수 실행
+														notification_thread = threading.Thread(
+																target=lambda: asyncio.run(send_cancel_notification()),
+																daemon=True
+														)
+														notification_thread.start()
+														print(f"CANCEL 알림 전송 스레드 시작: {to_number}")
+														self.log_error("CANCEL 클라이언트 알림 전송 시작", additional_info={
+																"to": to_number,
+																"from": from_number,
+																"call_id": call_id,
+																"method": "CANCEL"
+														})
+										except Exception as notify_error:
+												print(f"CANCEL 클라이언트 알림 전송 실패: {str(notify_error)}")
+												self.log_error("CANCEL 클라이언트 알림 전송 실패", notify_error)
+
 								self.update_call_status(call_id, '통화종료', '발신취소')
 								extension = self.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])

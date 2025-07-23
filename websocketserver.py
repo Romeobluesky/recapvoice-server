@@ -165,6 +165,55 @@ class WebSocketServer:
 			print(f"[알림 오류] 알림 전송 중 오류: {str(e)}")
 			self.log("알림 전송 중 오류", e, level="error")
 
+	async def notify_client_call_end(self, to_number, from_number, call_id=None, method="BYE"):
+		"""클라이언트에 통화 종료 알림"""
+		try:
+			print(f"[종료 알림 시작] 내선번호 {to_number}에 통화 종료 알림 시도 (발신: {from_number}, 방법: {method})")
+			# MongoDB에서 내선번호에 해당하는 IP 조회
+			mongo_client = MongoClient("mongodb://localhost:27017/")
+			db = mongo_client['packetwave']
+			members = db['members']
+
+			member = members.find_one({'extension_num': to_number})
+			if not member:
+				print(f"[MongoDB] 내선번호 {to_number}에 대한 정보 없음")
+				self.log(f"내선번호 {to_number}에 대한 정보 없음", level="warning")
+				return
+
+			ip = member.get('default_ip')
+			if not ip:
+				print(f"[MongoDB] 내선번호 {to_number}에 대한 IP 주소 없음")
+				self.log(f"내선번호 {to_number}에 대한 IP 주소 없음", level="warning")
+				return
+
+			print(f"[종료 알림 처리] 내선번호 {to_number}의 IP 주소: {ip}")
+			# 해당 IP로 연결된 클라이언트가 있는지 확인
+			if ip in self.connected_clients:
+				# method에 따라 type을 구분
+				message_type = 'call_bye' if method == 'BYE' else 'call_cancel' if method == 'CANCEL' else 'call_ended'
+
+				message = {
+					'type': message_type,
+					'method': method,
+					'from': from_number,
+					'to': to_number,
+					'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+				}
+
+				if call_id:
+					message['call_id'] = call_id
+
+				print(f"[종료 알림 전송] 메시지 전송: {message}")
+				await self.connected_clients[ip].send(json.dumps(message))
+				print(f"[종료 알림 완료] 내선번호 {to_number} (IP: {ip})에 통화 종료 알림 전송 완료")
+				self.log(f"통화 종료 알림 전송 완료: {to_number} (IP: {ip}), 방법: {method}", level="info")
+			else:
+				print(f"[종료 알림 실패] 클라이언트 연결 없음: 내선번호 {to_number} (IP: {ip})")
+				self.log(f"클라이언트 연결 없음: {ip}", level="warning")
+		except Exception as e:
+			print(f"[종료 알림 오류] 통화 종료 알림 전송 중 오류: {str(e)}")
+			self.log("통화 종료 알림 전송 중 오류", e, level="error")
+
 	def is_port_in_use(self, port):
 		"""지정된 포트가 사용 중인지 확인"""
 		with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
