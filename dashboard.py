@@ -59,6 +59,7 @@ class Dashboard(QMainWindow):
 		# Signal: 내선번호, 상태, 수신번호 전달
 		block_creation_signal = Signal(str)
 		block_update_signal = Signal(str, str, str)
+		extension_update_signal = Signal(str)  # 내선번호 업데이트 Signal
 
 		_instance = None  # 클래스 변수로 인스턴스 추적
 
@@ -258,8 +259,8 @@ class Dashboard(QMainWindow):
 								self.setWindowIcon(QIcon(resource_path("images/recapvoice_squere.ico")))
 								self.setWindowTitle("Recap Voice")
 								self.setAttribute(Qt.WA_QuitOnClose, False)
-								self.block_creation_signal.connect(self.create_block_in_main_thread)
-								self.block_update_signal.connect(self.update_block_in_main_thread)
+								# Signal 연결
+								self.extension_update_signal.connect(self.update_extension_in_main_thread)
 								self.settings_popup = SettingsPopup()
 								self.active_calls_lock = threading.RLock()
 								self.active_calls = {}
@@ -283,8 +284,10 @@ class Dashboard(QMainWindow):
 								self.resource_timer.start(30000)  # 30초마다 체크
 
 								self.sip_registrations = {}
+								self.sip_extensions = set()  # SIP 내선번호 집합
 								self.first_registration = False
 								self.packet_get = 0
+								# 토글 기능 제거 - 관련 변수들 제거
 
 								# 메모리 캐시 초기화
 								gc.collect()
@@ -560,16 +563,29 @@ class Dashboard(QMainWindow):
 				content_layout.addWidget(header)
 				status_section = self._create_status_section()
 				content_layout.addLayout(status_section)
-				line_list = self._create_line_list()
 				log_list = self._create_log_list()
-				content_layout.addWidget(line_list, 80)
-				content_layout.addWidget(log_list, 20)
-				content_layout.setStretch(2, 80)
-				content_layout.setStretch(3, 20)
+				content_layout.addWidget(log_list, 60)  # 비율 조정
+
+				# SIP 콘솔 로그 레이어 추가
+				sip_console = self._create_sip_console_log()
+				content_layout.addWidget(sip_console, 40)  # 비율 조정
+
+				content_layout.setStretch(2, 60)  # LOG LIST 비율
+				content_layout.setStretch(3, 40)  # SIP CONSOLE LOG 비율
 				self._apply_styles()
 				self.resize(1400, 900)
 				self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
 				self.settings_popup.path_changed.connect(self.update_storage_path)
+
+				# calls_layout을 빈 레이아웃으로 초기화 (전화연결상태 블록 대신)
+				self.calls_layout = QVBoxLayout()
+				self.calls_container = QWidget()
+
+				# 내선번호 표시 업데이트 (약간의 지연 후)
+				QTimer.singleShot(100, self.update_extension_display)
+
+				# SIP 콘솔 초기화 메시지
+				QTimer.singleShot(500, self.init_sip_console_welcome)
 
 		def load_network_interfaces(self):
 				try:
@@ -752,6 +768,14 @@ class Dashboard(QMainWindow):
 						logo_label.setPixmap(scaled_logo)
 				logo_container_layout.addWidget(logo_label)
 				layout.addWidget(logo_container)
+
+				# SIP 내선번호 표시 박스 추가
+				print("=== Extension box를 사이드바에 추가 중 ===")
+				extension_box = self._create_extension_box()
+				layout.addWidget(extension_box)
+				print(f"Extension box가 사이드바에 추가됨: {extension_box}")
+				print(f"사이드바 레이아웃 내 위젯 개수: {layout.count()}")
+
 				menu_container = QWidget()
 				menu_layout = QVBoxLayout(menu_container)
 				menu_layout.setContentsMargins(0, 0, 0, 0)
@@ -763,7 +787,7 @@ class Dashboard(QMainWindow):
 		def _create_menu_button(self, text, icon_path):
 				btn = QPushButton()
 				btn.setObjectName("menu_button")
-				btn.setFixedHeight(40)
+				btn.setFixedHeight(50)
 				btn.setCursor(Qt.PointingHandCursor)
 				layout = QHBoxLayout(btn)
 				layout.setContentsMargins(15, 0, 15, 0)
@@ -780,6 +804,295 @@ class Dashboard(QMainWindow):
 				layout.addWidget(text_label)
 				layout.addStretch()
 				return btn
+
+		def _create_extension_box(self):
+				"""SIP 내선번호 표시 박스 생성"""
+				# 메인 컨테이너 (둥근 박스)
+				extension_container = QWidget()
+				extension_container.setObjectName("extension_container")
+				extension_container.setFixedSize(200, 1000)
+				extension_container.setStyleSheet("""
+					QWidget#extension_container {
+						background-color: #48c9b0;
+						border-radius: 5px;
+						margin: 10px;
+					}
+				""")
+
+				main_layout = QVBoxLayout(extension_container)
+				main_layout.setContentsMargins(10, 10, 10, 10)
+				main_layout.setSpacing(5)
+
+				# 헤더 영역 (타이틀만)
+				title_label = QLabel("내선번호")
+				title_label.setAlignment(Qt.AlignCenter)
+				title_label.setFixedHeight(28)
+				title_label.setObjectName("extension_title")
+				title_label.setStyleSheet("""
+					QLabel#extension_title {
+						background-color: transparent;
+						border: none;
+						color: white;
+						font-size: 12px;
+						font-weight: bold;
+						padding-top: 5px;
+					}
+				""")
+				main_layout.addWidget(title_label)
+
+				# 스크롤 영역
+				scroll_area = QScrollArea()
+				scroll_area.setWidgetResizable(True)
+				scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+				scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+				scroll_area.setStyleSheet("""
+					QScrollArea {
+						border: none;
+						background-color: transparent;
+					}
+					QScrollBar:vertical {
+						background-color: rgba(255, 255, 255, 0.1);
+						width: 8px;
+						border-radius: 4px;
+					}
+					QScrollBar::handle:vertical {
+						background-color: rgba(255, 255, 255, 0.3);
+						border-radius: 4px;
+						min-height: 20px;
+					}
+					QScrollBar::handle:vertical:hover {
+						background-color: rgba(255, 255, 255, 0.5);
+					}
+				""")
+
+				# 내선번호 리스트 위젯
+				self.extension_list_widget = QWidget()
+				self.extension_list_layout = QVBoxLayout(self.extension_list_widget)
+				self.extension_list_layout.setContentsMargins(5, 5, 5, 5)
+				self.extension_list_layout.setSpacing(3)
+				self.extension_list_layout.setAlignment(Qt.AlignTop)
+
+				scroll_area.setWidget(self.extension_list_widget)
+				main_layout.addWidget(scroll_area)
+
+				# 위젯들 강제 표시 및 업데이트
+				extension_container.show()
+				scroll_area.show()
+				self.extension_list_widget.show()
+
+				# 강제 업데이트
+				extension_container.update()
+				scroll_area.update()
+				self.extension_list_widget.update()
+
+				# 최소 크기 설정 (혹시 크기가 0이면)
+				extension_container.setMinimumSize(200, 300)
+				scroll_area.setMinimumSize(180, 200)
+
+				print(f"Extension box 위젯 생성 완료")
+				print(f"Container 표시 상태: {extension_container.isVisible()}")
+				print(f"Container 크기: {extension_container.size()}")
+				print(f"Scroll area 표시 상태: {scroll_area.isVisible()}")
+				print(f"Scroll area 크기: {scroll_area.size()}")
+				print(f"List widget 표시 상태: {self.extension_list_widget.isVisible()}")
+				print(f"List widget 크기: {self.extension_list_widget.size()}")
+
+				return extension_container
+
+		# 토글 기능 제거됨 - 고정된 상태로 유지
+
+		def toggle_led_color(self, led_indicator):
+				"""LED 색상을 노란색과 녹색 사이에서 토글"""
+				try:
+						# LED 객체가 여전히 유효한지 확인
+						if led_indicator is None or not hasattr(led_indicator, 'isVisible'):
+								return
+
+						# LED가 표시되지 않거나 삭제된 경우 타이머 정지
+						if not led_indicator.isVisible() or led_indicator.parent() is None:
+								if hasattr(led_indicator, 'led_timer'):
+										led_indicator.led_timer.stop()
+								return
+
+						if hasattr(led_indicator, 'is_yellow'):
+								if led_indicator.is_yellow:
+										# 녹색으로 변경
+										led_indicator.setStyleSheet("""
+											QLabel {
+												background-color: transparent;
+												border: none;
+												color: #32CD32;
+												font-size: 12px;
+												font-weight: bold;
+											}
+										""")
+										led_indicator.is_yellow = False
+								else:
+										# 노란색으로 변경
+										led_indicator.setStyleSheet("""
+											QLabel {
+												background-color: transparent;
+												border: none;
+												color: #FFD700;
+												font-size: 12px;
+												font-weight: bold;
+											}
+										""")
+										led_indicator.is_yellow = True
+				except RuntimeError:
+						# C++ 객체가 삭제된 경우 타이머 정지
+						if hasattr(led_indicator, 'led_timer'):
+								try:
+										led_indicator.led_timer.stop()
+								except:
+										pass
+
+		def cleanup_led_timers(self, widget):
+				"""위젯 내의 LED 타이머들을 정리"""
+				try:
+						# 위젯의 모든 자식 위젯을 확인
+						for child in widget.findChildren(QLabel):
+								if hasattr(child, 'led_timer') and child.led_timer is not None:
+										child.led_timer.stop()
+										child.led_timer.deleteLater()
+								if hasattr(child, 'is_yellow'):
+										delattr(child, 'is_yellow')
+				except:
+						pass
+
+		def add_extension(self, extension):
+				"""새 내선번호 추가"""
+				if extension and extension not in self.sip_extensions:
+					self.sip_extensions.add(extension)
+					self.update_extension_display()
+
+		def refresh_extension_list_with_register(self, extension):
+				"""SIP REGISTER로 감지된 내선번호로 목록을 갱신 (Signal을 통해 메인 스레드에서 처리)"""
+				if extension:
+					print(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청")
+					self.log_to_sip_console(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청", "SIP")
+					# 메인 스레드에서 처리하도록 Signal 발신
+					self.extension_update_signal.emit(extension)
+
+		def update_extension_in_main_thread(self, extension):
+				"""메인 스레드에서 내선번호 업데이트 처리"""
+				print(f"메인 스레드에서 내선번호 처리: {extension}")
+				# 실제 등록된 내선번호 추가
+				self.sip_extensions.add(extension)
+				self.update_extension_display()
+				print(f"내선번호 {extension} 등록 완료")
+
+		def update_extension_display(self):
+				"""내선번호 표시 업데이트"""
+				print(f"=== update_extension_display 호출됨 ===")
+				print(f"현재 내선번호 목록: {self.sip_extensions}")
+				print(f"내선번호 개수: {len(self.sip_extensions)}")
+
+				# 기존 위젯들 제거 (타이머도 함께 정리)
+				while self.extension_list_layout.count():
+					child = self.extension_list_layout.takeAt(0)
+					if child.widget():
+						widget = child.widget()
+						# LED 타이머 정리
+						self.cleanup_led_timers(widget)
+						widget.deleteLater()
+
+				# 내선번호들을 정렬하여 세로로 표시
+				sorted_extensions = sorted(self.sip_extensions)
+
+				if not sorted_extensions:
+					# 등록된 내선번호가 없을 때 안내 메시지 표시
+					no_ext_label = QLabel("SIP Connection Waiting...")
+					no_ext_label.setStyleSheet("""
+						QLabel {
+							color: rgba(255, 255, 255, 0.6);
+							font-size: 12px;
+							padding: 5px 8px;
+							text-align: center;
+						}
+					""")
+					no_ext_label.setAlignment(Qt.AlignCenter)
+					self.extension_list_layout.addWidget(no_ext_label)
+				else:
+					print(f"내선번호 위젯 생성 시작: {sorted_extensions}")
+					for extension in sorted_extensions:
+						print(f"내선번호 {extension} 위젯 생성 중...")
+						# 각 내선번호별 컨테이너 위젯 생성
+						ext_container = QWidget()
+						ext_layout = QHBoxLayout(ext_container)
+						ext_layout.setContentsMargins(0, 0, 0, 0)
+						ext_layout.setSpacing(5)
+
+						# 내선번호 래이블과 LED를 포함한 컸테이너
+						extension_container = QWidget()
+						extension_container.setStyleSheet("""
+							QWidget {
+								background-color: rgba(255, 255, 255, 0.2);
+								border: 1px solid rgba(255, 255, 255, 0.3);
+								border-radius: 5px;
+								margin: 2px;
+							}
+						""")
+
+						# 내선번호 컸테이너 내부 레이아웃
+						extension_inner_layout = QHBoxLayout(extension_container)
+						extension_inner_layout.setContentsMargins(8, 5, 8, 5)
+						extension_inner_layout.setSpacing(5)
+
+						# 내선번호 레이블
+						extension_label = QLabel(extension)
+						extension_label.setStyleSheet("""
+							QLabel {
+								color: #ffffff;
+								font-size: 13px;
+								font-weight: bold;
+								background-color: transparent;
+								border: none;
+							}
+						""")
+
+						# 원형 LED 인디케이터 (QLabel로 변경)
+						led_indicator = QLabel("●")  # 원형 LED 이모지
+						led_indicator.setObjectName(f"led_indicator_{extension}")
+						led_indicator.setFixedSize(12, 12)  # 작은 원형 LED
+						led_indicator.setAlignment(Qt.AlignCenter)
+						led_indicator.setStyleSheet("""
+							QLabel {
+								background-color: transparent;
+								border: none;
+								color: #FFD700;
+								font-size: 12px;
+								font-weight: bold;
+							}
+						""")
+
+						# LED 깜박임 애니메이션 효과 (QTimer 사용)
+						led_timer = QTimer()
+						led_timer.timeout.connect(lambda: self.toggle_led_color(led_indicator))
+						led_timer.start(750)  # 0.75초마다 색상 전환
+
+						# LED 상태 초기화
+						led_indicator.is_yellow = True  # 노란색 상태 추적
+						led_indicator.led_timer = led_timer  # GC 방지
+
+						# 내선번호 컸테이너 내부에 레이블과 LED 배치
+						extension_inner_layout.addWidget(extension_label)
+						extension_inner_layout.addStretch()  # 공간 채우기
+						extension_inner_layout.addWidget(led_indicator)
+
+						# 메인 레이아웃에 전체 컸테이너 추가
+						ext_layout.addWidget(extension_container)
+
+						self.extension_list_layout.addWidget(ext_container)
+						print(f"내선번호 {extension} 위젯이 레이아웃에 추가됨")
+						print(f"현재 레이아웃 내 위젯 개수: {self.extension_list_layout.count()}")
+
+						# 위젯 표시 상태 확인
+						ext_container.show()
+						extension_container.show()
+						extension_label.show()
+						led_indicator.show()
+						print(f"위젯 표시 상태 - Container: {ext_container.isVisible()}, Extension Container: {extension_container.isVisible()}, Label: {extension_label.isVisible()}, LED: {led_indicator.isVisible()}")
 
 		def get_public_ip(self):
 				try:
@@ -961,14 +1274,12 @@ class Dashboard(QMainWindow):
 				# 내선번호 레이블은 "extensionLabel", 통화 시간 레이블은 "durationLabel"
 				if status != "대기중" and received_number:
 						labels = [
-								("내선:", internal_number),
 								("수신:", received_number),
 								("상태:", status),
 								("시간:", duration)
 						]
 				else:
 						labels = [
-								("내선:", internal_number),
 								("상태:", status)
 						]
 				for idx, (title, value) in enumerate(labels):
@@ -977,9 +1288,7 @@ class Dashboard(QMainWindow):
 						title_label.setStyleSheet("color: #888888; font-size: 12px;")
 						value_label = QLabel(value)
 						# objectName 지정
-						if title.strip() == "내선:":
-								value_label.setObjectName("extensionLabel")
-						elif title.strip() == "시간:":
+						if title.strip() == "시간:":
 								value_label.setObjectName("durationLabel")
 						else:
 								value_label.setObjectName("blockValue")
@@ -1087,6 +1396,153 @@ class Dashboard(QMainWindow):
 				table.horizontalHeader().setStretchLastSection(True)
 				layout.addWidget(table)
 				return group
+
+		def _create_sip_console_log(self):
+				"""SIP 콘솔 로그 레이어 생성"""
+				group = QGroupBox("SIP CONSOLE LOG")
+				group.setFixedHeight(300)  # 높이 300px로 고정
+				layout = QVBoxLayout(group)
+				layout.setContentsMargins(15, 15, 15, 15)
+
+				# 텍스트 에디터 (읽기 전용)
+				console_text = QTextEdit()
+				console_text.setObjectName("sip_console_text")
+				console_text.setReadOnly(True)
+				console_text.setStyleSheet("""
+					QTextEdit {
+						background-color: #1E1E1E;
+						color: #00FF00;
+						font-family: 'Consolas', 'Courier New', monospace;
+						font-size: 11px;
+						border: 1px solid #444444;
+						padding: 5px;
+					}
+				""")
+
+				# 툴바 추가
+				toolbar_layout = QHBoxLayout()
+
+				# 클리어 버튼
+				clear_btn = QPushButton("Clear")
+				clear_btn.setFixedSize(60, 25)
+				clear_btn.setStyleSheet("""
+					QPushButton {
+						background-color: #444444;
+						color: white;
+						border: 1px solid #666666;
+						border-radius: 3px;
+						font-size: 9px;
+					}
+					QPushButton:hover {
+						background-color: #555555;
+					}
+					QPushButton:pressed {
+						background-color: #333333;
+					}
+				""")
+				clear_btn.clicked.connect(lambda: console_text.clear())
+
+				# 자동 스크롤 체크박스
+				auto_scroll_cb = QCheckBox("Auto Scroll")
+				auto_scroll_cb.setChecked(True)
+				auto_scroll_cb.setObjectName("auto_scroll_checkbox")
+				auto_scroll_cb.setStyleSheet("""
+					QCheckBox {
+						color: white;
+						font-size: 9px;
+					}
+					QCheckBox::indicator {
+						width: 12px;
+						height: 12px;
+					}
+					QCheckBox::indicator:unchecked {
+						background-color: #2D2A2A;
+						border: 1px solid #666666;
+					}
+					QCheckBox::indicator:checked {
+						background-color: #4A90E2;
+						border: 1px solid #4A90E2;
+					}
+				""")
+
+				toolbar_layout.addWidget(clear_btn)
+				toolbar_layout.addWidget(auto_scroll_cb)
+				toolbar_layout.addStretch()
+
+				layout.addLayout(toolbar_layout)
+				layout.addWidget(console_text)
+
+				# 콘솔 텍스트 위젯을 인스턴스 변수로 저장
+				self.sip_console_text = console_text
+				self.auto_scroll_checkbox = auto_scroll_cb
+
+				return group
+
+		def log_to_sip_console(self, message, level="INFO"):
+				"""SIP 콘솔에 로그 메시지 추가"""
+				try:
+						if not hasattr(self, 'sip_console_text') or self.sip_console_text is None:
+								return
+
+						# 타임스탬프 추가
+						timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+						# 레벨에 따른 색상 설정
+						color_map = {
+								"INFO": "#00FF00",    # 녹색
+								"DEBUG": "#00FFFF",   # 시안색
+								"WARNING": "#FFFF00", # 노란색
+								"ERROR": "#FF0000",   # 빨간색
+								"SIP": "#FF00FF"      # 마젠타색
+						}
+						color = color_map.get(level, "#00FF00")
+
+						# HTML 형식으로 메시지 포맷
+						formatted_message = f'<span style="color: {color};">[{timestamp}] [{level}] {message}</span>'
+
+						# 메인 스레드에서 실행되도록 보장
+						QMetaObject.invokeMethod(
+								self, "_append_to_console",
+								Qt.QueuedConnection,
+								Q_ARG(str, formatted_message)
+						)
+				except Exception as e:
+						print(f"SIP 콘솔 로그 오류: {e}")
+
+		@Slot(str)
+		def _append_to_console(self, message):
+				"""콘솔에 메시지 추가 (메인 스레드에서 실행)"""
+				try:
+						if not hasattr(self, 'sip_console_text') or self.sip_console_text is None:
+								return
+
+						# 메시지 추가
+						self.sip_console_text.append(message)
+
+						# 자동 스크롤 체크
+						if hasattr(self, 'auto_scroll_checkbox') and self.auto_scroll_checkbox.isChecked():
+								scrollbar = self.sip_console_text.verticalScrollBar()
+								scrollbar.setValue(scrollbar.maximum())
+
+						# 최대 라인 수 제한 (성능을 위해)
+						max_lines = 1000
+						document = self.sip_console_text.document()
+						if document.blockCount() > max_lines:
+								cursor = QTextCursor(document)
+								cursor.movePosition(QTextCursor.Start)
+								cursor.movePosition(QTextCursor.Down, QTextCursor.KeepAnchor, 100)
+								cursor.removeSelectedText()
+				except Exception as e:
+						print(f"콘솔 메시지 추가 오류: {e}")
+
+		def init_sip_console_welcome(self):
+				"""SIP 콘솔 초기화 환영 메시지"""
+				try:
+						self.log_to_sip_console("PacketWave SIP Console Log 시작", "INFO")
+						self.log_to_sip_console("개발 모드와 배포 모드에서 SIP 관련 로그를 확인할 수 있습니다", "INFO")
+						self.log_to_sip_console("패킷 모니터링 준비 완료", "INFO")
+				except Exception as e:
+						print(f"SIP 콘솔 초기화 오류: {e}")
 
 		def _apply_styles(self):
 				self.setStyleSheet("""
@@ -1344,13 +1800,21 @@ class Dashboard(QMainWindow):
 						sys.stderr.flush()
 
 		def analyze_sip_packet(self, packet):
+				print(f"=== SIP 패킷 분석 시작 ===")
+				self.log_to_sip_console("SIP 패킷 분석 시작", "DEBUG")
 				if not hasattr(packet, 'sip'):
+						print("SIP 레이어가 없는 패킷")
+						self.log_to_sip_console("SIP 레이어가 없는 패킷", "WARNING")
 						self.log_error("SIP 레이어가 없는 패킷")
 						return
 
 				try:
 						sip_layer = packet.sip
+						print(f"SIP 패킷 감지됨")
+						self.log_to_sip_console("SIP 패킷 감지됨", "INFO")
 						if not hasattr(sip_layer, 'call_id'):
+								print("Call-ID가 없는 SIP 패킷")
+								self.log_to_sip_console("Call-ID가 없는 SIP 패킷", "WARNING")
 								self.log_error("Call-ID가 없는 SIP 패킷")
 								return
 
@@ -1388,21 +1852,18 @@ class Dashboard(QMainWindow):
 														to_number = self.extract_number(sip_layer.to_user)
 
 														if not from_number or not to_number:
-																self.log_error("유효하지 않은 전화번호", additional_info={
+															self.log_error("유효하지 않은 전화번호", additional_info={
 																		"from_user": str(sip_layer.from_user),
 																		"to_user": str(sip_layer.to_user)
-																})
-																return
+															})
+															return
 
-														# 내선번호 확인 및 블록 생성
+														# 내선번호 확인
 														extension = None
 														if len(from_number) == 4 and from_number[0] in '123456789':
-																extension = from_number
+															extension = from_number
 														elif len(to_number) == 4 and to_number[0] in '123456789':
-																extension = to_number
-
-														if extension:
-																self.block_creation_signal.emit(extension)
+															extension = to_number
 
 														# 내선번호로 전화가 왔을 때 WebSocket을 통해 클라이언트에 알림
 														if is_extension(to_number):
@@ -1410,6 +1871,7 @@ class Dashboard(QMainWindow):
 																		# WebSocket 서버가 있고 MongoDB가 연결되어 있는 경우에만 실행
 																		if hasattr(self, 'websocket_server') and self.db is not None:
 																				print(f"SIP 패킷 분석: 내선번호 {to_number}로 전화 수신 (발신: {from_number})")
+																				self.log_to_sip_console(f"내선번호 {to_number}로 전화 수신 (발신: {from_number})", "SIP")
 																				# 비동기 알림 전송을 위한 helper 함수
 																				async def send_notification():
 																						print(f"알림 전송 시작: 내선번호 {to_number}에 전화 수신 알림 (발신: {from_number})")
@@ -1505,6 +1967,14 @@ class Dashboard(QMainWindow):
 														self._handle_cancel_request(call_id)
 												except Exception as cancel_error:
 														self.log_error("CANCEL 처리 중 오류", cancel_error)
+														return
+
+										# REGISTER 처리
+										elif 'REGISTER' in request_line:
+												try:
+														self._handle_register_request(sip_layer, call_id, request_line)
+												except Exception as register_error:
+														self.log_error("REGISTER 처리 중 오류", register_error)
 														return
 
 								# 응답 처리
@@ -1621,7 +2091,7 @@ class Dashboard(QMainWindow):
 										"state_machine": self.call_state_machines[call_id].state.name if call_id in self.call_state_machines else "UNKNOWN"
 								})
 								if extension:
-										self.block_update_signal.emit(extension, "대기중", "")
+										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
 		def _handle_cancel_request(self, call_id):
 				"""CANCEL 요청 처리를 위한 헬퍼 메소드"""
@@ -1669,7 +2139,38 @@ class Dashboard(QMainWindow):
 										"after_state": after_state
 								})
 								if extension:
-										self.block_update_signal.emit(extension, "대기중", "")
+										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
+
+		def _handle_register_request(self, sip_layer, call_id, request_line):
+				"""REGISTER 요청 처리를 위한 헬퍼 메소드"""
+				try:
+						print(f"=== SIP REGISTER 감지 ===")
+						print(f"Request Line: {request_line}")
+						self.log_to_sip_console(f"SIP REGISTER 감지 - {request_line}", "SIP")
+
+						# SIP REGISTER에서 내선번호 추출
+						if hasattr(sip_layer, 'from_user'):
+								from_user = str(sip_layer.from_user)
+								print(f"From User: {from_user}")
+
+								extension = self.extract_number(from_user)
+								print(f"추출된 내선번호: {extension}")
+
+								if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
+										# SIP 등록된 내선번호를 사이드바에 추가
+										self.refresh_extension_list_with_register(extension)
+										self.log_error("SIP REGISTER 처리 완료", level="info", additional_info={
+												"extension": extension,
+												"call_id": call_id,
+												"from_user": from_user
+										})
+								else:
+										print(f"유효하지 않은 내선번호: {extension}")
+						else:
+								print("from_user 필드가 없음")
+				except Exception as e:
+						print(f"REGISTER 처리 중 오류: {e}")
+						self.log_error("REGISTER 요청 처리 중 오류", e)
 
 		def _handle_sip_response(self, sip_layer, call_id):
 				"""SIP 응답 처리를 위한 헬퍼 메소드"""
@@ -1677,7 +2178,7 @@ class Dashboard(QMainWindow):
 				if status_code == '100':
 						extension = self.extract_number(sip_layer.from_user)
 						if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
-								self.block_update_signal.emit(extension, "대기중", "")
+								pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
@@ -1686,7 +2187,8 @@ class Dashboard(QMainWindow):
 										extension = self.get_extension_from_call(call_id)
 										if extension:
 												received_number = self.active_calls[call_id]['to_number']
-												self.block_update_signal.emit(extension, "벨울림", received_number)
+												# 전화연결상태 블록 대신 사이드바에만 내선번호 추가
+												self.add_extension(extension)
 								elif status_code == '200':
 										if self.active_calls[call_id]['status'] != '통화종료':
 												# 상태 머신 업데이트 - TRYING 상태에서만 IN_CALL로 전이 허용
@@ -1711,7 +2213,7 @@ class Dashboard(QMainWindow):
 												extension = self.get_extension_from_call(call_id)
 												if extension:
 														received_number = self.active_calls[call_id]['to_number']
-														self.block_update_signal.emit(extension, "통화중", received_number)
+														pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
 		def _update_call_for_refer(self, call_id, original_call, forwarded_ext, log_file):
 				"""REFER 요청에 대한 통화 상태 업데이트"""
@@ -2044,12 +2546,12 @@ class Dashboard(QMainWindow):
 												self.active_calls[call_id]['status'] = '벨울림'
 										extension = self.get_extension_from_call(call_id)
 										received_number = self.active_calls[call_id].get('to_number', "")
-										self.block_update_signal.emit(extension, self.active_calls[call_id]['status'], received_number)
+										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 				except Exception as e:
 						print(f"SIP 응답 처리 중 오류: {e}")
 
 		def create_or_update_block(self, extension):
-				self.block_creation_signal.emit(extension)
+				pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
 		def block_exists(self, extension):
 				try:
@@ -2190,7 +2692,7 @@ class Dashboard(QMainWindow):
 
 										extension = self.get_extension_from_call(call_id)
 										received_number = self.active_calls[call_id].get('to_number', "")
-										self.block_update_signal.emit(extension, new_status, received_number)
+										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 						self.update_voip_status()
 				except Exception as e:
 						print(f"통화 상태 업데이트 중 오류: {e}")
@@ -2325,7 +2827,7 @@ class Dashboard(QMainWindow):
 												extension = self.get_extension_from_call(call_id)
 												if extension:
 														duration = self.calculate_duration(call_info)
-														self.block_update_signal.emit(extension, "통화중", call_info['to_number'])
+														pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 														for i in range(self.calls_layout.count()):
 																block = self.calls_layout.itemAt(i).widget()
 																if block:
