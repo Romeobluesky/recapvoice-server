@@ -810,7 +810,7 @@ class Dashboard(QMainWindow):
 				# 메인 컨테이너 (둥근 박스)
 				extension_container = QWidget()
 				extension_container.setObjectName("extension_container")
-				extension_container.setFixedSize(200, 1000)
+				extension_container.setFixedSize(200, 700)
 				extension_container.setStyleSheet("""
 					QWidget#extension_container {
 						background-color: #48c9b0;
@@ -885,9 +885,9 @@ class Dashboard(QMainWindow):
 				scroll_area.update()
 				self.extension_list_widget.update()
 
-				# 최소 크기 설정 (혹시 크기가 0이면)
-				extension_container.setMinimumSize(200, 300)
-				scroll_area.setMinimumSize(180, 200)
+				# 최소 크기 설정 (700px 컨테이너에 맞게)
+				extension_container.setMinimumSize(200, 700)
+				scroll_area.setMinimumSize(180, 650)  # 헤더와 여백 제외한 크기
 
 				print(f"Extension box 위젯 생성 완료")
 				print(f"Container 표시 상태: {extension_container.isVisible()}")
