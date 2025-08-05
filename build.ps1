@@ -30,6 +30,7 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--add-data `"rtpstream_manager.py;.`" " + `
     "--add-data `"voip_monitor.py;.`" " + `
     "--add-data `"wav_merger.py;.`" " + `
+    "--add-data `"websocketserver.py;.`" " + `
     "--add-data `"styles\styles.qss;styles`" " + `
     "--add-data `"images;images`" " + `
     "--add-data `"sounds;sounds`" " + `
@@ -95,7 +96,7 @@ Write-Host "Copying files to dist folder..."
 if (Test-Path "settings.ini") {
     Copy-Item "settings.ini" -Destination "$distPath\settings.ini" -Force
     Write-Host "settings.ini copied successfully"
-    
+
     # settings.ini 수정
     $settingsPath = "$distPath\settings.ini"
     Write-Host "Modifying settings.ini for production..."
@@ -144,4 +145,4 @@ foreach ($dll in $requiredDlls) {
     }
 }
 
-Write-Host "Build completed!" 
+Write-Host "Build completed!"
