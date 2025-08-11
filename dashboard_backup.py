@@ -46,14 +46,20 @@ from callstate_machine import CallStateMachine
 from callstate_machine import CallState
 from websocketserver import WebSocketServer
 
+# 새로운 분리된 모듈들
+from modules.logging_utils import LoggingUtils
+from modules.sip_handler import SipHandler
+from modules.extension_manager import ExtensionManager
+from modules.packet_processor import PacketProcessor
+from modules.ui_components import UIComponents
+from modules.database_handler import DatabaseHandler
+from utils.helpers import is_extension
+
 def resource_path(relative_path):
 		"""리소스 파일의 절대 경로를 반환"""
 		if hasattr(sys, '_MEIPASS'):
 				return os.path.join(sys._MEIPASS, relative_path)
 		return os.path.join(os.path.abspath('.'), relative_path)
-
-def is_extension(number):
-		return len(str(number)) == 4 and str(number)[0] in '123456789'
 
 class Dashboard(QMainWindow):
 		# Signal: 내선번호, 상태, 수신번호 전달
@@ -76,6 +82,14 @@ class Dashboard(QMainWindow):
 						args, _ = parser.parse_known_args()
 						self.log_level = args.log_level
 
+						# 모듈 인스턴스들 초기화
+						self.logging_utils = LoggingUtils(self)
+						self.sip_handler = SipHandler(self)
+						self.extension_manager = ExtensionManager(self)
+						self.packet_processor = PacketProcessor(self)
+						self.ui_components = UIComponents(self)
+						self.database_handler = DatabaseHandler(self)
+
 						# 필수 디렉토리 확인 및 생성
 						required_dirs = ['images', 'logs']
 						for dir_name in required_dirs:
@@ -83,20 +97,20 @@ class Dashboard(QMainWindow):
 										if not os.path.exists(dir_name):
 												os.makedirs(dir_name)
 								except PermissionError:
-										self.log_error(f"디렉토리 생성 권한 없음: {dir_name}")
+										self.logging_utils.log_error(f"디렉토리 생성 권한 없음: {dir_name}")
 										raise
 								except Exception as e:
-										self.log_error(f"디렉토리 생성 실패: {dir_name}", e)
+										self.logging_utils.log_error(f"디렉토리 생성 실패: {dir_name}", e)
 										raise
 
 						# 설정 파일 확인
 						if not os.path.exists('settings.ini'):
-								self.log_error("settings.ini 파일이 없습니다")
+								self.logging_utils.log_error("settings.ini 파일이 없습니다")
 								raise FileNotFoundError("settings.ini 파일이 필요합니다")
 
 						# 로그 파일 초기화
 						try:
-								self.initialize_log_file()
+								self.logging_utils.initialize_log_file()
 						except Exception as e:
 								print(f"로그 파일 초기화 실패: {e}")
 								raise
@@ -105,56 +119,13 @@ class Dashboard(QMainWindow):
 						try:
 								self.play_intro_video()
 						except Exception as e:
-								self.log_error("인트로 비디오 재생 실패", e)
+								self.logging_utils.log_error("인트로 비디오 재생 실패", e)
 								self.initialize_main_window()
 
 				except Exception as e:
-						self.log_error("대시보드 초기화 실패", e)
+						self.logging_utils.log_error("대시보드 초기화 실패", e)
 						raise
 
-		def initialize_log_file(self):
-				"""로그 파일을 초기화합니다."""
-				try:
-						# 로그 디렉토리 확인
-						log_dir = 'logs'
-						if not os.path.exists(log_dir):
-								os.makedirs(log_dir)
-
-						# 오늘 날짜로 로그 파일 이름 생성
-						today = datetime.datetime.now().strftime("%Y%m%d")
-						log_file_path = os.path.join(log_dir, f'voip_monitor_{today}.log')
-
-						# 현재 로그 파일로 심볼릭 링크 생성
-						current_log_path = 'voip_monitor.log'
-						if os.path.exists(current_log_path):
-								if os.path.islink(current_log_path):
-										os.remove(current_log_path)
-								else:
-										# 기존 파일이 있으면 백업
-										backup_path = f"{current_log_path}.bak"
-										if os.path.exists(backup_path):
-												os.remove(backup_path)
-										os.rename(current_log_path, backup_path)
-
-						# 윈도우에서는 심볼릭 링크 대신 하드 링크 사용
-						if os.name == 'nt':
-								# 로그 파일 직접 생성
-								with open(log_file_path, 'a', encoding='utf-8') as f:
-										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
-
-								# voip_monitor.log 파일도 직접 생성
-								with open(current_log_path, 'w', encoding='utf-8') as f:
-										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
-						else:
-								# Unix 시스템에서는 심볼릭 링크 사용
-								with open(log_file_path, 'a', encoding='utf-8') as f:
-										f.write(f"\n=== 프로그램 시작: {datetime.datetime.now()} ===\n")
-								os.symlink(log_file_path, current_log_path)
-
-						self.log_error("로그 파일 초기화 완료", level="info")
-				except Exception as e:
-						print(f"로그 파일 초기화 중 오류: {e}")
-						raise
 
 		def setup_single_instance(self):
 				"""단일 인스턴스 관리 설정"""
@@ -170,7 +141,7 @@ class Dashboard(QMainWindow):
 						self.instance_server.newConnection.connect(self.handle_instance_connection)
 
 				except Exception as e:
-						self.log_error("단일 인스턴스 설정 실패", e)
+						self.logging_utils.log_error("단일 인스턴스 설정 실패", e)
 
 		def handle_instance_connection(self):
 				"""새로운 인스턴스 연결 처리"""
@@ -180,7 +151,7 @@ class Dashboard(QMainWindow):
 								if socket.read(4) == b"show":
 										self.restore_window()
 				except Exception as e:
-						self.log_error("인스턴스 연결 처리 실패", e)
+						self.logging_utils.log_error("인스턴스 연결 처리 실패", e)
 
 		def restore_window(self):
 				"""창 복원 통합 메서드"""
@@ -191,7 +162,7 @@ class Dashboard(QMainWindow):
 						self.activateWindow()
 						self.raise_()
 				except Exception as e:
-						self.log_error("창 복원 실패", e)
+						self.logging_utils.log_error("창 복원 실패", e)
 
 		def play_intro_video(self):
 				try:
@@ -233,26 +204,26 @@ class Dashboard(QMainWindow):
 								try:
 										self.video_widget.deleteLater()
 								except Exception as e:
-										self.log_error("비디오 위젯 제거 실패", e)
+										self.logging_utils.log_error("비디오 위젯 제거 실패", e)
 
 						if hasattr(self, 'media_player'):
 								try:
 										self.media_player.deleteLater()
 								except Exception as e:
-										self.log_error("미디어 플레이어 제거 실패", e)
+										self.logging_utils.log_error("미디어 플레이어 제거 실패", e)
 
 						# 메인 창 초기화 전에 숨기기
 						try:
 								self.hide()
 						except Exception as e:
-								self.log_error("창 숨기기 실패", e)
+								self.logging_utils.log_error("창 숨기기 실패", e)
 
 						# 전체 화면 해제 및 창 설정 복원
 						try:
 								self.setWindowFlag(Qt.FramelessWindowHint, False)
 								self.setWindowState(Qt.WindowMaximized)  # 미리 최대화 상태로 설정
 						except Exception as e:
-								self.log_error("창 상태 설정 실패", e)
+								self.logging_utils.log_error("창 상태 설정 실패", e)
 
 						# 기존 초기화 코드 실행
 						try:
@@ -293,21 +264,21 @@ class Dashboard(QMainWindow):
 								gc.collect()
 
 						except Exception as e:
-								self.log_error("기본 설정 초기화 실패", e)
+								self.logging_utils.log_error("기본 설정 초기화 실패", e)
 								raise
 
 						try:
 								self._init_ui()
 						except Exception as e:
-								self.log_error("UI 초기화 실패", e)
+								self.logging_utils.log_error("UI 초기화 실패", e)
 								raise
 
 						try:
 								self.selected_interface = None
 								self.load_network_interfaces()
-								QTimer.singleShot(1000, self.start_packet_capture)
+								QTimer.singleShot(1000, self.packet_processor.start_packet_capture)
 						except Exception as e:
-								self.log_error("네트워크 인터페이스 초기화 실패", e)
+								self.logging_utils.log_error("네트워크 인터페이스 초기화 실패", e)
 
 						try:
 								self.duration_timer = QTimer()
@@ -315,7 +286,7 @@ class Dashboard(QMainWindow):
 								self.duration_timer.start(1000)
 								self.wav_merger = WavMerger()
 						except Exception as e:
-								self.log_error("타이머 및 유틸리티 초기화 실패", e)
+								self.logging_utils.log_error("타이머 및 유틸리티 초기화 실패", e)
 
 						# MongoDB 연결 (타임아웃 설정 포함)
 						try:
@@ -333,7 +304,7 @@ class Dashboard(QMainWindow):
 								else:
 										mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
 
-								self.log_error(f"MongoDB 연결 시도: {mongo_uri}", level="info")
+								self.logging_utils.log_error(f"MongoDB 연결 시도: {mongo_uri}", level="info")
 
 								# 짧은 타임아웃으로 연결 시도
 								self.mongo_client = MongoClient(
@@ -349,7 +320,7 @@ class Dashboard(QMainWindow):
 
 								# 연결 테스트
 								self.mongo_client.admin.command('ping')
-								self.log_error("MongoDB 연결 성공", level="info")
+								self.logging_utils.log_error("MongoDB 연결 성공", level="info")
 
 						except Exception as e:
 								# 초기 연결 실패는 로그에 남기지 않음 (재시도에서 해결될 가능성 높음)
@@ -361,7 +332,7 @@ class Dashboard(QMainWindow):
 								self.internalnumber = None
 
 								# 5초 후 재시도
-								QTimer.singleShot(5000, self.retry_mongodb_connection)
+								QTimer.singleShot(5000, self.database_handler.retry_mongodb_connection)
 
 						config = load_config()
 						if config.get('Environment', 'mode') == 'production':
@@ -381,22 +352,22 @@ class Dashboard(QMainWindow):
 																										win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
 																										win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
 																						except Exception as callback_error:
-																								self.log_error("윈도우 콜백 처리 실패", callback_error)
+																								self.logging_utils.log_error("윈도우 콜백 처리 실패", callback_error)
 																						return True
 																				win32gui.EnumWindows(enum_windows_callback, None)
 												except Exception as hide_error:
-														self.log_error("Wireshark 윈도우 숨기기 실패", hide_error)
+														self.logging_utils.log_error("Wireshark 윈도우 숨기기 실패", hide_error)
 
 										self.hide_console_timer = QTimer()
 										self.hide_console_timer.timeout.connect(hide_wireshark_windows)
 										self.hide_console_timer.start(100)
 								except Exception as e:
-										self.log_error("Wireshark 설정 실패", e)
+										self.logging_utils.log_error("Wireshark 설정 실패", e)
 
 						try:
 								self.setup_tray_icon()
 						except Exception as e:
-								self.log_error("트레이 아이콘 설정 실패", e)
+								self.logging_utils.log_error("트레이 아이콘 설정 실패", e)
 
 						try:
 								subprocess.Popen(['start.bat'], shell=True)
@@ -414,7 +385,7 @@ class Dashboard(QMainWindow):
 								""")
 								print("클라이언트 서버가 자동으로 시작되었습니다.")
 						except Exception as e:
-								self.log_error("클라이언트 서버 시작 실패", e)
+								self.logging_utils.log_error("클라이언트 서버 시작 실패", e)
 
 						try:
 								atexit.register(self.cleanup)
@@ -431,13 +402,13 @@ class Dashboard(QMainWindow):
 								# 의존성 및 시스템 제한 체크
 								self.check_system_limits()
 						except Exception as e:
-								self.log_error("시스템 모니터링 설정 실패", e)
+								self.logging_utils.log_error("시스템 모니터링 설정 실패", e)
 
 						# UI가 완전히 준비된 후 창 표시
 						try:
 								QTimer.singleShot(100, self.show_maximized_window)
 						except Exception as e:
-								self.log_error("창 표시 실패", e)
+								self.logging_utils.log_error("창 표시 실패", e)
 
 						# WebSocket 서버 시작
 						try:
@@ -459,19 +430,19 @@ class Dashboard(QMainWindow):
 														websocket_port += 1
 														print(f"포트 {websocket_port-1}가 이미 사용 중입니다. 포트 {websocket_port}로 재시도합니다.")
 												else:
-														self.log_error("WebSocket 서버 시작 실패", e)
+														self.logging_utils.log_error("WebSocket 서버 시작 실패", e)
 														break
 										except Exception as e:
-												self.log_error("WebSocket 서버 시작 실패", e)
+												self.logging_utils.log_error("WebSocket 서버 시작 실패", e)
 												break
 
 								if retry_count >= max_retry:
-										self.log_error(f"WebSocket 서버 시작 실패: 최대 재시도 횟수 ({max_retry})를 초과했습니다.")
+										self.logging_utils.log_error(f"WebSocket 서버 시작 실패: 최대 재시도 횟수 ({max_retry})를 초과했습니다.")
 						except Exception as e:
-								self.log_error("WebSocket 서버 시작 중 예외 발생", e)
+								self.logging_utils.log_error("WebSocket 서버 시작 중 예외 발생", e)
 
 				except Exception as e:
-						self.log_error("메인 윈도우 초기화 중 심각한 오류", e)
+						self.logging_utils.log_error("메인 윈도우 초기화 중 심각한 오류", e)
 						raise
 
 		def show_maximized_window(self):
@@ -498,7 +469,7 @@ class Dashboard(QMainWindow):
 								mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
 
 						# 재시도 로그는 간단하게만
-						# self.log_error("MongoDB 재연결 시도", level="info")
+						# self.logging_utils.log_error("MongoDB 재연결 시도", level="info")
 
 						# 짧은 타임아웃으로 연결 시도
 						self.mongo_client = MongoClient(
@@ -514,11 +485,11 @@ class Dashboard(QMainWindow):
 
 						# 연결 테스트
 						self.mongo_client.admin.command('ping')
-						self.log_error("MongoDB 연결 성공", level="info")
+						self.logging_utils.log_error("MongoDB 연결 성공", level="info")
 
 				except Exception as e:
 						# 재시도도 실패한 경우에만 로그 기록
-						self.log_error("MongoDB 연결 최종 실패", e)
+						self.logging_utils.log_error("MongoDB 연결 최종 실패", e)
 						# 연결이 계속 실패하면 MongoDB 없이 동작
 						self.mongo_client = None
 						self.db = None
@@ -552,22 +523,22 @@ class Dashboard(QMainWindow):
 				layout = QHBoxLayout(main_widget)
 				layout.setContentsMargins(0, 0, 0, 0)
 				layout.setSpacing(0)
-				self.sidebar = self._create_sidebar()
+				self.sidebar = self.ui_components.create_sidebar()
 				layout.addWidget(self.sidebar)
 				content = QWidget()
 				content_layout = QVBoxLayout(content)
 				content_layout.setContentsMargins(20, 20, 20, 20)
 				content_layout.setSpacing(20)
 				layout.addWidget(content)
-				header = self._create_header()
+				header = self.ui_components.create_header()
 				content_layout.addWidget(header)
 				status_section = self._create_status_section()
 				content_layout.addLayout(status_section)
-				log_list = self._create_log_list()
+				log_list = self.ui_components.create_log_list()
 				content_layout.addWidget(log_list, 60)  # 비율 조정
 
 				# SIP 콘솔 로그 레이어 추가
-				sip_console = self._create_sip_console_log()
+				sip_console = self.ui_components.create_sip_console_log()
 				content_layout.addWidget(sip_console, 40)  # 비율 조정
 
 				content_layout.setStretch(2, 60)  # LOG LIST 비율
@@ -585,7 +556,7 @@ class Dashboard(QMainWindow):
 				QTimer.singleShot(100, self.update_extension_display)
 
 				# SIP 콘솔 초기화 메시지
-				QTimer.singleShot(500, self.init_sip_console_welcome)
+				QTimer.singleShot(500, self.logging_utils.init_sip_console_welcome)
 
 		def load_network_interfaces(self):
 				try:
@@ -600,11 +571,11 @@ class Dashboard(QMainWindow):
 				"""패킷 캡처 시작"""
 				try:
 						if not self.selected_interface:
-								self.log_error("선택된 네트워크 인터페이스가 없습니다")
+								self.logging_utils.log_error("선택된 네트워크 인터페이스가 없습니다")
 								return
 
 						if hasattr(self, 'capture_thread') and self.capture_thread and self.capture_thread.is_alive():
-								self.log_error("패킷 캡처가 이미 실행 중입니다")
+								self.logging_utils.log_error("패킷 캡처가 이미 실행 중입니다")
 								return
 
 						# 시스템 리소스 체크
@@ -618,21 +589,21 @@ class Dashboard(QMainWindow):
 												"cpu": f"{cpu_percent}%",
 												"memory": f"{memory.percent}%"
 										}
-										self.log_error("시스템 리소스 부족", additional_info=resource_info, level="warning", console_output=False)
+										self.logging_utils.log_error("시스템 리소스 부족", additional_info=resource_info, level="warning", console_output=False)
 										# 리소스가 부족해도 계속 진행 - 종료하지 않음
 						except Exception as e:
-								self.log_error("시스템 리소스 체크 실패", e, console_output=False)
+								self.logging_utils.log_error("시스템 리소스 체크 실패", e, console_output=False)
 								# 실패해도 계속 진행
 
 						# Wireshark 경로 확인
 						config = load_config()
 						if not config:
-								self.log_error("설정 파일을 로드할 수 없습니다")
+								self.logging_utils.log_error("설정 파일을 로드할 수 없습니다")
 								return
 
 						wireshark_path = get_wireshark_path()
 						if not os.path.exists(wireshark_path):
-								self.log_error("Wireshark가 설치되어 있지 않습니다")
+								self.logging_utils.log_error("Wireshark가 설치되어 있지 않습니다")
 								return
 
 						# 캡처 스레드 시작
@@ -642,15 +613,15 @@ class Dashboard(QMainWindow):
 								daemon=True
 						)
 						self.capture_thread.start()
-						self.log_error("패킷 캡처 시작됨", additional_info={"interface": self.selected_interface})
+						self.logging_utils.log_error("패킷 캡처 시작됨", additional_info={"interface": self.selected_interface})
 
 				except Exception as e:
-						self.log_error("패킷 캡처 시작 실패", e)
+						self.logging_utils.log_error("패킷 캡처 시작 실패", e)
 
 		def capture_packets(self, interface):
 				"""패킷 캡처 실행"""
 				if not interface:
-						self.log_error("유효하지 않은 인터페이스")
+						self.logging_utils.log_error("유효하지 않은 인터페이스")
 						return
 
 				capture = None
@@ -674,21 +645,21 @@ class Dashboard(QMainWindow):
 										process = psutil.Process()
 										memory_percent = process.memory_percent()
 										if memory_percent > 80:
-												self.log_error("높은 메모리 사용량", additional_info={"memory_percent": memory_percent})
+												self.logging_utils.log_error("높은 메모리 사용량", additional_info={"memory_percent": memory_percent})
 
 										if hasattr(packet, 'sip'):
-												self.analyze_sip_packet(packet)
-										elif hasattr(packet, 'udp') and self.is_rtp_packet(packet):
-												self.handle_rtp_packet(packet)
+												self.sip_handler.analyze_sip_packet(packet)
+										elif hasattr(packet, 'udp') and self.packet_processor.is_rtp_packet(packet):
+												self.packet_processor.handle_rtp_packet(packet)
 
 								except Exception as packet_error:
-										self.log_error("패킷 처리 중 오류", packet_error)
+										self.logging_utils.log_error("패킷 처리 중 오류", packet_error)
 										continue
 
 				except KeyboardInterrupt:
-						self.log_error("사용자에 의한 캡처 중단")
+						self.logging_utils.log_error("사용자에 의한 캡처 중단")
 				except Exception as capture_error:
-						self.log_error("캡처 프로세스 오류", capture_error)
+						self.logging_utils.log_error("캡처 프로세스 오류", capture_error)
 
 				finally:
 						try:
@@ -698,17 +669,17 @@ class Dashboard(QMainWindow):
 										else:
 												capture.close()
 								else:
-										self.log_error("캡처 프로세스가 초기화되지 않았습니다")
+										self.logging_utils.log_error("캡처 프로세스가 초기화되지 않았습니다")
 						except Exception as close_error:
-								self.log_error("캡처 종료 실패", close_error)
+								self.logging_utils.log_error("캡처 종료 실패", close_error)
 
 						try:
 								if loop and not loop.is_closed():
 										loop.close()
 								else:
-										self.log_error("이벤트 루프가 초기화되지 않았습니다")
+										self.logging_utils.log_error("이벤트 루프가 초기화되지 않았습니다")
 						except Exception as loop_error:
-								self.log_error("이벤트 루프 종료 실패", loop_error)
+								self.logging_utils.log_error("이벤트 루프 종료 실패", loop_error)
 
 						# self.cleanup_existing_dumpcap()  # 캡처 종료 후 프로세스 정리
 
@@ -771,7 +742,7 @@ class Dashboard(QMainWindow):
 
 				# SIP 내선번호 표시 박스 추가
 				print("=== Extension box를 사이드바에 추가 중 ===")
-				extension_box = self._create_extension_box()
+				extension_box = self.ui_components.create_extension_box()
 				layout.addWidget(extension_box)
 				print(f"Extension box가 사이드바에 추가됨: {extension_box}")
 				print(f"사이드바 레이아웃 내 위젯 개수: {layout.count()}")
@@ -813,7 +784,7 @@ class Dashboard(QMainWindow):
 				extension_container.setFixedSize(200, 700)
 				extension_container.setStyleSheet("""
 					QWidget#extension_container {
-						background-color: #000000;
+						background-color: #48c9b0;
 						border-radius: 5px;
 						margin: 10px;
 					}
@@ -848,7 +819,7 @@ class Dashboard(QMainWindow):
 				scroll_area.setStyleSheet("""
 					QScrollArea {
 						border: none;
-						background-color: #2c3e50;
+						background-color: transparent;
 					}
 					QScrollBar:vertical {
 						background-color: rgba(255, 255, 255, 0.1);
@@ -867,12 +838,6 @@ class Dashboard(QMainWindow):
 
 				# 내선번호 리스트 위젯
 				self.extension_list_widget = QWidget()
-				self.extension_list_widget.setStyleSheet("""
-					QWidget {
-						background-color: #364F86;
-						border: none;
-					}
-				""")
 				self.extension_list_layout = QVBoxLayout(self.extension_list_widget)
 				self.extension_list_layout.setContentsMargins(5, 5, 5, 5)
 				self.extension_list_layout.setSpacing(3)
@@ -970,13 +935,13 @@ class Dashboard(QMainWindow):
 				"""새 내선번호 추가"""
 				if extension and extension not in self.sip_extensions:
 					self.sip_extensions.add(extension)
-					self.update_extension_display()
+					self.extension_manager.update_extension_display()
 
 		def refresh_extension_list_with_register(self, extension):
 				"""SIP REGISTER로 감지된 내선번호로 목록을 갱신 (Signal을 통해 메인 스레드에서 처리)"""
 				if extension:
 					print(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청")
-					self.log_to_sip_console(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청", "SIP")
+					self.logging_utils.log_to_sip_console(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청", "SIP")
 					# 메인 스레드에서 처리하도록 Signal 발신
 					self.extension_update_signal.emit(extension)
 
@@ -985,7 +950,7 @@ class Dashboard(QMainWindow):
 				print(f"메인 스레드에서 내선번호 처리: {extension}")
 				# 실제 등록된 내선번호 추가
 				self.sip_extensions.add(extension)
-				self.update_extension_display()
+				self.extension_manager.update_extension_display()
 				print(f"내선번호 {extension} 등록 완료")
 
 		def update_extension_display(self):
@@ -1029,12 +994,12 @@ class Dashboard(QMainWindow):
 						ext_layout.setContentsMargins(0, 0, 0, 0)
 						ext_layout.setSpacing(5)
 
-						# 내선번호 래이블과 LED를 포함한 컨테이너
+						# 내선번호 래이블과 LED를 포함한 컸테이너
 						extension_container = QWidget()
 						extension_container.setStyleSheet("""
 							QWidget {
-								background-color: #2c3e50;
-								border: 1px solid #34495e;
+								background-color: rgba(255, 255, 255, 0.2);
+								border: 1px solid rgba(255, 255, 255, 0.3);
 								border-radius: 5px;
 								margin: 2px;
 							}
@@ -1484,72 +1449,6 @@ class Dashboard(QMainWindow):
 
 				return group
 
-		def log_to_sip_console(self, message, level="INFO"):
-				"""SIP 콘솔에 로그 메시지 추가"""
-				try:
-						if not hasattr(self, 'sip_console_text') or self.sip_console_text is None:
-								return
-
-						# 타임스탬프 추가
-						timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-
-						# 레벨에 따른 색상 설정
-						color_map = {
-								"INFO": "#00FF00",    # 녹색
-								"DEBUG": "#00FFFF",   # 시안색
-								"WARNING": "#FFFF00", # 노란색
-								"ERROR": "#FF0000",   # 빨간색
-								"SIP": "#FF00FF"      # 마젠타색
-						}
-						color = color_map.get(level, "#00FF00")
-
-						# HTML 형식으로 메시지 포맷
-						formatted_message = f'<span style="color: {color};">[{timestamp}] [{level}] {message}</span>'
-
-						# 메인 스레드에서 실행되도록 보장
-						QMetaObject.invokeMethod(
-								self, "_append_to_console",
-								Qt.QueuedConnection,
-								Q_ARG(str, formatted_message)
-						)
-				except Exception as e:
-						print(f"SIP 콘솔 로그 오류: {e}")
-
-		@Slot(str)
-		def _append_to_console(self, message):
-				"""콘솔에 메시지 추가 (메인 스레드에서 실행)"""
-				try:
-						if not hasattr(self, 'sip_console_text') or self.sip_console_text is None:
-								return
-
-						# 메시지 추가
-						self.sip_console_text.append(message)
-
-						# 자동 스크롤 체크
-						if hasattr(self, 'auto_scroll_checkbox') and self.auto_scroll_checkbox.isChecked():
-								scrollbar = self.sip_console_text.verticalScrollBar()
-								scrollbar.setValue(scrollbar.maximum())
-
-						# 최대 라인 수 제한 (성능을 위해)
-						max_lines = 1000
-						document = self.sip_console_text.document()
-						if document.blockCount() > max_lines:
-								cursor = QTextCursor(document)
-								cursor.movePosition(QTextCursor.Start)
-								cursor.movePosition(QTextCursor.Down, QTextCursor.KeepAnchor, 100)
-								cursor.removeSelectedText()
-				except Exception as e:
-						print(f"콘솔 메시지 추가 오류: {e}")
-
-		def init_sip_console_welcome(self):
-				"""SIP 콘솔 초기화 환영 메시지"""
-				try:
-						self.log_to_sip_console("PacketWave SIP Console Log 시작", "INFO")
-						self.log_to_sip_console("개발 모드와 배포 모드에서 SIP 관련 로그를 확인할 수 있습니다", "INFO")
-						self.log_to_sip_console("패킷 모니터링 준비 완료", "INFO")
-				except Exception as e:
-						print(f"SIP 콘솔 초기화 오류: {e}")
-
 		def _apply_styles(self):
 				self.setStyleSheet("""
 						QMainWindow {
@@ -1752,76 +1651,24 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						print(f"대기중 블록 생성 중 오류: {e}")
 
-		def log_error(self, message, error=None, additional_info=None, level="error", console_output=True):
-				"""로그 메시지를 파일에 기록하고 콘솔에 출력합니다."""
-				try:
-						# 로그 레벨 확인
-						log_levels = {
-								"debug": 0,
-								"info": 1,
-								"warning": 2,
-								"error": 3
-						}
-
-						current_level = log_levels.get(level.lower(), 0)
-						min_level = log_levels.get(getattr(self, "log_level", "info").lower(), 1)
-
-						# 설정된 최소 레벨보다 낮은 로그는 무시
-						if current_level < min_level:
-								return
-
-						timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-						# 콘솔 출력 (console_output이 True인 경우에만)
-						if console_output:
-								level_prefix = {
-										"debug": "[디버그]",
-										"info": "[정보]",
-										"warning": "[경고]",
-										"error": "[오류]"
-								}.get(level.lower(), "[정보]")
-
-								print(f"\n[{timestamp}] {level_prefix} {message}")
-
-								if additional_info:
-										print(f"추가 정보: {additional_info}")
-								if error:
-										print(f"에러 메시지: {str(error)}")
-
-						# 파일 로깅
-						with open('voip_monitor.log', 'a', encoding='utf-8', buffering=1) as log_file:  # buffering=1: 라인 버퍼링
-								log_file.write(f"\n[{timestamp}] {message}\n")
-								if additional_info:
-										log_file.write(f"추가 정보: {additional_info}\n")
-								if error:
-										log_file.write(f"에러 메시지: {str(error)}\n")
-										log_file.write("스택 트레이스:\n")
-										log_file.write(traceback.format_exc())
-								log_file.write("\n")
-								log_file.flush()  # 강제로 디스크에 쓰기
-								os.fsync(log_file.fileno())  # 운영체제 버퍼도 비우기
-				except Exception as e:
-						print(f"로깅 중 오류 발생: {e}")
-						sys.stderr.write(f"Critical logging error: {e}\n")
-						sys.stderr.flush()
 
 		def analyze_sip_packet(self, packet):
 				print(f"=== SIP 패킷 분석 시작 ===")
-				self.log_to_sip_console("SIP 패킷 분석 시작", "DEBUG")
+				self.logging_utils.log_to_sip_console("SIP 패킷 분석 시작", "DEBUG")
 				if not hasattr(packet, 'sip'):
 						print("SIP 레이어가 없는 패킷")
-						self.log_to_sip_console("SIP 레이어가 없는 패킷", "WARNING")
-						self.log_error("SIP 레이어가 없는 패킷")
+						self.logging_utils.log_to_sip_console("SIP 레이어가 없는 패킷", "WARNING")
+						self.logging_utils.log_error("SIP 레이어가 없는 패킷")
 						return
 
 				try:
 						sip_layer = packet.sip
 						print(f"SIP 패킷 감지됨")
-						self.log_to_sip_console("SIP 패킷 감지됨", "INFO")
+						self.logging_utils.log_to_sip_console("SIP 패킷 감지됨", "INFO")
 						if not hasattr(sip_layer, 'call_id'):
 								print("Call-ID가 없는 SIP 패킷")
-								self.log_to_sip_console("Call-ID가 없는 SIP 패킷", "WARNING")
-								self.log_error("Call-ID가 없는 SIP 패킷")
+								self.logging_utils.log_to_sip_console("Call-ID가 없는 SIP 패킷", "WARNING")
+								self.logging_utils.log_error("Call-ID가 없는 SIP 패킷")
 								return
 
 						call_id = sip_layer.call_id
@@ -1837,7 +1684,7 @@ class Dashboard(QMainWindow):
 								else:
 										internal_number = sip_layer.from_user
 						except Exception as e:
-								self.log_error("내선번호 추출 실패", e)
+								self.logging_utils.log_error("내선번호 추출 실패", e)
 								internal_number = sip_layer.from_user
 
 						try:
@@ -1848,17 +1695,17 @@ class Dashboard(QMainWindow):
 										if 'INVITE' in request_line:
 												try:
 														if not hasattr(sip_layer, 'from_user') or not hasattr(sip_layer, 'to_user'):
-																self.log_error("필수 SIP 헤더 누락", additional_info={
+																self.logging_utils.log_error("필수 SIP 헤더 누락", additional_info={
 																		"call_id": call_id,
 																		"request_line": request_line
 																})
 																return
 
-														from_number = self.extract_number(sip_layer.from_user)
-														to_number = self.extract_number(sip_layer.to_user)
+														from_number = self.sip_handler.extract_number(sip_layer.from_user)
+														to_number = self.sip_handler.extract_number(sip_layer.to_user)
 
 														if not from_number or not to_number:
-															self.log_error("유효하지 않은 전화번호", additional_info={
+															self.logging_utils.log_error("유효하지 않은 전화번호", additional_info={
 																		"from_user": str(sip_layer.from_user),
 																		"to_user": str(sip_layer.to_user)
 															})
@@ -1877,7 +1724,7 @@ class Dashboard(QMainWindow):
 																		# WebSocket 서버가 있고 MongoDB가 연결되어 있는 경우에만 실행
 																		if hasattr(self, 'websocket_server') and self.db is not None:
 																				print(f"SIP 패킷 분석: 내선번호 {to_number}로 전화 수신 (발신: {from_number})")
-																				self.log_to_sip_console(f"내선번호 {to_number}로 전화 수신 (발신: {from_number})", "SIP")
+																				self.logging_utils.log_to_sip_console(f"내선번호 {to_number}로 전화 수신 (발신: {from_number})", "SIP")
 																				# 비동기 알림 전송을 위한 helper 함수
 																				async def send_notification():
 																						print(f"알림 전송 시작: 내선번호 {to_number}에 전화 수신 알림 (발신: {from_number})")
@@ -1891,14 +1738,14 @@ class Dashboard(QMainWindow):
 																				)
 																				notification_thread.start()
 																				print(f"알림 전송 스레드 시작: {to_number}")
-																				self.log_error("클라이언트 알림 전송 시작", additional_info={
+																				self.logging_utils.log_error("클라이언트 알림 전송 시작", additional_info={
 																						"to": to_number,
 																						"from": from_number,
 																						"call_id": call_id
 																				})
 																except Exception as notify_error:
 																		print(f"클라이언트 알림 전송 실패: {str(notify_error)}")
-																		self.log_error("클라이언트 알림 전송 실패", notify_error)
+																		self.logging_utils.log_error("클라이언트 알림 전송 실패", notify_error)
 
 														# 통화 정보 저장 및 상태 전이
 														with self.active_calls_lock:
@@ -1919,13 +1766,13 @@ class Dashboard(QMainWindow):
 																		# IDLE 상태에서만 TRYING으로 전이 허용
 																		if current_state == CallState.IDLE:
 																				self.call_state_machines[call_id].update_state(CallState.TRYING)
-																				self.log_error("상태 전이 성공", level="info", additional_info={
+																				self.logging_utils.log_error("상태 전이 성공", level="info", additional_info={
 																						"call_id": call_id,
 																						"from_state": "IDLE",
 																						"to_state": "TRYING"
 																				})
 																		else:
-																				self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
+																				self.logging_utils.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 																						"call_id": call_id,
 																						"current_state": current_state.name,
 																						"attempted_state": "TRYING"
@@ -1942,13 +1789,13 @@ class Dashboard(QMainWindow):
 																		}
 
 																except Exception as state_error:
-																		self.log_error("통화 상태 업데이트 실패", state_error)
+																		self.logging_utils.log_error("통화 상태 업데이트 실패", state_error)
 																		return
 
 														self.update_call_status(call_id, '시도중')
 
 												except Exception as invite_error:
-														self.log_error("INVITE 처리 중 오류", invite_error)
+														self.logging_utils.log_error("INVITE 처리 중 오류", invite_error)
 														return
 
 										# REFER 처리
@@ -1956,7 +1803,7 @@ class Dashboard(QMainWindow):
 												try:
 														self._handle_refer_request(sip_layer, call_id, request_line)
 												except Exception as refer_error:
-														self.log_error("REFER 처리 중 오류", refer_error)
+														self.logging_utils.log_error("REFER 처리 중 오류", refer_error)
 														return
 
 										# BYE 처리
@@ -1964,7 +1811,7 @@ class Dashboard(QMainWindow):
 												try:
 														self._handle_bye_request(call_id)
 												except Exception as bye_error:
-														self.log_error("BYE 처리 중 오류", bye_error)
+														self.logging_utils.log_error("BYE 처리 중 오류", bye_error)
 														return
 
 										# CANCEL 처리
@@ -1972,7 +1819,7 @@ class Dashboard(QMainWindow):
 												try:
 														self._handle_cancel_request(call_id)
 												except Exception as cancel_error:
-														self.log_error("CANCEL 처리 중 오류", cancel_error)
+														self.logging_utils.log_error("CANCEL 처리 중 오류", cancel_error)
 														return
 
 										# REGISTER 처리
@@ -1980,7 +1827,7 @@ class Dashboard(QMainWindow):
 												try:
 														self._handle_register_request(sip_layer, call_id, request_line)
 												except Exception as register_error:
-														self.log_error("REGISTER 처리 중 오류", register_error)
+														self.logging_utils.log_error("REGISTER 처리 중 오류", register_error)
 														return
 
 								# 응답 처리
@@ -1988,16 +1835,16 @@ class Dashboard(QMainWindow):
 										try:
 												self._handle_sip_response(sip_layer, call_id)
 										except Exception as response_error:
-												self.log_error("SIP 응답 처리 중 오류", response_error)
+												self.logging_utils.log_error("SIP 응답 처리 중 오류", response_error)
 												return
 
 						except Exception as method_error:
-								self.log_error("SIP 메소드 처리 중 오류", method_error)
+								self.logging_utils.log_error("SIP 메소드 처리 중 오류", method_error)
 								return
 
 				except Exception as e:
-						self.log_error("SIP 패킷 분석 중 심각한 오류", e)
-						self.log_error("상세 오류 정보", level="info", additional_info={"traceback": traceback.format_exc()})
+						self.logging_utils.log_error("SIP 패킷 분석 중 심각한 오류", e)
+						self.logging_utils.log_error("상세 오류 정보", level="info", additional_info={"traceback": traceback.format_exc()})
 
 		def _handle_refer_request(self, sip_layer, call_id, request_line):
 				"""REFER 요청 처리를 위한 헬퍼 메소드"""
@@ -2024,7 +1871,7 @@ class Dashboard(QMainWindow):
 										return
 
 								refer_to = str(sip_layer.refer_to)
-								forwarded_ext = self.extract_number(refer_to.split('@')[0])
+								forwarded_ext = self.sip_handler.extract_number(refer_to.split('@')[0])
 
 								if not forwarded_ext:
 										log_file.write("[오류] 유효하지 않은 Refer-To 번호\n")
@@ -2045,13 +1892,13 @@ class Dashboard(QMainWindow):
 										current_state = self.call_state_machines[call_id].state
 										if current_state == CallState.IN_CALL:
 												self.call_state_machines[call_id].update_state(CallState.TERMINATED)
-												self.log_error("상태 전이 성공", level="info", additional_info={
+												self.logging_utils.log_error("상태 전이 성공", level="info", additional_info={
 														"call_id": call_id,
 														"from_state": "IN_CALL",
 														"to_state": "TERMINATED"
 												})
 										else:
-												self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
+												self.logging_utils.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 														"call_id": call_id,
 														"current_state": current_state.name,
 														"attempted_state": "TERMINATED"
@@ -2077,7 +1924,7 @@ class Dashboard(QMainWindow):
 														)
 														notification_thread.start()
 														print(f"BYE 알림 전송 스레드 시작: {to_number}")
-														self.log_error("BYE 클라이언트 알림 전송 시작", additional_info={
+														self.logging_utils.log_error("BYE 클라이언트 알림 전송 시작", additional_info={
 																"to": to_number,
 																"from": from_number,
 																"call_id": call_id,
@@ -2085,12 +1932,12 @@ class Dashboard(QMainWindow):
 														})
 										except Exception as notify_error:
 												print(f"BYE 클라이언트 알림 전송 실패: {str(notify_error)}")
-												self.log_error("BYE 클라이언트 알림 전송 실패", notify_error)
+												self.logging_utils.log_error("BYE 클라이언트 알림 전송 실패", notify_error)
 
 								self.update_call_status(call_id, '통화종료', '정상종료')
-								extension = self.get_extension_from_call(call_id)
+								extension = self.extension_manager.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])
-								self.log_error("BYE 처리", level="info", additional_info={
+								self.logging_utils.log_error("BYE 처리", level="info", additional_info={
 										"extension": extension,
 										"before_state": before_state,
 										"after_state": after_state,
@@ -2126,7 +1973,7 @@ class Dashboard(QMainWindow):
 														)
 														notification_thread.start()
 														print(f"CANCEL 알림 전송 스레드 시작: {to_number}")
-														self.log_error("CANCEL 클라이언트 알림 전송 시작", additional_info={
+														self.logging_utils.log_error("CANCEL 클라이언트 알림 전송 시작", additional_info={
 																"to": to_number,
 																"from": from_number,
 																"call_id": call_id,
@@ -2134,12 +1981,12 @@ class Dashboard(QMainWindow):
 														})
 										except Exception as notify_error:
 												print(f"CANCEL 클라이언트 알림 전송 실패: {str(notify_error)}")
-												self.log_error("CANCEL 클라이언트 알림 전송 실패", notify_error)
+												self.logging_utils.log_error("CANCEL 클라이언트 알림 전송 실패", notify_error)
 
 								self.update_call_status(call_id, '통화종료', '발신취소')
-								extension = self.get_extension_from_call(call_id)
+								extension = self.extension_manager.get_extension_from_call(call_id)
 								after_state = dict(self.active_calls[call_id])
-								self.log_error("CANCEL 처리", level="info", additional_info={
+								self.logging_utils.log_error("CANCEL 처리", level="info", additional_info={
 										"extension": extension,
 										"before_state": before_state,
 										"after_state": after_state
@@ -2152,20 +1999,20 @@ class Dashboard(QMainWindow):
 				try:
 						print(f"=== SIP REGISTER 감지 ===")
 						print(f"Request Line: {request_line}")
-						self.log_to_sip_console(f"SIP REGISTER 감지 - {request_line}", "SIP")
+						self.logging_utils.log_to_sip_console(f"SIP REGISTER 감지 - {request_line}", "SIP")
 
 						# SIP REGISTER에서 내선번호 추출
 						if hasattr(sip_layer, 'from_user'):
 								from_user = str(sip_layer.from_user)
 								print(f"From User: {from_user}")
 
-								extension = self.extract_number(from_user)
+								extension = self.sip_handler.extract_number(from_user)
 								print(f"추출된 내선번호: {extension}")
 
 								if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
 										# SIP 등록된 내선번호를 사이드바에 추가
-										self.refresh_extension_list_with_register(extension)
-										self.log_error("SIP REGISTER 처리 완료", level="info", additional_info={
+										self.extension_manager.refresh_extension_list_with_register(extension)
+										self.logging_utils.log_error("SIP REGISTER 처리 완료", level="info", additional_info={
 												"extension": extension,
 												"call_id": call_id,
 												"from_user": from_user
@@ -2176,13 +2023,13 @@ class Dashboard(QMainWindow):
 								print("from_user 필드가 없음")
 				except Exception as e:
 						print(f"REGISTER 처리 중 오류: {e}")
-						self.log_error("REGISTER 요청 처리 중 오류", e)
+						self.logging_utils.log_error("REGISTER 요청 처리 중 오류", e)
 
 		def _handle_sip_response(self, sip_layer, call_id):
 				"""SIP 응답 처리를 위한 헬퍼 메소드"""
 				status_code = sip_layer.status_code
 				if status_code == '100':
-						extension = self.extract_number(sip_layer.from_user)
+						extension = self.sip_handler.extract_number(sip_layer.from_user)
 						if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
 								pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
@@ -2190,11 +2037,11 @@ class Dashboard(QMainWindow):
 						if call_id in self.active_calls:
 								if status_code == '183':
 										self.update_call_status(call_id, '벨울림')
-										extension = self.get_extension_from_call(call_id)
+										extension = self.extension_manager.get_extension_from_call(call_id)
 										if extension:
 												received_number = self.active_calls[call_id]['to_number']
 												# 전화연결상태 블록 대신 사이드바에만 내선번호 추가
-												self.add_extension(extension)
+												self.extension_manager.add_extension(extension)
 								elif status_code == '200':
 										if self.active_calls[call_id]['status'] != '통화종료':
 												# 상태 머신 업데이트 - TRYING 상태에서만 IN_CALL로 전이 허용
@@ -2202,13 +2049,13 @@ class Dashboard(QMainWindow):
 														current_state = self.call_state_machines[call_id].state
 														if current_state == CallState.TRYING:
 																self.call_state_machines[call_id].update_state(CallState.IN_CALL)
-																self.log_error("상태 전이 성공", level="info", additional_info={
+																self.logging_utils.log_error("상태 전이 성공", level="info", additional_info={
 																		"call_id": call_id,
 																		"from_state": "TRYING",
 																		"to_state": "IN_CALL"
 																})
 														else:
-																self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
+																self.logging_utils.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 																		"call_id": call_id,
 																		"current_state": current_state.name,
 																		"attempted_state": "IN_CALL"
@@ -2216,7 +2063,7 @@ class Dashboard(QMainWindow):
 																return
 
 												self.update_call_status(call_id, '통화중')
-												extension = self.get_extension_from_call(call_id)
+												extension = self.extension_manager.get_extension_from_call(call_id)
 												if extension:
 														received_number = self.active_calls[call_id]['to_number']
 														pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
@@ -2268,8 +2115,8 @@ class Dashboard(QMainWindow):
 		def handle_new_call(self, sip_layer, call_id):
 				try:
 						print(f"새로운 통화 처리 시작 - Call-ID: {call_id}")
-						from_number = self.extract_number(sip_layer.from_user)
-						to_number = self.extract_number(sip_layer.to_user)
+						from_number = self.sip_handler.extract_number(sip_layer.from_user)
+						to_number = self.sip_handler.extract_number(sip_layer.to_user)
 						print(f"발신번호: {from_number}")
 						print(f"수신번호: {to_number}")
 						with self.active_calls_lock:
@@ -2296,7 +2143,7 @@ class Dashboard(QMainWindow):
 										'result': '정상종료'
 								})
 				self.update_voip_status()
-				extension = self.get_extension_from_call(call_id)
+				extension = self.extension_manager.get_extension_from_call(call_id)
 				if extension:
 						QMetaObject.invokeMethod(self, "update_block_to_waiting", Qt.QueuedConnection, Q_ARG(str, extension))
 						print(f"통화 종료 처리: {extension}")
@@ -2400,7 +2247,7 @@ class Dashboard(QMainWindow):
 						with self.active_calls_lock:
 								for call_id, call_info in self.active_calls.items():
 										if call_info.get('status_changed', False):
-												extension = self.get_extension_from_call(call_id)
+												extension = self.extension_manager.get_extension_from_call(call_id)
 												if extension:
 														self.create_waiting_block(extension)
 												call_info['status_changed'] = False
@@ -2535,7 +2382,7 @@ class Dashboard(QMainWindow):
 								if '@' in call_id:
 										ip = call_id.split('@')[1]
 								if ip:
-										extension = self.extract_number(sip_layer.from_user)
+										extension = self.sip_handler.extract_number(sip_layer.from_user)
 										if ip not in self.sip_registrations:
 												self.sip_registrations[ip] = {'status': [], 'extension': extension}
 										self.sip_registrations[ip]['status'].append(status_code)
@@ -2550,7 +2397,7 @@ class Dashboard(QMainWindow):
 												self.active_calls[call_id]['status'] = '통화중'
 										elif status_code == '180':
 												self.active_calls[call_id]['status'] = '벨울림'
-										extension = self.get_extension_from_call(call_id)
+										extension = self.extension_manager.get_extension_from_call(call_id)
 										received_number = self.active_calls[call_id].get('to_number', "")
 										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 				except Exception as e:
@@ -2584,9 +2431,9 @@ class Dashboard(QMainWindow):
 										status="대기중"
 								)
 								self.calls_layout.addWidget(block)
-								self.log_error("블록 생성 완료", additional_info={"extension": extension})
+								self.logging_utils.log_error("블록 생성 완료", additional_info={"extension": extension})
 				except Exception as e:
-						self.log_error("블록 생성 중 오류", e)
+						self.logging_utils.log_error("블록 생성 중 오류", e)
 
 		def update_block_to_waiting(self, extension):
 				try:
@@ -2623,7 +2470,7 @@ class Dashboard(QMainWindow):
 						call_id = None
 						with self.active_calls_lock:
 								for cid, call_info in self.active_calls.items():
-										if self.get_extension_from_call(cid) == extension:
+										if self.extension_manager.get_extension_from_call(cid) == extension:
 												call_id = cid
 												break
 						duration = "00:00:00"
@@ -2680,7 +2527,7 @@ class Dashboard(QMainWindow):
 																		if merged_file:
 																				# active_calls에서 저장된 packet 정보 가져오기
 																				packet = self.active_calls[call_id].get('packet', None)
-																				self._save_to_mongodb(
+																				self.database_handler.save_to_mongodb(
 																						merged_file, html_file,
 																						local_num, remote_num, call_id, packet
 																				)
@@ -2696,7 +2543,7 @@ class Dashboard(QMainWindow):
 																except Exception as e:
 																		print(f"파일 처리 중 오류: {e}")
 
-										extension = self.get_extension_from_call(call_id)
+										extension = self.extension_manager.get_extension_from_call(call_id)
 										received_number = self.active_calls[call_id].get('to_number', "")
 										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 						self.update_voip_status()
@@ -2719,21 +2566,21 @@ class Dashboard(QMainWindow):
 								if proc.info['name'] and 'dumpcap' in proc.info['name'].lower():
 										try:
 												proc.kill()
-												self.log_error("기존 Dumpcap 프로세스 종료", level="info", additional_info={"pid": proc.info['pid']})
+												self.logging_utils.log_error("기존 Dumpcap 프로세스 종료", level="info", additional_info={"pid": proc.info['pid']})
 										except Exception as e:
-												self.log_error("Dumpcap 프로세스 종료 실패", e)
+												self.logging_utils.log_error("Dumpcap 프로세스 종료 실패", e)
 				except Exception as e:
-						self.log_error("Dumpcap 프로세스 정리 중 오류", e)
+						self.logging_utils.log_error("Dumpcap 프로세스 정리 중 오류", e)
 
 		def handle_rtp_packet(self, packet):
 				try:
 						if not hasattr(self, 'stream_manager'):
 								self.stream_manager = RTPStreamManager()
-								self.log_error("RTP 스트림 매니저 생성", level="info")
+								self.logging_utils.log_error("RTP 스트림 매니저 생성", level="info")
 
 						# SIP 정보 확인 및 처리
 						if hasattr(packet, 'sip'):
-								self.analyze_sip_packet(packet)
+								self.sip_handler.analyze_sip_packet(packet)
 								return
 
 						# UDP 페이로드가 없으면 처리하지 않음
@@ -2755,16 +2602,16 @@ class Dashboard(QMainWindow):
 								try:
 										# 파일 경로 생성 전에 phone_ip 유효성 검사
 										if '@' not in call_id:
-												self.log_error("유효하지 않은 call_id 형식", additional_info={"call_id": call_id})
+												self.logging_utils.log_error("유효하지 않은 call_id 형식", additional_info={"call_id": call_id})
 												continue
 
 										phone_ip = call_id.split('@')[1].split(';')[0].split(':')[0]
 
 										if not phone_ip:
-												self.log_error("phone_ip를 추출할 수 없음", additional_info={"call_id": call_id})
+												self.logging_utils.log_error("phone_ip를 추출할 수 없음", additional_info={"call_id": call_id})
 												continue
 
-										direction = self.determine_stream_direction(packet, call_id)
+										direction = self.packet_processor.determine_stream_direction(packet, call_id)
 
 										if not direction:
 												continue
@@ -2814,15 +2661,15 @@ class Dashboard(QMainWindow):
 														)
 
 										except Exception as payload_error:
-												self.log_error("페이로드 분석 오류", payload_error)
+												self.logging_utils.log_error("페이로드 분석 오류", payload_error)
 												continue
 								except Exception as call_error:
-										self.log_error("통화별 RTP 처리 오류", call_error, {"call_id": call_id})
+										self.logging_utils.log_error("통화별 RTP 처리 오류", call_error, {"call_id": call_id})
 										continue
 
 				except Exception as e:
-						self.log_error("RTP 패킷 처리 중 심각한 오류", e)
-						self.log_error("상세 오류 정보", additional_info={"traceback": traceback.format_exc()})
+						self.logging_utils.log_error("RTP 패킷 처리 중 심각한 오류", e)
+						self.logging_utils.log_error("상세 오류 정보", additional_info={"traceback": traceback.format_exc()})
 
 
 		def update_call_duration(self):
@@ -2830,7 +2677,7 @@ class Dashboard(QMainWindow):
 						with self.active_calls_lock:
 								for call_id, call_info in self.active_calls.items():
 										if call_info.get('status') == '통화중':
-												extension = self.get_extension_from_call(call_id)
+												extension = self.extension_manager.get_extension_from_call(call_id)
 												if extension:
 														duration = self.calculate_duration(call_info)
 														pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
@@ -2998,7 +2845,7 @@ class Dashboard(QMainWindow):
 																						per_lv9 = member_doc.get('per_lv9', '')
 
 																			# 로깅 추가
-																			self.log_error("SIP 메시지 헤더 확인3", level="info", additional_info={
+																			self.logging_utils.log_error("SIP 메시지 헤더 확인3", level="info", additional_info={
 																					"msg_hdr": msg_hdr,
 																					"from_number": local_num,
 																					"to_number": remote_num,
@@ -3028,7 +2875,7 @@ class Dashboard(QMainWindow):
 																		local_num = local_num_str
 																		remote_num = remote_num_str
 												# 로깅 추가
-												self.log_error("SIP 메시지 헤더 확인4", level="info", additional_info={
+												self.logging_utils.log_error("SIP 메시지 헤더 확인4", level="info", additional_info={
 														"msg_hdr": msg_hdr,
 														"from_number": local_num,
 														"to_number": remote_num,
@@ -3061,7 +2908,7 @@ class Dashboard(QMainWindow):
 																		local_num = remote_num_str
 																		remote_num = local_num_str
 												# 로깅 추가
-												self.log_error("SIP 메시지 헤더 확인5", level="info", additional_info={
+												self.logging_utils.log_error("SIP 메시지 헤더 확인5", level="info", additional_info={
 														"msg_hdr": msg_hdr,
 														"from_number": local_num,
 														"to_number": remote_num,
@@ -3148,7 +2995,7 @@ class Dashboard(QMainWindow):
 								self.cleanup()
 								event.accept()
 				except Exception as e:
-						self.log_error("창 닫기 처리 중 오류", e)
+						self.logging_utils.log_error("창 닫기 처리 중 오류", e)
 						event.accept()
 
 		def show_window(self):
@@ -3161,7 +3008,7 @@ class Dashboard(QMainWindow):
 						self.activateWindow()
 						self.raise_()
 				except Exception as e:
-						self.log_error("창 복원 중 오류", e)
+						self.logging_utils.log_error("창 복원 중 오류", e)
 
 		def show_settings(self):
 				try:
@@ -3229,7 +3076,7 @@ class Dashboard(QMainWindow):
 
 				except Exception as e:
 						# 오류는 기존 log_error 함수를 통해 기록하되, 콘솔 출력 없이
-						self.log_error("리소스 모니터링 오류", e, level="error", console_output=False)
+						self.logging_utils.log_error("리소스 모니터링 오류", e, level="error", console_output=False)
 
 		def start_new_thread(self, target, name=None):
 				"""스레드 생성 및 관리"""
@@ -3239,7 +3086,7 @@ class Dashboard(QMainWindow):
 								self.active_threads = {t for t in self.active_threads if t.is_alive()}
 
 								if len(self.active_threads) > 50:  # 스레드 수 제한
-										self.log_error("스레드 수 초과", additional_info={
+										self.logging_utils.log_error("스레드 수 초과", additional_info={
 												"active_threads": len(self.active_threads)
 										})
 										return None
@@ -3251,7 +3098,7 @@ class Dashboard(QMainWindow):
 								return thread
 
 				except Exception as e:
-						self.log_error("스레드 생성 오류", e)
+						self.logging_utils.log_error("스레드 생성 오류", e)
 						return None
 
 		def check_system_limits(self):
@@ -3271,10 +3118,10 @@ class Dashboard(QMainWindow):
 						}
 
 						# 콘솔에 출력하지 않고 로그 파일에만 기록
-						self.log_error("시스템 리소스 제한", additional_info=resource_info, level="info", console_output=False)
+						self.logging_utils.log_error("시스템 리소스 제한", additional_info=resource_info, level="info", console_output=False)
 				except Exception as e:
 						# 오류도 콘솔에 출력하지 않음
-						self.log_error("시스템 리소스 확인 중 오류", e, level="error", console_output=False)
+						self.logging_utils.log_error("시스템 리소스 확인 중 오류", e, level="error", console_output=False)
 
 def main():
 		try:
