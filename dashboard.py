@@ -1881,7 +1881,7 @@ class Dashboard(QMainWindow):
 																				# 비동기 알림 전송을 위한 helper 함수
 																				async def send_notification():
 																						print(f"알림 전송 시작: 내선번호 {to_number}에 전화 수신 알림 (발신: {from_number})")
-																						await self.websocket_server.notify_client(to_number, from_number, call_id)
+																						await self.websocket_server.notify_client(to_number, from_number, call_id, self)
 																						print(f"알림 전송 완료: 내선번호 {to_number}")
 
 																				# 별도 스레드에서 비동기 함수 실행

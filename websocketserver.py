@@ -120,10 +120,28 @@ class WebSocketServer:
 				'message': '서버 오류로 등록 실패'
 			}))
 
-	async def notify_client(self, to_number, from_number, call_id=None):
+	async def notify_client(self, to_number, from_number, call_id=None, dashboard_instance=None):
 		"""클라이언트에 수신 전화 알림"""
 		try:
 			print(f"[알림 시작] 내선번호 {to_number}에 알림 시도 (발신: {from_number})")
+			
+			# 통화 중인 내선번호인지 확인 (dashboard_instance가 제공된 경우)
+			if dashboard_instance and hasattr(dashboard_instance, 'active_calls') and hasattr(dashboard_instance, 'active_calls_lock'):
+				with dashboard_instance.active_calls_lock:
+					for call_id_check, call_info in dashboard_instance.active_calls.items():
+						# 해당 내선번호가 이미 '통화중' 상태인지 확인
+						if (call_info.get('status') == '통화중' and 
+							(call_info.get('from_number') == to_number or call_info.get('to_number') == to_number)):
+							print(f"[알림 차단] 내선번호 {to_number}가 이미 통화 중 (Call-ID: {call_id_check})")
+							self.log(f"내선번호 {to_number}가 이미 통화 중이므로 수신 알림 차단", level="info")
+							return
+						# 해당 내선번호가 이미 '벨울림' 상태인지 확인 (동시 수신 차단)
+						elif (call_info.get('status') == '벨울림' and 
+							  call_info.get('to_number') == to_number):
+							print(f"[알림 차단] 내선번호 {to_number}가 이미 벨울림 중 (Call-ID: {call_id_check})")
+							self.log(f"내선번호 {to_number}가 이미 벨울림 중이므로 수신 알림 차단", level="info")
+							return
+			
 			# MongoDB에서 내선번호에 해당하는 IP 조회
 			mongo_client = MongoClient("mongodb://localhost:27017/")
 			db = mongo_client['packetwave']
