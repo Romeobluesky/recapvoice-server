@@ -1,0 +1,25 @@
+[2025-08-21 16:32:35] [오류] 메인 윈도우 초기화 중 심각한 오류
+에러 메시지: 'cp949' codec can't decode byte 0xec in position 194: illegal multibyte sequence
+Traceback (most recent call last):
+  File "d:\Work_state\packet_wave\dashboard.py", line 228, in handle_media_status
+    self.initialize_main_window()
+  File "d:\Work_state\packet_wave\dashboard.py", line 367, in initialize_main_window
+    config = load_config()
+             ^^^^^^^^^^^^^
+  File "d:\Work_state\packet_wave\config_loader.py", line 6, in load_config
+    config.read(config_path)
+  File "C:\Users\HOMEWORK\AppData\Local\Programs\Python\Python312\Lib\configparser.py", line 684, in read
+    self._read(fp, filename)
+  File "C:\Users\HOMEWORK\AppData\Local\Programs\Python\Python312\Lib\configparser.py", line 999, in _read
+    for lineno, line in enumerate(fp, start=1):
+                        ^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'cp949' codec can't decode byte 0xec in position 194: illegal multibyte sequence
+=== update_extension_display 호출됨 ===
+현재 내선번호 목록: set()
+내선번호 개수: 0
+
+[2025-08-21 16:32:36] [오류] 패킷 캡처 시작 실패
+에러 메시지: 'cp949' codec can't decode byte 0xec in position 194: illegal multibyte sequence
+
+[2025-08-21 16:32:40] [오류] MongoDB 연결 최종 실패
+에러 메시지: 'cp949' codec can't decode byte 0xec in position 194: illegal multibyte sequence

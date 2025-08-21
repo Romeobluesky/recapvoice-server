@@ -3,7 +3,7 @@ import configparser
 
 def load_config(config_path="settings.ini"):
     config = configparser.ConfigParser()
-    config.read(config_path)
+    config.read(config_path, encoding='utf-8')
     return config
 
 def get_wireshark_path():

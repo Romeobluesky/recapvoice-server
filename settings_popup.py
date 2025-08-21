@@ -24,6 +24,7 @@ class SettingsPopup(QDialog):
 	# 시그널 정의
 	path_changed = Signal(str)
 	settings_changed = Signal(dict)  # 모든 설정값을 dictionary로 전달
+	network_ip_changed = Signal(str)  # Network IP 변경 전용 신호
 
 	def __init__(self, parent=None):
 		super().__init__(parent)
@@ -438,6 +439,11 @@ class SettingsPopup(QDialog):
 		"""설정 저장"""
 		# 현재 MAC 주소 가져오기 (저장 시에도 항상 최신 MAC 주소 사용)
 		current_mac = self.get_mac_address()
+		
+		# Network IP 변경 감지를 위해 이전 값 저장
+		old_network_ip = self.config.get('Network', 'ip', fallback='') if 'Network' in self.config else ''
+		new_network_ip = self.ip_combo.currentText()
+		
 		# 설정값 업데이트
 		settings_data = {
 			'Extension': {
@@ -480,6 +486,11 @@ class SettingsPopup(QDialog):
 		# 설정 변경 시그널 발생
 		self.settings_changed.emit(settings_data)
 		self.path_changed.emit(settings_data['Recording']['save_path'])
+		
+		# Network IP 변경 시 별도 신호 발송
+		if old_network_ip != new_network_ip:
+			print(f"Network IP 변경 감지: {old_network_ip} → {new_network_ip}")
+			self.network_ip_changed.emit(new_network_ip)
 
 		QMessageBox.information(self, "설정 저장", "설정이 성공적으로 저장되었습니다.")
 		self.close()

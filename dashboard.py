@@ -9,6 +9,7 @@ import os
 import platform
 import psutil
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -576,6 +577,7 @@ class Dashboard(QMainWindow):
 				self.resize(1400, 900)
 				self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
 				self.settings_popup.path_changed.connect(self.update_storage_path)
+				self.settings_popup.network_ip_changed.connect(self.on_network_ip_changed)
 
 				# calls_layout을 빈 레이아웃으로 초기화 (전화연결상태 블록 대신)
 				self.calls_layout = QVBoxLayout()
@@ -589,12 +591,236 @@ class Dashboard(QMainWindow):
 
 		def load_network_interfaces(self):
 				try:
-						interfaces = list(psutil.net_if_addrs().keys())
+						# 모든 네트워크 인터페이스 정보 수집
+						all_interfaces = psutil.net_if_addrs()
+						active_interfaces = []
+						
+						print("=== 네트워크 인터페이스 분석 ===")
+						self.log_to_sip_console("네트워크 인터페이스 분석 시작", "DEBUG")
+						
+						for interface_name, addresses in all_interfaces.items():
+								try:
+										# 인터페이스 상태 확인
+										if_stats = psutil.net_if_stats().get(interface_name)
+										if not if_stats or not if_stats.isup:
+												continue
+										
+										# IP 주소 확인
+										has_ip = False
+										ip_address = None
+										for addr in addresses:
+												if addr.family == socket.AF_INET:  # IPv4
+														ip_address = addr.address
+														if ip_address != '127.0.0.1':  # 루프백 제외
+																has_ip = True
+																break
+										
+										if has_ip:
+												active_interfaces.append({
+														'name': interface_name,
+														'ip': ip_address,
+														'stats': if_stats
+												})
+												print(f"활성 인터페이스: {interface_name} (IP: {ip_address})")
+												self.log_to_sip_console(f"활성 인터페이스 발견: {interface_name} (IP: {ip_address})", "DEBUG")
+								except Exception as e:
+										print(f"인터페이스 {interface_name} 분석 중 오류: {e}")
+						
+						# 포트미러링에 적합한 인터페이스 선택
+						selected_interface = self.select_best_interface(active_interfaces)
+						
+						# 설정 파일에서 저장된 인터페이스 확인
 						config = load_config()
-						default_interface = config.get('Network', 'interface', fallback=interfaces[0])
-						self.selected_interface = default_interface
+						saved_interface = config.get('Network', 'interface', fallback='')
+						
+						# 저장된 인터페이스가 활성 상태라면 우선 사용
+						if saved_interface and any(iface['name'] == saved_interface for iface in active_interfaces):
+								selected_interface = saved_interface
+								print(f"저장된 인터페이스 사용: {saved_interface}")
+								self.log_to_sip_console(f"저장된 인터페이스 사용: {saved_interface}", "INFO")
+						else:
+								print(f"자동 선택된 인터페이스: {selected_interface}")
+								self.log_to_sip_console(f"자동 선택된 인터페이스: {selected_interface}", "INFO")
+						
+						self.selected_interface = selected_interface
+						self.active_interfaces = active_interfaces  # 나중에 설정에서 선택할 수 있도록 저장
+						
+						# 자동 선택된 인터페이스를 settings.ini에 저장
+						if selected_interface and not saved_interface:
+								self.save_interface_to_config(selected_interface)
+						
 				except Exception as e:
 						print(f"네트워크 인터페이스 로드 실패: {e}")
+						self.log_error("네트워크 인터페이스 로드 실패", e)
+
+		def select_best_interface(self, active_interfaces):
+				"""포트미러링에 최적인 네트워크 인터페이스 선택"""
+				if not active_interfaces:
+						print("활성 인터페이스가 없음")
+						return None
+				
+				print("=== 최적 인터페이스 선택 ===")
+				
+				# 우선순위 기반 선택
+				# 1. 이더넷 인터페이스 우선 (Wi-Fi보다 안정적)
+				ethernet_interfaces = []
+				wifi_interfaces = []
+				other_interfaces = []
+				
+				for iface in active_interfaces:
+						name = iface['name'].lower()
+						if 'ethernet' in name or '이더넷' in name:
+								ethernet_interfaces.append(iface)
+						elif 'wi-fi' in name or 'wifi' in name or 'wireless' in name:
+								wifi_interfaces.append(iface)
+						else:
+								other_interfaces.append(iface)
+				
+				# 2. 이더넷 인터페이스가 있다면 우선 선택
+				if ethernet_interfaces:
+						# 이더넷 중에서도 가장 적절한 것 선택
+						best_ethernet = self.find_best_ethernet_interface(ethernet_interfaces)
+						print(f"이더넷 인터페이스 선택: {best_ethernet['name']}")
+						self.log_to_sip_console(f"이더넷 인터페이스 선택: {best_ethernet['name']}", "INFO")
+						return best_ethernet['name']
+				
+				# 3. 이더넷이 없다면 Wi-Fi 또는 기타 인터페이스
+				all_remaining = wifi_interfaces + other_interfaces
+				if all_remaining:
+						selected = all_remaining[0]
+						print(f"대체 인터페이스 선택: {selected['name']}")
+						self.log_to_sip_console(f"대체 인터페이스 선택: {selected['name']}", "INFO")
+						return selected['name']
+				
+				return active_interfaces[0]['name'] if active_interfaces else None
+
+		def find_best_ethernet_interface(self, ethernet_interfaces):
+				"""이더넷 인터페이스 중 최적 선택"""
+				if len(ethernet_interfaces) == 1:
+						return ethernet_interfaces[0]
+				
+				print(f"이더넷 인터페이스 {len(ethernet_interfaces)}개 발견, 최적 선택 중...")
+				
+				# 포트미러링 IP와 같은 대역의 인터페이스 우선 선택
+				try:
+						config = load_config()
+						target_ip = config.get('Network', 'ip', fallback=None)
+						
+						if target_ip:
+								target_network = target_ip.rsplit('.', 1)[0]  # 예: 1.1.1.2 -> 1.1.1
+								print(f"포트미러링 IP 대역: {target_network}")
+								
+								for iface in ethernet_interfaces:
+										iface_network = iface['ip'].rsplit('.', 1)[0]
+										print(f"인터페이스 {iface['name']}: {iface['ip']} (대역: {iface_network})")
+										
+										if iface_network == target_network:
+												print(f"포트미러링 IP와 같은 대역 인터페이스 발견: {iface['name']}")
+												self.log_to_sip_console(f"포트미러링 IP와 같은 대역 인터페이스: {iface['name']}", "INFO")
+												return iface
+				except Exception as e:
+						print(f"IP 대역 비교 중 오류: {e}")
+				
+				# 같은 대역이 없다면 가장 활성화된 인터페이스 선택
+				# (바이트 송수신이 많은 인터페이스)
+				best_interface = ethernet_interfaces[0]
+				try:
+						for iface in ethernet_interfaces:
+								stats = iface['stats']
+								if stats.bytes_sent + stats.bytes_recv > best_interface['stats'].bytes_sent + best_interface['stats'].bytes_recv:
+										best_interface = iface
+				except Exception as e:
+						print(f"인터페이스 통계 비교 중 오류: {e}")
+				
+				print(f"최종 선택된 이더넷 인터페이스: {best_interface['name']}")
+				return best_interface
+
+		def save_interface_to_config(self, interface_name):
+				"""선택된 인터페이스를 settings.ini에 저장"""
+				try:
+						config = configparser.ConfigParser()
+						config.read('settings.ini', encoding='utf-8')
+						
+						if 'Network' not in config:
+								config['Network'] = {}
+						
+						config['Network']['interface'] = interface_name
+						
+						with open('settings.ini', 'w', encoding='utf-8') as configfile:
+								config.write(configfile)
+						
+						print(f"인터페이스 설정 저장: {interface_name}")
+						self.log_to_sip_console(f"인터페이스 설정 저장: {interface_name}", "INFO")
+						
+				except Exception as e:
+						print(f"인터페이스 설정 저장 실패: {e}")
+						self.log_error("인터페이스 설정 저장 실패", e)
+
+		def change_network_interface(self, new_interface_name):
+				"""네트워크 인터페이스를 수동으로 변경"""
+				try:
+						print(f"=== 네트워크 인터페이스 수동 변경: {new_interface_name} ===")
+						self.log_to_sip_console(f"네트워크 인터페이스 변경: {new_interface_name}", "INFO")
+						
+						# 새 인터페이스가 활성 상태인지 확인
+						if hasattr(self, 'active_interfaces'):
+								active_names = [iface['name'] for iface in self.active_interfaces]
+								if new_interface_name not in active_names:
+										print(f"경고: 인터페이스 '{new_interface_name}'가 활성 상태가 아닙니다")
+										self.log_to_sip_console(f"경고: 인터페이스 '{new_interface_name}'가 활성 상태가 아닙니다", "WARNING")
+						
+						# 현재 인터페이스와 다른 경우에만 재시작
+						if self.selected_interface != new_interface_name:
+								old_interface = self.selected_interface
+								self.selected_interface = new_interface_name
+								
+								# settings.ini에 저장
+								self.save_interface_to_config(new_interface_name)
+								
+								# 패킷 캡처 재시작
+								success = self.restart_packet_capture()
+								
+								if success:
+										print(f"인터페이스 변경 완료: {old_interface} → {new_interface_name}")
+										self.log_to_sip_console(f"인터페이스 변경 완료: {old_interface} → {new_interface_name}", "INFO")
+								else:
+										print(f"인터페이스 변경 실패, 이전 설정으로 복원")
+										self.selected_interface = old_interface
+										self.log_to_sip_console("인터페이스 변경 실패, 이전 설정으로 복원", "ERROR")
+								
+								return success
+						else:
+								print("동일한 인터페이스입니다")
+								return True
+								
+				except Exception as e:
+						print(f"네트워크 인터페이스 변경 중 오류: {e}")
+						self.log_error("네트워크 인터페이스 변경 실패", e)
+						return False
+
+		def show_available_interfaces(self):
+				"""사용 가능한 네트워크 인터페이스 목록 출력"""
+				try:
+						print("\n=== 사용 가능한 네트워크 인터페이스 ===")
+						self.log_to_sip_console("사용 가능한 네트워크 인터페이스 조회", "INFO")
+						
+						if hasattr(self, 'active_interfaces') and self.active_interfaces:
+								for i, iface in enumerate(self.active_interfaces, 1):
+										status = "✓ 현재 사용중" if iface['name'] == self.selected_interface else ""
+										print(f"{i}. {iface['name']} (IP: {iface['ip']}) {status}")
+										self.log_to_sip_console(f"인터페이스 {i}: {iface['name']} (IP: {iface['ip']}) {status}", "INFO")
+						else:
+								print("활성 인터페이스 정보가 없습니다")
+								self.load_network_interfaces()  # 다시 로드 시도
+						
+						print(f"\n현재 선택된 인터페이스: {self.selected_interface}")
+						print("인터페이스 변경 방법:")
+						print("  dashboard.change_network_interface('이더넷 3')")
+						print("또는 SIP 콘솔에서 확인하세요.")
+						
+				except Exception as e:
+						print(f"인터페이스 목록 조회 중 오류: {e}")
+						self.log_error("인터페이스 목록 조회 실패", e)
 
 		def start_packet_capture(self):
 				"""패킷 캡처 시작"""
@@ -647,6 +873,78 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						self.log_error("패킷 캡처 시작 실패", e)
 
+		def restart_packet_capture(self, new_ip=None):
+				"""패킷 캡처 재시작 (Network IP 변경 시 사용)"""
+				try:
+						self.log_to_sip_console("패킷 캡처 재시작 시작...", "INFO")
+						print("=== 패킷 캡처 재시작 ===")
+						
+						# 1. 기존 캡처 중지
+						if hasattr(self, 'capture_thread') and self.capture_thread and self.capture_thread.is_alive():
+								print("기존 캡처 스레드 종료 중...")
+								self.log_to_sip_console("기존 패킷 캡처 종료 중...", "INFO")
+								
+								# capture 객체가 있으면 종료 요청
+								if hasattr(self, 'capture') and self.capture:
+										try:
+												# capture 종료 플래그 설정 (나중에 capture_packets에서 확인)
+												self.capture_stop_requested = True
+												self.capture = None
+										except Exception as e:
+												print(f"캡처 객체 종료 중 오류: {e}")
+								
+								# 스레드 종료 대기 (최대 3초)
+								try:
+										self.capture_thread.join(timeout=3.0)
+										if self.capture_thread.is_alive():
+												print("캡처 스레드가 정상적으로 종료되지 않음")
+												self.log_to_sip_console("기존 캡처 스레드 강제 종료", "WARNING")
+										else:
+												print("기존 캡처 스레드 정상 종료")
+												self.log_to_sip_console("기존 캡처 스레드 정상 종료", "INFO")
+								except Exception as e:
+										print(f"스레드 종료 대기 중 오류: {e}")
+						
+						# 2. 잠시 대기 (리소스 정리 시간)
+						import time
+						time.sleep(0.5)
+						
+						# 3. 새로운 IP 설정 확인
+						if new_ip:
+								print(f"새 포트미러링 IP로 재시작: {new_ip}")
+								self.log_to_sip_console(f"새 포트미러링 IP로 재시작: {new_ip}", "INFO")
+						
+						# 4. 새 캡처 시작
+						if not self.selected_interface:
+								self.log_error("선택된 네트워크 인터페이스가 없습니다")
+								return False
+						
+						# capture_stop_requested 플래그 초기화
+						self.capture_stop_requested = False
+						
+						# 새 캡처 스레드 시작
+						self.capture_thread = threading.Thread(
+								target=self.capture_packets,
+								args=(self.selected_interface,),
+								daemon=True
+						)
+						self.capture_thread.start()
+						
+						print("새 패킷 캡처 스레드 시작됨")
+						self.log_to_sip_console("패킷 캡처 재시작 완료", "INFO")
+						self.log_error("패킷 캡처 재시작 완료", additional_info={
+								"interface": self.selected_interface, 
+								"new_ip": new_ip
+						})
+						
+						return True
+						
+				except Exception as e:
+						print(f"패킷 캡처 재시작 실패: {e}")
+						self.log_error("패킷 캡처 재시작 실패", e)
+						self.log_to_sip_console(f"패킷 캡처 재시작 실패: {e}", "ERROR")
+						return False
+
 		def capture_packets(self, interface):
 				"""패킷 캡처 실행"""
 				if not interface:
@@ -657,32 +955,90 @@ class Dashboard(QMainWindow):
 				loop = None
 
 				try:
+						# 캡처 중지 플래그 초기화 (필요시)
+						if not hasattr(self, 'capture_stop_requested'):
+								self.capture_stop_requested = False
+
 						# 이벤트 루프 설정
 						loop = asyncio.new_event_loop()
 						asyncio.set_event_loop(loop)
 
-						# 캡처 필터 설정
-						capture = pyshark.LiveCapture(
-								interface=interface,
-								display_filter='sip or (udp and (udp.port >= 1024 and udp.port <= 65535))'
-						)
+						# settings.ini에서 포트미러링 대상 IP 가져오기
+						config = load_config()
+						target_ip = config.get('Network', 'ip', fallback=None)
+						
+						# 포트미러링 환경을 위한 캡처 필터 설정 (단순화)
+						if target_ip:
+								# Wireshark와 동일한 단순 필터
+								display_filter = f'(host {target_ip}) and (sip or udp)'
+								self.log_to_sip_console(f"포트미러링 필터 적용: {display_filter}", "INFO")
+								print(f"사용중인 필터: {display_filter}")
+						else:
+								# 모든 SIP 패킷 캡처 (테스트용)
+								display_filter = 'sip'
+								self.log_to_sip_console(f"SIP 전용 필터 적용: {display_filter}", "INFO")
+								print(f"사용중인 필터: {display_filter}")
+								
+						# 디버깅 모드: 필터 없이 모든 패킷 캡처 (임시)
+						debug_mode = True  # SIP 패킷을 찾기 위한 디버깅
+						if debug_mode:
+								print("🔍 디버깅 모드: 모든 패킷 캡처 시작")
+								self.log_to_sip_console("🔍 디버깅 모드: 모든 패킷 캡처", "INFO")
+								capture = pyshark.LiveCapture(interface=interface)  # 필터 없음
+						else:
+								capture = pyshark.LiveCapture(
+										interface=interface,
+										display_filter=display_filter
+								)
+						
+						# 전역 변수로 capture 객체 저장 (재시작 시 사용)
+						self.capture = capture
 
 						# 패킷 캡처 시작
+						self.log_to_sip_console(f"패킷 캡처 시작 - 인터페이스: {interface}", "INFO")
+						packet_count = 0
 						for packet in capture.sniff_continuously():
 								try:
+										# 캡처 중지 요청 확인
+										if hasattr(self, 'capture_stop_requested') and self.capture_stop_requested:
+												print("패킷 캡처 중지 요청 감지됨")
+												self.log_to_sip_console("패킷 캡처 중지 요청으로 종료", "INFO")
+												break
+										
+										packet_count += 1
+										# 패킷 개수 로깅 제거 (너무 많음)
+										
+										# 처음 5개 패킷만 기본 정보 로깅
+										if packet_count <= 5:
+												try:
+														src_ip = getattr(packet.ip, 'src', 'unknown') if hasattr(packet, 'ip') else 'no_ip'
+														dst_ip = getattr(packet.ip, 'dst', 'unknown') if hasattr(packet, 'ip') else 'no_ip'
+														protocol = packet.highest_layer
+														print(f"패킷 #{packet_count}: {src_ip} → {dst_ip}, 프로토콜: {protocol}")
+												except Exception as e:
+														print(f"패킷 정보 추출 오류: {e}")
+										
 										# 메모리 사용량 모니터링
 										process = psutil.Process()
 										memory_percent = process.memory_percent()
 										if memory_percent > 80:
 												self.log_error("높은 메모리 사용량", additional_info={"memory_percent": memory_percent})
 
+										# SIP 패킷 처리
 										if hasattr(packet, 'sip'):
+												print(f"★★★ SIP 패킷 발견! (#{packet_count}) ★★★")
+												self.log_to_sip_console(f"★ SIP 패킷 감지됨! (#{packet_count})", "SIP")
 												self.analyze_sip_packet(packet)
-										elif hasattr(packet, 'udp') and self.is_rtp_packet(packet):
-												self.handle_rtp_packet(packet)
+										elif hasattr(packet, 'udp'):
+												if self.is_rtp_packet(packet):
+														self.handle_rtp_packet(packet)
+												# UDP 패킷 로그 제거 (너무 많음)
 
 								except Exception as packet_error:
 										self.log_error("패킷 처리 중 오류", packet_error)
+										# 중지 요청이 있으면 오류 상황에서도 종료
+										if hasattr(self, 'capture_stop_requested') and self.capture_stop_requested:
+												break
 										continue
 
 				except KeyboardInterrupt:
@@ -975,24 +1331,53 @@ class Dashboard(QMainWindow):
 		def refresh_extension_list_with_register(self, extension):
 				"""SIP REGISTER로 감지된 내선번호로 목록을 갱신 (Signal을 통해 메인 스레드에서 처리)"""
 				if extension:
-					print(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청")
-					self.log_to_sip_console(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청", "SIP")
+					print(f"🎯 SIP REGISTER 감지: 내선번호 {extension} 등록 요청")
+					self.log_to_sip_console(f"🎯 SIP REGISTER 감지: 내선번호 {extension} 등록 요청", "SIP")
+					print(f"Signal 발송 준비: extension_update_signal.emit({extension})")
 					# 메인 스레드에서 처리하도록 Signal 발신
 					self.extension_update_signal.emit(extension)
+					print(f"Signal 발송 완료: {extension}")
+				else:
+					print("❌ REGISTER에서 내선번호 추출 실패")
+					self.log_to_sip_console("❌ REGISTER에서 내선번호 추출 실패", "WARNING")
 
 		def update_extension_in_main_thread(self, extension):
 				"""메인 스레드에서 내선번호 업데이트 처리"""
-				print(f"메인 스레드에서 내선번호 처리: {extension}")
+				print(f"🎯 메인 스레드에서 내선번호 처리 시작: {extension}")
+				self.log_to_sip_console(f"🎯 메인 스레드에서 내선번호 처리: {extension}", "SIP")
+				
+				# 현재 내선번호 목록 상태 출력 (간소화)
+				print(f"현재 내선번호 목록: {self.sip_extensions}")
+				
 				# 실제 등록된 내선번호 추가
-				self.sip_extensions.add(extension)
-				self.update_extension_display()
-				print(f"내선번호 {extension} 등록 완료")
+				if extension and extension not in self.sip_extensions:
+						self.sip_extensions.add(extension)
+						print(f"✅ 내선번호 {extension}를 목록에 추가")
+						self.log_to_sip_console(f"✅ 내선번호 {extension} 추가됨", "SIP")
+						
+						# UI 업데이트
+						print("UI 업데이트 시작...")
+						self.update_extension_display()
+						print("UI 업데이트 완료")
+						self.log_to_sip_console(f"내선번호 {extension} UI 업데이트 완료", "SIP")
+				else:
+						if not extension:
+								print("❌ 빈 내선번호")
+								self.log_to_sip_console("❌ 빈 내선번호", "WARNING")
+						else:
+								print(f"ℹ️ 내선번호 {extension}는 이미 등록됨")
+								self.log_to_sip_console(f"내선번호 {extension}는 이미 등록됨", "INFO")
 
 		def update_extension_display(self):
-				"""내선번호 표시 업데이트"""
-				print(f"=== update_extension_display 호출됨 ===")
-				print(f"현재 내선번호 목록: {self.sip_extensions}")
-				print(f"내선번호 개수: {len(self.sip_extensions)}")
+				"""내선번호 표시 업데이트 - 왼쪽 사이드바 박스"""
+				print(f"내선번호 UI 업데이트: {len(self.sip_extensions)}개")
+				self.log_to_sip_console(f"📱 내선번호 UI 업데이트: {len(self.sip_extensions)}개", "SIP")
+				
+				# extension_list_layout 존재 확인
+				if not hasattr(self, 'extension_list_layout'):
+						print("❌ extension_list_layout이 없습니다!")
+						self.log_to_sip_console("❌ extension_list_layout이 없습니다!", "ERROR")
+						return
 
 				# 기존 위젯들 제거 (타이머도 함께 정리)
 				while self.extension_list_layout.count():
@@ -1020,9 +1405,8 @@ class Dashboard(QMainWindow):
 					no_ext_label.setAlignment(Qt.AlignCenter)
 					self.extension_list_layout.addWidget(no_ext_label)
 				else:
-					print(f"내선번호 위젯 생성 시작: {sorted_extensions}")
+					print(f"내선번호 위젯 생성: {sorted_extensions}")
 					for extension in sorted_extensions:
-						print(f"내선번호 {extension} 위젯 생성 중...")
 						# 각 내선번호별 컨테이너 위젯 생성
 						ext_container = QWidget()
 						ext_layout = QHBoxLayout(ext_container)
@@ -1090,15 +1474,15 @@ class Dashboard(QMainWindow):
 						ext_layout.addWidget(extension_container)
 
 						self.extension_list_layout.addWidget(ext_container)
-						print(f"내선번호 {extension} 위젯이 레이아웃에 추가됨")
-						print(f"현재 레이아웃 내 위젯 개수: {self.extension_list_layout.count()}")
-
-						# 위젯 표시 상태 확인
+						
+						# 위젯 표시
 						ext_container.show()
 						extension_container.show()
 						extension_label.show()
 						led_indicator.show()
-						print(f"위젯 표시 상태 - Container: {ext_container.isVisible()}, Extension Container: {extension_container.isVisible()}, Label: {extension_label.isVisible()}, LED: {led_indicator.isVisible()}")
+				
+				print(f"내선번호 UI 업데이트 완료: {len(sorted_extensions)}개")
+				self.log_to_sip_console(f"내선번호 UI 업데이트 완료: {len(sorted_extensions)}개", "SIP")
 
 		def get_public_ip(self):
 				try:
@@ -1692,6 +2076,7 @@ class Dashboard(QMainWindow):
 						self.settings_popup = SettingsPopup(self)
 						self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
 						self.settings_popup.path_changed.connect(self.update_storage_path)
+						self.settings_popup.network_ip_changed.connect(self.on_network_ip_changed)
 						self.settings_popup.exec()
 				except Exception as e:
 						print(f"설정 창 표시 중 오류: {e}")
@@ -1725,6 +2110,28 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						print(f"Error updating storage path: {e}")
 						QMessageBox.warning(self, "오류", "저장 경로 업데이트 중 오류가 발생했습니다.")
+
+		@Slot(str)
+		def on_network_ip_changed(self, new_ip):
+				"""Network IP 변경 시 패킷 캡처 재시작"""
+				try:
+						print(f"=== Network IP 변경 감지: {new_ip} ===")
+						self.log_to_sip_console(f"Network IP 변경 감지: {new_ip}", "INFO")
+						
+						# 패킷 캡처 재시작
+						success = self.restart_packet_capture(new_ip)
+						
+						if success:
+								self.log_to_sip_console(f"새 포트미러링 IP ({new_ip})로 패킷 캡처 재시작 완료", "INFO")
+								print(f"패킷 캡처 재시작 성공: {new_ip}")
+						else:
+								self.log_to_sip_console(f"패킷 캡처 재시작 실패", "ERROR")
+								print("패킷 캡처 재시작 실패")
+								
+				except Exception as e:
+						print(f"Network IP 변경 처리 중 오류: {e}")
+						self.log_error("Network IP 변경 처리 오류", e)
+						self.log_to_sip_console(f"IP 변경 처리 오류: {e}", "ERROR")
 
 		TABLE_STYLE = """
 				QTableWidget::item:selected {
@@ -1806,25 +2213,51 @@ class Dashboard(QMainWindow):
 						sys.stderr.flush()
 
 		def analyze_sip_packet(self, packet):
-				print(f"=== SIP 패킷 분석 시작 ===")
-				self.log_to_sip_console("SIP 패킷 분석 시작", "DEBUG")
+				print(f"\n=== SIP 패킷 분석 시작 ===")
+				self.log_to_sip_console("SIP 패킷 분석 시작", "SIP")
+				
+				# 포트미러링 환경에서 패킷 정보 추가 출력
+				if hasattr(packet, 'ip'):
+						src_ip = getattr(packet.ip, 'src', 'unknown')
+						dst_ip = getattr(packet.ip, 'dst', 'unknown')
+						print(f"IP 정보 - Source: {src_ip}, Destination: {dst_ip}")
+						self.log_to_sip_console(f"패킷 IP - 송신: {src_ip}, 수신: {dst_ip}", "SIP")
+				
+				# UDP 포트 정보 출력
+				if hasattr(packet, 'udp'):
+						try:
+								src_port = packet.udp.srcport
+								dst_port = packet.udp.dstport
+								print(f"UDP 포트 - Source: {src_port}, Destination: {dst_port}")
+								self.log_to_sip_console(f"UDP 포트 - 송신: {src_port}, 수신: {dst_port}", "SIP")
+						except Exception as e:
+								print(f"UDP 포트 정보 추출 오류: {e}")
+				
 				if not hasattr(packet, 'sip'):
 						print("SIP 레이어가 없는 패킷")
 						self.log_to_sip_console("SIP 레이어가 없는 패킷", "WARNING")
 						self.log_error("SIP 레이어가 없는 패킷")
 						return
-
+				
 				try:
 						sip_layer = packet.sip
 						print(f"SIP 패킷 감지됨")
-						self.log_to_sip_console("SIP 패킷 감지됨", "INFO")
+						self.log_to_sip_console("SIP 패킷 감지됨", "SIP")
+						
+						# SIP 레이어 기본 정보만 출력 (상세 로그 제거)
+						sip_method = getattr(sip_layer, 'method', getattr(sip_layer, 'status_line', 'unknown'))
+						print(f"SIP 메서드/상태: {sip_method}")
+						self.log_to_sip_console(f"SIP 메서드: {sip_method}", "SIP")
+						
 						if not hasattr(sip_layer, 'call_id'):
 								print("Call-ID가 없는 SIP 패킷")
 								self.log_to_sip_console("Call-ID가 없는 SIP 패킷", "WARNING")
-								self.log_error("Call-ID가 없는 SIP 패킷")
-								return
-
-						call_id = sip_layer.call_id
+								# Call-ID가 없어도 계속 진행 (다른 정보 확인)
+								call_id = "no_call_id"
+						else:
+								call_id = sip_layer.call_id
+								print(f"Call-ID: {call_id}")
+								self.log_to_sip_console(f"Call-ID: {call_id}", "SIP")
 
 						# 내선번호 추출 로직...
 						try:
@@ -1854,8 +2287,8 @@ class Dashboard(QMainWindow):
 																})
 																return
 
-														from_number = self.extract_number(sip_layer.from_user)
-														to_number = self.extract_number(sip_layer.to_user)
+														from_number = self.extract_full_number(sip_layer.from_user)
+														to_number = self.extract_full_number(sip_layer.to_user)
 
 														if not from_number or not to_number:
 															self.log_error("유효하지 않은 전화번호", additional_info={
@@ -2024,7 +2457,7 @@ class Dashboard(QMainWindow):
 										return
 
 								refer_to = str(sip_layer.refer_to)
-								forwarded_ext = self.extract_number(refer_to.split('@')[0])
+								forwarded_ext = self.extract_full_number(refer_to.split('@')[0])
 
 								if not forwarded_ext:
 										log_file.write("[오류] 유효하지 않은 Refer-To 번호\n")
@@ -2154,26 +2587,72 @@ class Dashboard(QMainWindow):
 						print(f"Request Line: {request_line}")
 						self.log_to_sip_console(f"SIP REGISTER 감지 - {request_line}", "SIP")
 
-						# SIP REGISTER에서 내선번호 추출
+						# 포트미러링 환경에서 더 많은 헤더 정보 확인
+						extension = None
+						
+						# 1. From 헤더에서 내선번호 추출 시도
 						if hasattr(sip_layer, 'from_user'):
 								from_user = str(sip_layer.from_user)
 								print(f"From User: {from_user}")
-
 								extension = self.extract_number(from_user)
-								print(f"추출된 내선번호: {extension}")
+						
+						# 2. To 헤더에서도 확인 (포트미러링에서는 방향이 바뀔 수 있음)
+						if not extension and hasattr(sip_layer, 'to_user'):
+								to_user = str(sip_layer.to_user)
+								print(f"To User: {to_user}")
+								extension = self.extract_number(to_user)
+						
+						# 3. Contact 헤더에서 확인
+						if not extension and hasattr(sip_layer, 'contact'):
+								contact = str(sip_layer.contact)
+								print(f"Contact: {contact}")
+								# Contact 헤더에서 sip:1234@domain 형태 추출
+								import re
+								contact_match = re.search(r'sip:(\d{4})@', contact)
+								if contact_match:
+										extension = contact_match.group(1)
+						
+						# 4. Authorization 헤더에서 username 확인
+						if not extension and hasattr(sip_layer, 'authorization'):
+								auth_header = str(sip_layer.authorization)
+								print(f"Authorization: {auth_header}")
+								# username="1234" 형태 추출
+								auth_match = re.search(r'username="?(\d{4})"?', auth_header)
+								if auth_match:
+										extension = auth_match.group(1)
+						
+						# 5. 모든 SIP 헤더 출력 (디버깅용)
+						if not extension:
+								print("=== 모든 SIP 헤더 확인 ===")
+								for field_name in dir(sip_layer):
+										if not field_name.startswith('_'):
+												try:
+														field_value = getattr(sip_layer, field_name)
+														if field_value and str(field_value) != '<bound method':
+																print(f"{field_name}: {field_value}")
+																# 4자리 숫자 패턴 검색
+																digit_match = re.search(r'\b(\d{4})\b', str(field_value))
+																if digit_match and digit_match.group(1)[0] in ['1','2','3','4','5','6','7','8','9']:
+																		extension = digit_match.group(1)
+																		print(f"헤더 {field_name}에서 내선번호 발견: {extension}")
+																		break
+												except Exception:
+														continue
 
-								if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
-										# SIP 등록된 내선번호를 사이드바에 추가
-										self.refresh_extension_list_with_register(extension)
-										self.log_error("SIP REGISTER 처리 완료", level="info", additional_info={
-												"extension": extension,
-												"call_id": call_id,
-												"from_user": from_user
-										})
-								else:
-										print(f"유효하지 않은 내선번호: {extension}")
+						print(f"최종 추출된 내선번호: {extension}")
+
+						if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
+								# SIP 등록된 내선번호를 사이드바에 추가
+								self.refresh_extension_list_with_register(extension)
+								self.log_to_sip_console(f"내선번호 {extension} 등록 완료", "SIP")
+								self.log_error("SIP REGISTER 처리 완료", level="info", additional_info={
+										"extension": extension,
+										"call_id": call_id,
+										"method": "REGISTER"
+								})
 						else:
-								print("from_user 필드가 없음")
+								print(f"유효하지 않은 내선번호: {extension}")
+								self.log_to_sip_console(f"유효하지 않은 내선번호 또는 내선번호 추출 실패: {extension}", "WARNING")
 				except Exception as e:
 						print(f"REGISTER 처리 중 오류: {e}")
 						self.log_error("REGISTER 요청 처리 중 오류", e)
@@ -2268,8 +2747,8 @@ class Dashboard(QMainWindow):
 		def handle_new_call(self, sip_layer, call_id):
 				try:
 						print(f"새로운 통화 처리 시작 - Call-ID: {call_id}")
-						from_number = self.extract_number(sip_layer.from_user)
-						to_number = self.extract_number(sip_layer.to_user)
+						from_number = self.extract_full_number(sip_layer.from_user)
+						to_number = self.extract_full_number(sip_layer.to_user)
 						print(f"발신번호: {from_number}")
 						print(f"수신번호: {to_number}")
 						with self.active_calls_lock:
@@ -2489,16 +2968,98 @@ class Dashboard(QMainWindow):
 						if not sip_user:
 								return ''
 						sip_user = str(sip_user)
-						if 'sip:' in sip_user:
-								number = sip_user.split('sip:')[1].split('@')[0]
-								return ''.join(c for c in number if c.isdigit())
-						if '109' in sip_user:
-								for i, char in enumerate(sip_user):
-										if i > sip_user.index('109') + 2 and char.isalpha():
-												return sip_user[i+1:]
-						return ''.join(c for c in sip_user if c.isdigit())
+						print(f"내선번호 추출 시도: {sip_user}")
+						
+						# 여러 패턴으로 내선번호 추출 시도
+						patterns = [
+								# 1. sip:1234@domain 형태
+								r'sip:(\d{4})@',
+								# 2. <sip:1234@domain> 형태
+								r'<sip:(\d{4})@',
+								# 3. "Display Name" <sip:1234@domain> 형태
+								r'"[^"]*"\s*<sip:(\d{4})@',
+								# 4. 1234@domain 형태
+								r'(\d{4})@',
+								# 5. 단순히 4자리 숫자 (첫 번째가 1-9)
+								r'\b([1-9]\d{3})\b',
+								# 6. tel:+821234 형태에서 뒤 4자리
+								r'tel:\+\d*(\d{4})',
+								# 7. 109로 시작하는 특수 케이스
+								r'109.*?([1-9]\d{3})'
+						]
+						
+						for pattern in patterns:
+								match = re.search(pattern, sip_user)
+								if match:
+										extension = match.group(1)
+										if len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
+												print(f"패턴 '{pattern}'으로 내선번호 추출 성공: {extension}")
+												return extension
+						
+						# 모든 패턴 실패 시 숫자만 추출 (레거시)
+						digits_only = ''.join(c for c in sip_user if c.isdigit())
+						if len(digits_only) >= 4:
+								# 끝에서 4자리 또는 처음 4자리 중 유효한 것
+								for candidate in [digits_only[-4:], digits_only[:4]]:
+										if len(candidate) == 4 and candidate[0] in ['1','2','3','4','5','6','7','8','9']:
+												print(f"숫자 추출으로 내선번호 발견: {candidate}")
+												return candidate
+						
+						print(f"내선번호 추출 실패: {sip_user}")
+						return ''
 				except Exception as e:
 						print(f"전화번호 추출 중 오류: {e}")
+						return ''
+
+		def extract_full_number(self, sip_user):
+				"""전체 전화번호 추출 - 알파벳이 포함된 경우만 내선번호로 처리, 나머지는 전체 번호 표시"""
+				try:
+						if not sip_user:
+								return ''
+						sip_user = str(sip_user)
+						print(f"전체 번호 추출 시도: {sip_user}")
+						
+						# 알파벳이 포함되어 있으면 내선번호 추출 (알파벳 뒤 4자리)
+						if re.search(r'[a-zA-Z]', sip_user):
+								print("알파벳 포함됨 - 내선번호 추출 시도")
+								
+								# 1. 먼저 기존 SIP URI 패턴 확인
+								sip_patterns = [
+										r'sip:([1-9]\d{3})@',
+										r'<sip:([1-9]\d{3})@', 
+										r'"[^"]*"\s*<sip:([1-9]\d{3})@',
+										r'([1-9]\d{3})@'
+								]
+								
+								for pattern in sip_patterns:
+										match = re.search(pattern, sip_user)
+										if match:
+												extension = match.group(1)
+												if len(extension) == 4 and extension[0] in '123456789':
+														print(f"SIP URI에서 내선번호 추출 성공: {extension}")
+														return extension
+								
+								# 2. 알파벳 뒤의 4자리 패턴 확인 (예: 109J7422 → 7422)
+								alpha_pattern = re.search(r'[a-zA-Z]([1-9]\d{3})', sip_user)
+								if alpha_pattern:
+										extension = alpha_pattern.group(1)
+										if len(extension) == 4 and extension[0] in '123456789':
+												print(f"알파벳 뒤 내선번호 추출 성공: {extension}")
+												return extension
+						
+						# 알파벳이 없으면 전체 번호 추출
+						else:
+								print("알파벳 없음 - 전체 번호 추출")
+								# 모든 숫자 추출
+								digits_only = ''.join(c for c in sip_user if c.isdigit())
+								if digits_only:
+										print(f"전체 번호 추출 성공: {digits_only}")
+										return digits_only
+						
+						print(f"번호 추출 실패: {sip_user}")
+						return ''
+				except Exception as e:
+						print(f"전체 번호 추출 중 오류: {e}")
 						return ''
 
 		def get_call_id_from_rtp(self, packet):
@@ -3168,6 +3729,7 @@ class Dashboard(QMainWindow):
 						self.settings_popup = SettingsPopup(self)
 						self.settings_popup.settings_changed.connect(self.update_dashboard_settings)
 						self.settings_popup.path_changed.connect(self.update_storage_path)
+						self.settings_popup.network_ip_changed.connect(self.on_network_ip_changed)
 						self.settings_popup.exec()
 				except Exception as e:
 						print(f"설정 창 표시 중 오류: {e}")

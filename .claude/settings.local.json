@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(cp:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(del test_number_extraction.py)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }
