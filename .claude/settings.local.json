@@ -4,8 +4,22 @@
       "Bash(cp:*)",
       "Bash(ls:*)",
       "Bash(del test_number_extraction.py)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(dir:*)",
+      "Bash(npm --version)",
+      "Bash(taskkill:*)",
+      "Bash(wmic:*)",
+      "Bash(pkill:*)",
+      "Bash(kill:*)",
+      "Bash(./mongodb/bin/mongod:*)",
+      "Bash(mkdir:*)",
+      "Bash(./start_no_admin.bat)",
+      "Bash(./nginx/nginx.exe:*)",
+      "Bash(python:*)"
     ],
-    "deny": []
+    "deny": [],
+    "additionalDirectories": [
+      "D:\\d\\Work_state"
+    ]
   }
 }

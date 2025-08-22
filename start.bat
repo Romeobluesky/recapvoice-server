@@ -1,8 +1,16 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: 관리자 권한 체크
+net session >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo Requesting administrator privileges...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
+
 :: 환경 모드 확인
-for /f "tokens=1,2 delims==" %%A in ('findstr /b "mode" settings.ini') do (
+for /f "tokens=1,2 delims==" %%A in ('findstr /b "mode" "%~dp0settings.ini"') do (
 	set "env_mode=%%B"
 	set "env_mode=!env_mode: =!"
 	echo Mode is: !env_mode!
@@ -11,7 +19,7 @@ for /f "tokens=1,2 delims==" %%A in ('findstr /b "mode" settings.ini') do (
 :: 경로 설정
 if "!env_mode!"=="development" (
 	:: 개발 환경 경로 - settings.ini에서 직접 경로 읽기
-	for /f "tokens=1,2 delims==" %%A in ('findstr /b "dir_path" settings.ini') do (
+	for /f "tokens=1,2 delims==" %%A in ('findstr /b "dir_path" "%~dp0settings.ini"') do (
 		set "dir_path=%%B"
 		set "dir_path=!dir_path: =!"
 		echo Found dir_path: !dir_path!
@@ -95,9 +103,13 @@ if !ERRORLEVEL! neq 0 (
 	echo Failed to start Nginx.
 	goto error
 )
+echo Nginx started successfully.
+
+:: 잠시 대기 (2초)
+ping -n 3 127.0.0.1 >nul
 
 :: MongoDB 설정 읽기
-for /f "tokens=1,2 delims==" %%A in ('findstr /b "host" settings.ini') do (
+for /f "tokens=1,2 delims==" %%A in ('findstr /b "host" "%~dp0settings.ini"') do (
 	set "mongodb_host=%%B"
 	set "mongodb_host=!mongodb_host: =!"
 	echo Found MongoDB host: !mongodb_host!
@@ -117,6 +129,10 @@ if %ERRORLEVEL% neq 0 (
 	echo Failed to start MongoDB.
 	goto error
 )
+echo MongoDB started successfully.
+
+:: 잠시 대기 (3초)
+ping -n 4 127.0.0.1 >nul
 
 
 :: NestJS 시작

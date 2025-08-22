@@ -1,13 +1,5 @@
 # PowerShell 스크립트
 
-# models 폴더 임시 이동
-Write-Host "Moving models folder temporarily..."
-$modelsPath = "packetwave_client\models"
-$tempModelsPath = "models_temp"
-if (Test-Path $modelsPath) {
-    Move-Item -Path $modelsPath -Destination $tempModelsPath -Force
-    Write-Host "Models folder moved to temporary location"
-}
 
 $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--name `"Recap Voice`" " + `
@@ -19,7 +11,6 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--add-data `"voip_monitor.log;.`" " + `
     "--add-data `"crash.log;.`" " + `
     "--add-data `"sequence_errors.log;.`" " + `
-    "--add-data `"docs;docs`" " + `
     "--add-data `"apply_schemas.py;.`" " + `
     "--add-data `"config_loader.py;.`" " + `
     "--add-data `"packet_monitor.py;.`" " + `
@@ -34,8 +25,6 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--add-data `"styles\styles.qss;styles`" " + `
     "--add-data `"images;images`" " + `
     "--add-data `"sounds;sounds`" " + `
-    "--exclude-module `"packetwave_client\models`" " + `
-    "--add-data `"packetwave_client;packetwave_client`" " + `
     "--version-file `"version.txt`" " + `
     "--hidden-import `"pymongo`" " + `
     "--hidden-import `"pydub`" " + `
@@ -69,21 +58,6 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
 Write-Host "Executing PyInstaller command..."
 Invoke-Expression $pyinstaller_cmd
 
-# models 폴더 원래 위치로 복원
-Write-Host "Restoring models folder..."
-if (Test-Path $tempModelsPath) {
-    if (-not (Test-Path "packetwave_client")) {
-        New-Item -ItemType Directory -Path "packetwave_client" -Force
-    }
-    # 기존 models 폴더가 있다면 제거
-    if (Test-Path $modelsPath) {
-        Remove-Item -Path $modelsPath -Recurse -Force
-    }
-    # 정확한 경로로 복원
-    Move-Item -Path $tempModelsPath -Destination $modelsPath -Force
-    Write-Host "Models folder restored to original location: $modelsPath"
-}
-
 # 빌드 완료 후 파일 복사
 $distPath = "dist\Recap Voice"
 if (-not (Test-Path $distPath)) {
@@ -100,13 +74,22 @@ if (Test-Path "settings.ini") {
     # settings.ini 수정
     $settingsPath = "$distPath\settings.ini"
     Write-Host "Modifying settings.ini for production..."
-    $content = Get-Content $settingsPath -Raw
+    $content = Get-Content $settingsPath -Raw -Encoding UTF8
     $installPath = "C:\Program Files (x86)\Recap Voice"
     $content = $content -replace "D:\\Work_state\\packet_wave\\PacketWaveRecord", "$installPath\RecapVoiceRecord"
     $content = $content -replace "mode = development", "mode = production"
     $content = $content -replace "D:\\Work_state\\packet_wave", "$installPath"
-    Set-Content $settingsPath $content -Force
+    Set-Content $settingsPath $content -Encoding UTF8 -Force
     Write-Host "settings.ini modified successfully for production environment"
+
+    # _internal 폴더의 settings.ini도 수정
+    $internalSettingsPath = "$distPath\_internal\settings.ini"
+    if (Test-Path $internalSettingsPath) {
+        Set-Content $internalSettingsPath $content -Encoding UTF8 -Force
+        Write-Host "_internal\settings.ini also modified for production environment"
+    } else {
+        Write-Host "Warning: _internal\settings.ini not found"
+    }
 } else {
     Write-Host "settings.ini not found"
 }

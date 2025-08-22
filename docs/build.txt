@@ -1,0 +1,70 @@
+빌드를 아래의 순으로 진행했고
+1. build.ps1
+2. RecapVoice_Setup.nsi
+
+이후 exe 파일을 실행을 하면
+1. start.bat 을 자동으로 관리자 모드 실행을 시키지 못함. nginx mongodb 등등 외부 프로그램을 실행을 시키지 못함.
+2. 사용자가 이유를 알고 싶어 수동으로 관리자모드 start.bat 을 실행 시키면 아래와 같이 나옴 확인해줘
+```
+FINDSTR: settings.ini을(를) 열 수 없습니다.
+Starting Nginx from: C:\Program Files (x86)\Recap Voice\nginx\nginx.exe
+FINDSTR: settings.ini을(를) 열 수 없습니다.
+Starting MongoDB...
+Starting NestJS...
+
+> packetwave_clint@0.0.1 start
+> nest start
+
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [NestFactory] Starting Nest application...
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] MongooseModule dependencies initialized +34ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] ConfigHostModule dependencies initialized +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] ServeStaticModule dependencies initialized +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] ConfigModule dependencies initialized +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] MongooseCoreModule dependencies initialized +10ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] MongooseModule dependencies initialized +5ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] MongooseModule dependencies initialized +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] MongooseModule dependencies initialized +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] AppModule dependencies initialized +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] MembersModule dependencies initialized +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] AuthModule dependencies initialized +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [InstanceLoader] FilesModule dependencies initialized +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RoutesResolver] AppController {/}: +15ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/, GET} route +2ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/login, GET} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/register, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/users, GET} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RoutesResolver] MembersController {/members}: +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/members, GET} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/members/:member_id, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/members, POST} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/members/update/:id, POST} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/members/delete/:id, POST} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RoutesResolver] FilesController {/files}: +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files, GET} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/latest, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/:id, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files, POST} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/search, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/stream/:id, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/download/:id, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/text/:path(*), GET} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/:id, DELETE} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/info/:id, GET} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/files/transcribe/:id, POST} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RoutesResolver] AuthController {/auth}: +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/auth/register, POST} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/auth/login, POST} route +0ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [RouterExplorer] Mapped {/auth/logout, GET} route +1ms
+[Nest] 23400  - 2025. 08. 22. 오전 5:25:38     LOG [NestApplication] Nest application successfully started +3ms
+WebSocket server is running
+Application is running on: http://localhost:3000
+```
+
+3. C:\Program Files (x86)\Recap Voice\_internal\settings.ini 파일에 대해 빌드할때
+```
+[Environment]
+mode = development
+```
+이 아래와 같이 변경되어야 되는 것 아닌지 확인요청
+mode = production
