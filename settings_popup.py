@@ -67,7 +67,17 @@ class SettingsPopup(QDialog):
 			with open('settings.ini', 'w', encoding='utf-8') as configfile:
 				self.config.write(configfile)
 		else:
-			self.config.read('settings.ini', encoding='utf-8')
+			# BOM 처리를 위해 파일을 먼저 읽고 BOM 제거 후 ConfigParser로 처리
+			try:
+				with open('settings.ini', 'r', encoding='utf-8-sig') as f:
+					content = f.read()
+				# BOM이 제거된 내용으로 ConfigParser 파싱
+				import io
+				self.config.read_string(content)
+			except Exception as e:
+				# BOM 처리 실패 시 기본 방식으로 재시도
+				print(f"BOM 처리 중 오류 발생, 기본 방식으로 재시도: {e}")
+				self.config.read('settings.ini', encoding='utf-8')
 			# MongoDB 섹션이 없을 경우 기본값으로 생성
 			if 'MongoDB' not in self.config:
 				self.config['MongoDB'] = {

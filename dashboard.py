@@ -71,6 +71,30 @@ class Dashboard(QMainWindow):
 
 		_instance = None  # 클래스 변수로 인스턴스 추적
 
+		def get_work_directory(self):
+				"""작업 디렉토리를 결정합니다 (개발/프로덕션 모드에 따라)"""
+				try:
+						# 설정 파일이 존재하는지 확인
+						if os.path.exists('settings.ini'):
+								config = configparser.ConfigParser()
+								config.read('settings.ini', encoding='utf-8')
+
+								# 모드 확인
+								mode = config.get('Environment', 'mode', fallback='development')
+
+								if mode == 'production':
+										# 프로덕션 모드: ProgramFiles(x86) 사용
+										return os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'Recap Voice')
+								else:
+										# 개발 모드: 설정 파일의 dir_path 사용
+										return config.get('DefaultDirectory', 'dir_path', fallback=os.getcwd())
+						else:
+								# 설정 파일이 없으면 현재 디렉토리 사용
+								return os.getcwd()
+				except Exception:
+						# 오류 발생 시 현재 디렉토리 사용
+						return os.getcwd()
+
 		def __init__(self):
 				try:
 						super().__init__()
@@ -84,23 +108,38 @@ class Dashboard(QMainWindow):
 						args, _ = parser.parse_known_args()
 						self.log_level = args.log_level
 
-						# 필수 디렉토리 확인 및 생성
+						# 작업 디렉토리 설정
+						self.work_dir = self.get_work_directory()
+
+						# 필수 디렉토리 확인 및 생성 (작업 디렉토리 기준)
 						required_dirs = ['images', 'logs']
 						for dir_name in required_dirs:
 								try:
-										if not os.path.exists(dir_name):
-												os.makedirs(dir_name)
+										full_path = os.path.join(self.work_dir, dir_name)
+										if not os.path.exists(full_path):
+												os.makedirs(full_path, exist_ok=True)
 								except PermissionError:
-										self.log_error(f"디렉토리 생성 권한 없음: {dir_name}")
-										raise
+										# 권한 문제 시 임시 디렉토리 사용
+										import tempfile
+										temp_dir = tempfile.gettempdir()
+										fallback_path = os.path.join(temp_dir, 'PacketWave', dir_name)
+										try:
+												os.makedirs(fallback_path, exist_ok=True)
+												print(f"권한 문제로 임시 디렉토리 사용: {fallback_path}")
+												# 작업 디렉토리를 임시 디렉토리로 변경
+												self.work_dir = os.path.join(temp_dir, 'PacketWave')
+										except Exception as fallback_error:
+												print(f"임시 디렉토리 생성도 실패: {fallback_error}")
+												raise
 								except Exception as e:
-										self.log_error(f"디렉토리 생성 실패: {dir_name}", e)
+										print(f"디렉토리 생성 실패: {dir_name} - {e}")
 										raise
 
-						# 설정 파일 확인
-						if not os.path.exists('settings.ini'):
-								self.log_error("settings.ini 파일이 없습니다")
-								raise FileNotFoundError("settings.ini 파일이 필요합니다")
+						# 설정 파일 확인 (work_dir 기준)
+						settings_path = os.path.join(self.work_dir, 'settings.ini')
+						if not os.path.exists(settings_path):
+								print(f"settings.ini 파일이 없습니다: {settings_path}")
+								raise FileNotFoundError(f"settings.ini 파일이 필요합니다: {settings_path}")
 
 						# 로그 파일 초기화
 						try:
@@ -119,17 +158,26 @@ class Dashboard(QMainWindow):
 		def initialize_log_file(self):
 				"""로그 파일을 초기화합니다."""
 				try:
-						# 로그 디렉토리 확인
-						log_dir = 'logs'
+						# 로그 디렉토리 확인 (work_dir 기준)
+						log_dir = os.path.join(self.work_dir, 'logs')
 						if not os.path.exists(log_dir):
-								os.makedirs(log_dir)
+								try:
+										os.makedirs(log_dir, exist_ok=True)
+								except PermissionError:
+										# 권한 문제 시 임시 디렉토리 사용
+										import tempfile
+										log_dir = os.path.join(tempfile.gettempdir(), 'PacketWave', 'logs')
+										os.makedirs(log_dir, exist_ok=True)
+										print(f"권한 문제로 로그를 임시 디렉토리에 생성: {log_dir}")
+										# work_dir 업데이트
+										self.work_dir = os.path.join(tempfile.gettempdir(), 'PacketWave')
 
 						# 오늘 날짜로 로그 파일 이름 생성
 						today = datetime.datetime.now().strftime("%Y%m%d")
 						log_file_path = os.path.join(log_dir, f'voip_monitor_{today}.log')
 
 						# 현재 로그 파일로 심볼릭 링크 생성
-						current_log_path = 'voip_monitor.log'
+						current_log_path = os.path.join(self.work_dir, 'logs', 'voip_monitor.log')
 						if os.path.exists(current_log_path):
 								if os.path.islink(current_log_path):
 										os.remove(current_log_path)
@@ -1168,16 +1216,16 @@ class Dashboard(QMainWindow):
 						# pyshark 캡처 프로세스 강제 시작
 						try:
 								self.safe_log("패킷 캡처 시작 중...", "INFO")
-								
+
 								# 실제로 dumpcap/tshark를 시작하려면 패킷을 읽어야 함
 								packet_iter = iter(capture.sniff_continuously())
-								
+
 								# 첫 패킷 시도 (5초 타임아웃)
 								import time
 								import threading
-								
+
 								first_packet = None
-								
+
 								def get_first_packet():
 										nonlocal first_packet
 										try:
@@ -1185,30 +1233,30 @@ class Dashboard(QMainWindow):
 												self.safe_log("✅ 첫 패킷 획득 성공 - tshark/dumpcap 실행됨", "INFO")
 										except Exception as e:
 												self.safe_log(f"첫 패킷 획득 실패: {e}", "ERROR")
-								
+
 								# 별도 스레드에서 첫 패킷 시도
 								packet_thread = threading.Thread(target=get_first_packet, daemon=True)
 								packet_thread.start()
 								packet_thread.join(timeout=5)
-								
+
 								if packet_thread.is_alive():
 										self.safe_log("⚠️ SIP 패킷 캡처 타임아웃 - 더 넓은 필터로 재시도", "WARNING")
 										# SIP 필터를 제거하고 모든 UDP 패킷 캡처
 										capture = pyshark.LiveCapture(interface=interface, bpf_filter="udp")
 										packet_iter = iter(capture.sniff_continuously())
-										
+
 										packet_thread = threading.Thread(target=get_first_packet, daemon=True)
 										packet_thread.start()
 										packet_thread.join(timeout=3)
-										
+
 										if packet_thread.is_alive():
 												self.safe_log("❌ 패킷 캡처 완전 실패 - tshark/dumpcap 시작 안됨", "ERROR")
 												return
 										else:
 												self.safe_log("✅ UDP 패킷 캡처 시작됨 - tshark/dumpcap 실행됨", "INFO")
-								
+
 								packet_count = 1 if first_packet else 0
-								
+
 						except Exception as e:
 								self.safe_log(f"패킷 캡처 시작 실패: {e}", "ERROR")
 								return
@@ -2464,7 +2512,21 @@ class Dashboard(QMainWindow):
 										print(f"에러 메시지: {str(error)}")
 
 						# 파일 로깅
-						with open('voip_monitor.log', 'a', encoding='utf-8', buffering=1) as log_file:  # buffering=1: 라인 버퍼링
+						log_file_path = os.path.join(getattr(self, 'work_dir', os.getcwd()), 'logs', 'voip_monitor.log')
+
+						# 로그 디렉토리가 없으면 생성
+						log_dir = os.path.dirname(log_file_path)
+						if not os.path.exists(log_dir):
+								try:
+										os.makedirs(log_dir, exist_ok=True)
+								except PermissionError:
+										# 권한 문제 시 임시 디렉토리 사용
+										import tempfile
+										temp_log_dir = os.path.join(tempfile.gettempdir(), 'PacketWave', 'logs')
+										os.makedirs(temp_log_dir, exist_ok=True)
+										log_file_path = os.path.join(temp_log_dir, 'voip_monitor.log')
+
+						with open(log_file_path, 'a', encoding='utf-8', buffering=1) as log_file:  # buffering=1: 라인 버퍼링
 								log_file.write(f"\n[{timestamp}] {message}\n")
 								if additional_info:
 										log_file.write(f"추가 정보: {additional_info}\n")

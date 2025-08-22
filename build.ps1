@@ -79,13 +79,14 @@ if (Test-Path "settings.ini") {
     $content = $content -replace "D:\\Work_state\\packet_wave\\PacketWaveRecord", "$installPath\RecapVoiceRecord"
     $content = $content -replace "mode = development", "mode = production"
     $content = $content -replace "D:\\Work_state\\packet_wave", "$installPath"
-    Set-Content $settingsPath $content -Encoding UTF8 -Force
+    $utf8WithoutBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($settingsPath, $content, $utf8WithoutBom)
     Write-Host "settings.ini modified successfully for production environment"
 
     # _internal 폴더의 settings.ini도 수정
     $internalSettingsPath = "$distPath\_internal\settings.ini"
     if (Test-Path $internalSettingsPath) {
-        Set-Content $internalSettingsPath $content -Encoding UTF8 -Force
+        [System.IO.File]::WriteAllText($internalSettingsPath, $content, $utf8WithoutBom)
         Write-Host "_internal\settings.ini also modified for production environment"
     } else {
         Write-Host "Warning: _internal\settings.ini not found"

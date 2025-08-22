@@ -1,5 +1,5 @@
-ï»¿!define APP_NAME "Recap Voice"
-!define VERSION "1.802"
+!define APP_NAME "Recap Voice"
+!define VERSION "1.822"
 !define INSTALL_DIR "$PROGRAMFILES\${APP_NAME}"
 
 Name "${APP_NAME}"
@@ -7,31 +7,31 @@ OutFile "RecapVoice_Setup.exe"
 InstallDir "${INSTALL_DIR}"
 RequestExecutionLevel admin
 
-# ë²„ì „ ì •ë³´ ì¶”ê°€
-VIProductVersion "1.8.0.2"
+# ¹öÀü Á¤º¸ Ãß°¡
+VIProductVersion "1.8.2.2"
 VIAddVersionKey "ProductName" "Recap Voice"
 VIAddVersionKey "CompanyName" "Xpower Networks"
-VIAddVersionKey "FileVersion" "1.802"
-VIAddVersionKey "ProductVersion" "1.802"
+VIAddVersionKey "FileVersion" "1.822"
+VIAddVersionKey "ProductVersion" "1.822"
 VIAddVersionKey "LegalCopyright" "Copyright (c) 2025"
 VIAddVersionKey "FileDescription" "Recap Voice"
 VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
 
-# MUI ì„¤ì •
+# MUI ¼³Á¤
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "WinCore.nsh"
 !include "WinMessages.nsh"
 !include "StrFunc.nsh"
 
-# MUI ì„¤ì •
+# MUI ¼³Á¤
 !define MUI_ABORTWARNING
 !define MUI_ICON "images\recapvoice_squere.ico"
 !define MUI_UNICON "images\recapvoice_squere.ico"
 
-# MUI í˜ì´ì§€
-!define MUI_WELCOMEPAGE_TITLE "Recap Voice ì„¤ì¹˜ í”„ë¡œê·¸ë¨"
-!define MUI_WELCOMEPAGE_TEXT "ì´ í”„ë¡œê·¸ë¨ì€ ìŒì„± íŒ¨í‚·ì„ ìº¡ì²˜í•˜ê³  ë…¹ìŒí•˜ëŠ” í”„ë¡œê·¸ë¨ì…ë‹ˆë‹¤.$\n$\nê³„ì†í•˜ë ¤ë©´ ë‹¤ìŒì„ í´ë¦­í•˜ì„¸ìš”."
+# MUI ÆäÀÌÁö
+!define MUI_WELCOMEPAGE_TITLE "Recap Voice ¼³Ä¡ ÇÁ·Î±×·¥"
+!define MUI_WELCOMEPAGE_TEXT "ÀÌ ÇÁ·Î±×·¥Àº À½¼º ÆĞÅ¶À» Ä¸Ã³ÇÏ°í ³ìÀ½ÇÏ´Â ÇÁ·Î±×·¥ÀÔ´Ï´Ù.$\n$\n°è¼ÓÇÏ·Á¸é ´ÙÀ½À» Å¬¸¯ÇÏ¼¼¿ä."
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "LICENCE.txt"
@@ -39,10 +39,10 @@ VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
-# ì–¸ì–´ ì„¤ì •
+# ¾ğ¾î ¼³Á¤
 !insertmacro MUI_LANGUAGE "Korean"
 
-# ë§¤í¬ë¡œ ì •ì˜
+# ¸ÅÅ©·Î Á¤ÀÇ
 !macro ReplaceInFile SOURCE_FILE SEARCH_TEXT REPLACEMENT
   Push "${SOURCE_FILE}"
   Push "${SEARCH_TEXT}"
@@ -56,98 +56,104 @@ VIAddVersionKey "OriginalFilename" "Recap Voice.exe"
 !macroend
 
 Function .onInit
-    # ê´€ë¦¬ì ê¶Œí•œ ì²´í¬
+    # °ü¸®ÀÚ ±ÇÇÑ Ã¼Å©
     UserInfo::GetAccountType
     Pop $0
     ${If} $0 != "admin"
-        MessageBox MB_ICONSTOP "ê´€ë¦¬ì ê¶Œí•œìœ¼ë¡œ ì‹¤í–‰í•´ì£¼ì„¸ìš”."
+        MessageBox MB_ICONSTOP "°ü¸®ÀÚ ±ÇÇÑÀ¸·Î ½ÇÇàÇØÁÖ¼¼¿ä."
         Abort
     ${EndIf}
 
-    # 32ë¹„íŠ¸ ë ˆì§€ìŠ¤íŠ¸ë¦¬ ë·° ì„¤ì •
+    # 32ºñÆ® ·¹Áö½ºÆ®¸® ºä ¼³Á¤
     SetRegView 32
 
-    # 32ë¹„íŠ¸ í”„ë¡œê·¸ë¨ì´ë¯€ë¡œ ìë™ìœ¼ë¡œ ì ì ˆí•œ Program Files ê²½ë¡œ ì‚¬ìš©
+    # 32ºñÆ® ÇÁ·Î±×·¥ÀÌ¹Ç·Î ÀÚµ¿À¸·Î ÀûÀıÇÑ Program Files °æ·Î »ç¿ë
     StrCpy $INSTDIR "$PROGRAMFILES\${APP_NAME}"
 
-    # ì´ì „ ì„¤ì¹˜ í™•ì¸
+    # ÀÌÀü ¼³Ä¡ È®ÀÎ
     ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString"
     StrCmp $R0 "" done
 
     MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
-        "${APP_NAME}ê°€ ì´ë¯¸ ì„¤ì¹˜ë˜ì–´ ìˆìŠµë‹ˆë‹¤. ì œê±° í›„ ë‹¤ì‹œ ì„¤ì¹˜í•˜ì‹œê² ìŠµë‹ˆê¹Œ?" \
+        "${APP_NAME}°¡ ÀÌ¹Ì ¼³Ä¡µÇ¾î ÀÖ½À´Ï´Ù. Á¦°Å ÈÄ ´Ù½Ã ¼³Ä¡ÇÏ½Ã°Ú½À´Ï±î?" \
         IDOK uninst
     Abort
 
     uninst:
-        # ì¬ì„¤ì¹˜ ì „ í™˜ê²½ ë³€ìˆ˜ ì™„ì „ ì •ë¦¬
+        # Àç¼³Ä¡ Àü È¯°æ º¯¼ö ¿ÏÀü Á¤¸®
         DetailPrint "Cleaning environment variables before reinstall..."
         Call CleanupEnvironmentVariables
 
-        # ì´ì „ ë²„ì „ ì œê±°
+        # ÀÌÀü ¹öÀü Á¦°Å
         ExecWait '$R0 _?=$INSTDIR'
 
     done:
 FunctionEnd
 
 Section "Prerequisites"
-   # prereq í´ë” ìƒì„± ë° ì„¤ì •
+   # prereq Æú´õ »ı¼º ¹× ¼³Á¤
    CreateDirectory "$INSTDIR\prereq"
    SetOutPath "$INSTDIR\prereq"
 
-   # Wireshark & TShark ì„¤ì¹˜
+   # Wireshark & TShark ¼³Ä¡
    DetailPrint "Installing Wireshark and TShark..."
    File "prereq\Wireshark-4.4.2-x64.exe"
    ExecWait '"$INSTDIR\prereq\Wireshark-4.4.2-x64.exe" /desktopicon=no /D=C:\Program Files\Wireshark'
 
-   # Node.js ì„¤ì¹˜
+   # Node.js ¼³Ä¡
    DetailPrint "Installing Node.js..."
    File "prereq\node-v20.18.2-x64.msi"
    ExecWait '"msiexec" /i "$INSTDIR\prereq\node-v20.18.2-x64.msi" /quiet /norestart'
 
-   # FFmpeg ì„¤ì¹˜ (64ë¹„íŠ¸ ë²„ì „)
+   # FFmpeg ¼³Ä¡ (64ºñÆ® ¹öÀü)
    DetailPrint "Installing FFmpeg..."
    CreateDirectory "C:\Program Files\ffmpeg"
    SetOutPath "C:\Program Files\ffmpeg"
    File /r "prereq\ffmpeg\*.*"
 
-   # ì„¤ì¹˜ ê²½ë¡œë¥¼ ë‹¤ì‹œ INSTDIRë¡œ ë³µê·€
+   # ¼³Ä¡ °æ·Î¸¦ ´Ù½Ã INSTDIR·Î º¹±Í
    SetOutPath "$INSTDIR"
 SectionEnd
 
 Section "MainSection"
    SetOutPath "$INSTDIR"
 
-   # ì„¤ì¹˜ ë””ë ‰í† ë¦¬ ë‚´ì— ë…¹ìŒ íŒŒì¼ ì €ì¥ ë””ë ‰í† ë¦¬ ìƒì„±
+   # ¼³Ä¡ µğ·ºÅä¸® ³»¿¡ ³ìÀ½ ÆÄÀÏ ÀúÀå µğ·ºÅä¸® »ı¼º
    SetShellVarContext all
    CreateDirectory "$INSTDIR\RecapVoiceRecord"
    nsExec::ExecToStack 'icacls "$INSTDIR\RecapVoiceRecord" /grant Everyone:(OI)(CI)F'
 
-   # dist í´ë”ì˜ settings.ini íŒŒì¼ì„ ë¨¼ì € ë³µì‚¬
+   # ÇÁ·Î±×·¥ ½ÇÇà ÆÄÀÏ¿¡ ´ëÇÑ ±ÇÇÑ ¼³Á¤
+   nsExec::ExecToStack 'icacls "$INSTDIR" /grant Everyone:(OI)(CI)RX'
+   nsExec::ExecToStack 'icacls "$INSTDIR\*.exe" /grant Everyone:(OI)(CI)F'
+   nsExec::ExecToStack 'icacls "$INSTDIR\*.ini" /grant Everyone:(OI)(CI)F'
+   nsExec::ExecToStack 'icacls "$INSTDIR\*.log" /grant Everyone:(OI)(CI)F'
+
+   # dist Æú´õÀÇ settings.ini ÆÄÀÏÀ» ¸ÕÀú º¹»ç
    File "dist\Recap Voice\settings.ini"
 
-   # settings.ini ë‚´ìš© ìˆ˜ì • 2025-01-07 ì£¼ì„ì²˜ë¦¬
-   #!insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave\PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
-   #!insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave" "$INSTDIR"
+   # settings.ini ³»¿ë ¼öÁ¤ 2025-01-07 ÁÖ¼®Ã³¸®
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave\PacketWaveRecord" "$INSTDIR\RecapVoiceRecord"
+   !insertmacro ReplaceInFile "$INSTDIR\settings.ini" "D:\Work_state\packet_wave" "$INSTDIR"
 
-   # nginx.conf íŒŒì¼ì˜ ê²½ë¡œë„ ìˆ˜ì •
+   # nginx.conf ÆÄÀÏÀÇ °æ·Îµµ ¼öÁ¤
    !insertmacro ReplaceInFile "$INSTDIR\nginx\conf\nginx.conf" "D:\Work_state\packet_wave" "$INSTDIR"
 
-   # ë‚˜ë¨¸ì§€ íŒŒì¼ë“¤ ë³µì‚¬
+   # ³ª¸ÓÁö ÆÄÀÏµé º¹»ç
    File /r "dist\Recap Voice\*.*"
    File /r "mongodb"
    File /r "nginx"
 
-   # packetwave_client ì™¸ë¶€ í´ë”ì—ì„œ ë³µì‚¬
+   # packetwave_client ¿ÜºÎ Æú´õ¿¡¼­ º¹»ç
    DetailPrint "Copying packetwave_client from external folder..."
 
-   ; ì„¤ì¹˜ íŒŒì¼ê³¼ ê°™ì€ ìœ„ì¹˜ì˜ packetwave_client í´ë” í™•ì¸
+   ; ¼³Ä¡ ÆÄÀÏ°ú °°Àº À§Ä¡ÀÇ packetwave_client Æú´õ È®ÀÎ
    StrCpy $R0 "$EXEDIR\packetwave_client"
    ${If} ${FileExists} "$R0"
       DetailPrint "Found packetwave_client folder at: $R0"
       CreateDirectory "$INSTDIR\packetwave_client"
 
-      ; xcopyë¥¼ ì‚¬ìš©í•œ ì „ì²´ í´ë” ë³µì‚¬
+      ; xcopy¸¦ »ç¿ëÇÑ ÀüÃ¼ Æú´õ º¹»ç
       nsExec::ExecToStack 'xcopy "$R0" "$INSTDIR\packetwave_client" /E /I /H /Y'
       Pop $R1
       Pop $R2
@@ -166,7 +172,7 @@ Section "MainSection"
 
    SetOutPath "$INSTDIR"
 
-   # ê¸°ì¡´ PATH ê°’ ë³´ì¡´í•˜ë©´ì„œ ìƒˆë¡œìš´ ê²½ë¡œ ì¶”ê°€
+   # ±âÁ¸ PATH °ª º¸Á¸ÇÏ¸é¼­ »õ·Î¿î °æ·Î Ãß°¡
    Push "C:\Program Files\nodejs"
    Call AddToPath
    Push "C:\Program Files\Npcap"
@@ -182,25 +188,25 @@ Section "MainSection"
    Push "$INSTDIR\packetwave_client\node_modules"
    Call AddToPath
 
-   # í™˜ê²½ë³€ìˆ˜ ì„¤ì • í›„ ë¡œê·¸ ì¶œë ¥
+   # È¯°æº¯¼ö ¼³Á¤ ÈÄ ·Î±× Ãâ·Â
    ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
    DetailPrint "Updated PATH: $0"
 
-   # ë°”ë¡œê°€ê¸° ìƒì„±
+   # ¹Ù·Î°¡±â »ı¼º
    CreateDirectory "$SMPROGRAMS\${APP_NAME}"
    CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe"
    CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\Recap Voice.exe"
 
    WriteUninstaller "$INSTDIR\uninstall.exe"
 
-   # ì œì–´íŒ ë“±ë¡
+   # Á¦¾îÆÇ µî·Ï
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayName" "${APP_NAME}"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString" "$INSTDIR\uninstall.exe"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayIcon" "$INSTDIR\Recap Voice.exe"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "Publisher" "Xpower Networks"
    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayVersion" "${VERSION}"
 
-   # ì„¤ì¹˜ ì™„ë£Œ í›„ ìµœì¢… PATH ê¸°ë¡
+   # ¼³Ä¡ ¿Ï·á ÈÄ ÃÖÁ¾ PATH ±â·Ï
    ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
    FileWrite $9 "Final PATH: $0$\r$\n"
    FileClose $9
@@ -253,15 +259,15 @@ Function ReplaceInFile
 FunctionEnd
 
 Function AddToPath
-   Exch $0  ; ì¶”ê°€í•  ê²½ë¡œ
-   Push $1  ; í˜„ì¬ PATH ê°’
-   Push $2  ; ì„ì‹œ ë³€ìˆ˜
-   Push $3  ; ë¬¸ìì—´ ê¸¸ì´ ì €ì¥ìš©
+   Exch $0  ; Ãß°¡ÇÒ °æ·Î
+   Push $1  ; ÇöÀç PATH °ª
+   Push $2  ; ÀÓ½Ã º¯¼ö
+   Push $3  ; ¹®ÀÚ¿­ ±æÀÌ ÀúÀå¿ë
 
-   # í˜„ì¬ ì‹œìŠ¤í…œì˜ PATH ê°’ì„ ê°€ì ¸ì˜´
+   # ÇöÀç ½Ã½ºÅÛÀÇ PATH °ªÀ» °¡Á®¿È
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
 
-   # ì´ë¯¸ ê²½ë¡œê°€ ì¡´ì¬í•˜ëŠ”ì§€ í™•ì¸
+   # ÀÌ¹Ì °æ·Î°¡ Á¸ÀçÇÏ´ÂÁö È®ÀÎ
    Push $1
    Push "$0"
    Call StrStr
@@ -269,37 +275,37 @@ Function AddToPath
    StrCmp $2 "" NotFound Found
 
    Found:
-      DetailPrint "'$0' ê²½ë¡œê°€ ì´ë¯¸ PATHì— ì¡´ì¬í•©ë‹ˆë‹¤."
+      DetailPrint "'$0' °æ·Î°¡ ÀÌ¹Ì PATH¿¡ Á¸ÀçÇÕ´Ï´Ù."
       Goto done
 
    NotFound:
-      # ìƒˆë¡œìš´ PATH ê¸¸ì´ ê³„ì‚°
+      # »õ·Î¿î PATH ±æÀÌ °è»ê
       StrLen $3 $1
       StrLen $2 $0
       IntOp $3 $3 + $2
-      IntOp $3 $3 + 1  # ì„¸ë¯¸ì½œë¡  ê¸¸ì´ ì¶”ê°€
+      IntOp $3 $3 + 1  # ¼¼¹ÌÄİ·Ğ ±æÀÌ Ãß°¡
 
-      # PATH ê¸¸ì´ ì²´í¬ (8000ì ì œí•œ, ì—¬ìœ  ê³µê°„ í™•ë³´)
+      # PATH ±æÀÌ Ã¼Å© (8000ÀÚ Á¦ÇÑ, ¿©À¯ °ø°£ È®º¸)
       ${If} $3 > 8000
-         MessageBox MB_OK|MB_ICONEXCLAMATION "PATH í™˜ê²½ë³€ìˆ˜ê°€ ë„ˆë¬´ ê¹ë‹ˆë‹¤. ìƒˆë¡œìš´ ê²½ë¡œë¥¼ ì¶”ê°€í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤."
+         MessageBox MB_OK|MB_ICONEXCLAMATION "PATH È¯°æº¯¼ö°¡ ³Ê¹« ±é´Ï´Ù. »õ·Î¿î °æ·Î¸¦ Ãß°¡ÇÒ ¼ö ¾ø½À´Ï´Ù."
          Goto done
       ${EndIf}
 
-      # ìƒˆ ê²½ë¡œ ì¶”ê°€ (ê¸°ì¡´ PATH ìœ ì§€)
+      # »õ °æ·Î Ãß°¡ (±âÁ¸ PATH À¯Áö)
       ${If} $1 != ""
-         StrCpy $2 $1 1 -1  # ë§ˆì§€ë§‰ ë¬¸ì í™•ì¸
+         StrCpy $2 $1 1 -1  # ¸¶Áö¸· ¹®ÀÚ È®ÀÎ
          ${If} $2 != ";"
-            StrCpy $1 "$1;"  # ì„¸ë¯¸ì½œë¡  ì¶”ê°€
+            StrCpy $1 "$1;"  # ¼¼¹ÌÄİ·Ğ Ãß°¡
          ${EndIf}
-         StrCpy $1 "$1$0"  # ìƒˆ ê²½ë¡œ ì¶”ê°€
+         StrCpy $1 "$1$0"  # »õ °æ·Î Ãß°¡
       ${Else}
          StrCpy $1 "$0"
       ${EndIf}
 
-      # PATH í™˜ê²½ ë³€ìˆ˜ ì—…ë°ì´íŠ¸
+      # PATH È¯°æ º¯¼ö ¾÷µ¥ÀÌÆ®
       WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $1
       SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
-      DetailPrint "'$0' ê²½ë¡œê°€ PATHì— ì¶”ê°€ë˜ì—ˆìŠµë‹ˆë‹¤."
+      DetailPrint "'$0' °æ·Î°¡ PATH¿¡ Ãß°¡µÇ¾ú½À´Ï´Ù."
 
 done:
    Pop $3
@@ -338,10 +344,10 @@ Function CleanupEnvironmentVariables
 
    DetailPrint "Removing all Recap Voice related PATH entries..."
 
-   # í˜„ì¬ PATH ì½ê¸°
+   # ÇöÀç PATH ÀĞ±â
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
 
-   # ê° ê²½ë¡œë¥¼ ìˆœì°¨ì ìœ¼ë¡œ ì œê±°
+   # °¢ °æ·Î¸¦ ¼øÂ÷ÀûÀ¸·Î Á¦°Å
    Push "$INSTDIR\nginx"
    Call RemoveFromPathInstall
    Push "$INSTDIR\mongodb\bin"
@@ -357,7 +363,7 @@ Function CleanupEnvironmentVariables
    Push "C:\Program Files\ffmpeg\bin"
    Call RemoveFromPathInstall
 
-   # ë³€ê²½ì‚¬í•­ ì ìš©
+   # º¯°æ»çÇ× Àû¿ë
    SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
    DetailPrint "Environment variables cleaned successfully"
 
@@ -375,10 +381,10 @@ Function RemoveFromPathInstall
    Push $6
 
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   StrCpy $5 $1 1 -1 # ë§ˆì§€ë§‰ ë¬¸ì ê°€ì ¸ì˜¤ê¸°
+   StrCpy $5 $1 1 -1 # ¸¶Áö¸· ¹®ÀÚ °¡Á®¿À±â
 
    ${If} $5 != ";"
-      StrCpy $1 "$1;" # ë§ˆì§€ë§‰ì— ì„¸ë¯¸ì½œë¡  ì¶”ê°€
+      StrCpy $1 "$1;" # ¸¶Áö¸·¿¡ ¼¼¹ÌÄİ·Ğ Ãß°¡
    ${EndIf}
 
    Push $1
@@ -389,13 +395,13 @@ Function RemoveFromPathInstall
 
    StrLen $3 "$0;"
    StrLen $4 $2
-   StrCpy $5 $1 -$4 # ì œê±°í•  ë¶€ë¶„ ì´ì „ê¹Œì§€
-   StrCpy $6 $2 "" $3 # ì œê±°í•  ë¶€ë¶„ ì´í›„ë¶€í„°
+   StrCpy $5 $1 -$4 # Á¦°ÅÇÒ ºÎºĞ ÀÌÀü±îÁö
+   StrCpy $6 $2 "" $3 # Á¦°ÅÇÒ ºÎºĞ ÀÌÈÄºÎÅÍ
    StrCpy $3 "$5$6"
 
-   StrCpy $5 $3 1 -1 # ë§ˆì§€ë§‰ ë¬¸ì í™•ì¸
+   StrCpy $5 $3 1 -1 # ¸¶Áö¸· ¹®ÀÚ È®ÀÎ
    ${If} $5 == ";"
-      StrCpy $3 $3 -1 # ë§ˆì§€ë§‰ ì„¸ë¯¸ì½œë¡  ì œê±°
+      StrCpy $3 $3 -1 # ¸¶Áö¸· ¼¼¹ÌÄİ·Ğ Á¦°Å
    ${EndIf}
 
    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $3
@@ -412,7 +418,7 @@ Function RemoveFromPathInstall
 FunctionEnd
 
 Section "Uninstall"
-   # ì‹¤í–‰ ì¤‘ì¸ í”„ë¡œì„¸ìŠ¤ ì¢…ë£Œ
+   # ½ÇÇà ÁßÀÎ ÇÁ·Î¼¼½º Á¾·á
    DetailPrint "Terminating running processes..."
    ExecWait 'taskkill /f /im "Recap Voice.exe" /t'
    ExecWait 'taskkill /f /im "nginx.exe" /t'
@@ -420,9 +426,9 @@ Section "Uninstall"
    ExecWait 'taskkill /f /im "node.exe" /t'
    ExecWait 'taskkill /f /im "Dumpcap.exe" /t'
 
-   Sleep 2000  # í”„ë¡œì„¸ìŠ¤ê°€ ì™„ì „íˆ ì¢…ë£Œë˜ê¸¸ ê¸°ë‹¤ë¦¼
+   Sleep 2000  # ÇÁ·Î¼¼½º°¡ ¿ÏÀüÈ÷ Á¾·áµÇ±æ ±â´Ù¸²
 
-   # í™˜ê²½ ë³€ìˆ˜ ì œê±°
+   # È¯°æ º¯¼ö Á¦°Å
    DetailPrint "Removing environment variables..."
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
    !insertmacro un.RemovePath "$INSTDIR\nginx"
@@ -433,38 +439,38 @@ Section "Uninstall"
    !insertmacro un.RemovePath "C:\Program Files\Wireshark"
    !insertmacro un.RemovePath "C:\Program Files\ffmpeg\bin"
 
-   # í™˜ê²½ ë³€ìˆ˜ ë³€ê²½ì‚¬í•­ ì ìš©
+   # È¯°æ º¯¼ö º¯°æ»çÇ× Àû¿ë
    SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
    DetailPrint "Environment variables removed successfully"
 
-   # ë°”íƒ•í™”ë©´ ì•„ì´ì½˜ ì œê±°
+   # ¹ÙÅÁÈ­¸é ¾ÆÀÌÄÜ Á¦°Å
    SetShellVarContext all
    Delete "$DESKTOP\${APP_NAME}.lnk"
    Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"
    RMDir "$SMPROGRAMS\${APP_NAME}"
 
-   # ëª¨ë“  íŒŒì¼ ì‚­ì œ ì‹œë„
+   # ¸ğµç ÆÄÀÏ »èÁ¦ ½Ãµµ
    DetailPrint "Removing installation directory..."
    Delete "$INSTDIR\uninstall.exe"
    RMDir /r /REBOOTOK "$INSTDIR"
 
-   # ë…¹ìŒ íŒŒì¼ í´ë” ì‚­ì œ ì—¬ë¶€ í™•ì¸
-   MessageBox MB_YESNO "ìŒì„± ë…¹ìŒ íŒŒì¼ì´ ì €ì¥ëœ í´ë”ë¥¼ ì‚­ì œí•˜ì‹œê² ìŠµë‹ˆê¹Œ?" IDNO skip_delete_records
+   # ³ìÀ½ ÆÄÀÏ Æú´õ »èÁ¦ ¿©ºÎ È®ÀÎ
+   MessageBox MB_YESNO "À½¼º ³ìÀ½ ÆÄÀÏÀÌ ÀúÀåµÈ Æú´õ¸¦ »èÁ¦ÇÏ½Ã°Ú½À´Ï±î?" IDNO skip_delete_records
    SetShellVarContext all
    RMDir /r "$INSTDIR\RecapVoiceRecord"
    Goto records_deletion_done
 
    skip_delete_records:
-   DetailPrint "ìŒì„± ë…¹ìŒ íŒŒì¼ì„ ë³´ì¡´í•©ë‹ˆë‹¤."
+   DetailPrint "À½¼º ³ìÀ½ ÆÄÀÏÀ» º¸Á¸ÇÕ´Ï´Ù."
 
    records_deletion_done:
 
-   # ì œì–´íŒì—ì„œ í”„ë¡œê·¸ë¨ ì œê±°
+   # Á¦¾îÆÇ¿¡¼­ ÇÁ·Î±×·¥ Á¦°Å
    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
-   # í´ë”ê°€ ì—¬ì „íˆ ì¡´ì¬í•˜ëŠ”ì§€ í™•ì¸
+   # Æú´õ°¡ ¿©ÀüÈ÷ Á¸ÀçÇÏ´ÂÁö È®ÀÎ
    ${If} ${FileExists} "$INSTDIR"
-       MessageBox MB_OK|MB_ICONINFORMATION "ì¼ë¶€ íŒŒì¼ì´ ì‚¬ìš© ì¤‘ì´ì–´ì„œ ì™„ì „íˆ ì œê±°ë˜ì§€ ì•Šì•˜ìŠµë‹ˆë‹¤.$\nì‹œìŠ¤í…œ ì¬ì‹œì‘ í›„ ìë™ìœ¼ë¡œ ì œê±°ë©ë‹ˆë‹¤."
+       MessageBox MB_OK|MB_ICONINFORMATION "ÀÏºÎ ÆÄÀÏÀÌ »ç¿ë ÁßÀÌ¾î¼­ ¿ÏÀüÈ÷ Á¦°ÅµÇÁö ¾Ê¾Ò½À´Ï´Ù.$\n½Ã½ºÅÛ Àç½ÃÀÛ ÈÄ ÀÚµ¿À¸·Î Á¦°ÅµË´Ï´Ù."
    ${EndIf}
 SectionEnd
 
@@ -478,10 +484,10 @@ Function un.RemoveFromPath
    Push $6
 
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   StrCpy $5 $1 1 -1 # ë§ˆì§€ë§‰ ë¬¸ì ê°€ì ¸ì˜¤ê¸°
+   StrCpy $5 $1 1 -1 # ¸¶Áö¸· ¹®ÀÚ °¡Á®¿À±â
 
    ${If} $5 != ";"
-      StrCpy $1 "$1;" # ë§ˆì§€ë§‰ì— ì„¸ë¯¸ì½œë¡  ì¶”ê°€
+      StrCpy $1 "$1;" # ¸¶Áö¸·¿¡ ¼¼¹ÌÄİ·Ğ Ãß°¡
    ${EndIf}
 
    Push $1
@@ -492,13 +498,13 @@ Function un.RemoveFromPath
 
    StrLen $3 "$0;"
    StrLen $4 $2
-   StrCpy $5 $1 -$4 # ì œê±°í•  ë¶€ë¶„ ì´ì „ê¹Œì§€
-   StrCpy $6 $2 "" $3 # ì œê±°í•  ë¶€ë¶„ ì´í›„ë¶€í„°
+   StrCpy $5 $1 -$4 # Á¦°ÅÇÒ ºÎºĞ ÀÌÀü±îÁö
+   StrCpy $6 $2 "" $3 # Á¦°ÅÇÒ ºÎºĞ ÀÌÈÄºÎÅÍ
    StrCpy $3 "$5$6"
 
-   StrCpy $5 $3 1 -1 # ë§ˆì§€ë§‰ ë¬¸ì í™•ì¸
+   StrCpy $5 $3 1 -1 # ¸¶Áö¸· ¹®ÀÚ È®ÀÎ
    ${If} $5 == ";"
-      StrCpy $3 $3 -1 # ë§ˆì§€ë§‰ ì„¸ë¯¸ì½œë¡  ì œê±°
+      StrCpy $3 $3 -1 # ¸¶Áö¸· ¼¼¹ÌÄİ·Ğ Á¦°Å
    ${EndIf}
 
    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $3

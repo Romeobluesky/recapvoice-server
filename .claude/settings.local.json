@@ -27,7 +27,9 @@
       "Bash(chcp 65001)",
       "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -v)",
       "Bash(\"D:\\Work_state\\packet_wave\\dashboard.py\")",
-      "Bash(del test_capture_simple.py test_final_capture.py test_tshark.py debug_capture.py debug_capture_broad.py)"
+      "Bash(del test_capture_simple.py test_final_capture.py test_tshark.py debug_capture.py debug_capture_broad.py)",
+      "Bash(.build.ps1)",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "additionalDirectories": [
