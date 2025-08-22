@@ -65,6 +65,9 @@ class Dashboard(QMainWindow):
 		block_creation_signal = Signal(str)
 		block_update_signal = Signal(str, str, str)
 		extension_update_signal = Signal(str)  # 내선번호 업데이트 Signal
+		start_led_timer_signal = Signal(object)  # LED 타이머 시작 Signal
+		sip_packet_signal = Signal(object)  # SIP 패킷 분석 Signal
+		safe_log_signal = Signal(str, str)  # 스레드 안전 로깅 Signal
 
 		_instance = None  # 클래스 변수로 인스턴스 추적
 
@@ -211,8 +214,13 @@ class Dashboard(QMainWindow):
 								self.setWindowIcon(QIcon(resource_path("images/recapvoice_squere.ico")))
 								self.setWindowTitle("Recap Voice")
 								self.setAttribute(Qt.WA_QuitOnClose, False)
-								# Signal 연결
-								self.extension_update_signal.connect(self.update_extension_in_main_thread)
+								# Signal 연결 - 메인 스레드에서 안전하게 실행되도록 QueuedConnection 사용
+								self.extension_update_signal.connect(self.update_extension_in_main_thread, Qt.QueuedConnection)
+								self.start_led_timer_signal.connect(self.start_led_timer_in_main_thread, Qt.QueuedConnection)
+								self.sip_packet_signal.connect(self.analyze_sip_packet_in_main_thread, Qt.QueuedConnection)
+
+								# 스레드 안전 로깅을 위한 시그널 연결
+								self.safe_log_signal.connect(self.log_to_sip_console, Qt.QueuedConnection)
 								self.settings_popup = SettingsPopup()
 								self.active_calls_lock = threading.RLock()
 								self.active_calls = {}
@@ -469,6 +477,24 @@ class Dashboard(QMainWindow):
 						self.internalnumber = None
 
 		def cleanup(self):
+				# 모든 타이머 정리
+				try:
+						# 기본 타이머들 정리
+						for timer_name in ['voip_timer', 'packet_timer', 'resource_timer', 'duration_timer', 'hide_console_timer']:
+								if hasattr(self, timer_name):
+										timer = getattr(self, timer_name)
+										if timer and hasattr(timer, 'stop'):
+												timer.stop()
+												timer.deleteLater()
+
+						# LED 타이머들 정리
+						if hasattr(self, 'extension_list_container'):
+								self.cleanup_led_timers(self.extension_list_container)
+
+						print("타이머 정리 완료")
+				except Exception as e:
+						print(f"타이머 정리 중 오류: {e}")
+
 				# 기존 cleanup 코드
 				if hasattr(self, 'capture') and self.capture:
 						try:
@@ -478,6 +504,12 @@ class Dashboard(QMainWindow):
 										self.capture.close()
 						except Exception as e:
 								print(f"Cleanup error: {e}")
+
+				# tshark와 dumpcap 프로세스 정리
+				try:
+						self.stop_wireshark_processes()
+				except Exception as e:
+						print(f"Wireshark 프로세스 정리 중 오류: {e}")
 
 				# WebSocket 서버 정리
 				if hasattr(self, 'websocket_server') and self.websocket_server:
@@ -529,6 +561,7 @@ class Dashboard(QMainWindow):
 
 				# SIP 콘솔 초기화 메시지
 				QTimer.singleShot(500, self.init_sip_console_welcome)
+
 
 		def load_network_interfaces(self):
 				try:
@@ -802,6 +835,9 @@ class Dashboard(QMainWindow):
 								self.log_error("Wireshark가 설치되어 있지 않습니다")
 								return
 
+						# tshark와 dumpcap 실행 확인 및 시작
+						self.start_wireshark_processes()
+
 						# 캡처 스레드 시작
 						self.capture_thread = threading.Thread(
 								target=self.capture_packets,
@@ -813,6 +849,160 @@ class Dashboard(QMainWindow):
 
 				except Exception as e:
 						self.log_error("패킷 캡처 시작 실패", e)
+
+		def start_wireshark_processes(self):
+				"""tshark와 dumpcap 프로세스 직접 실행"""
+				try:
+						wireshark_path = get_wireshark_path()
+						tshark_path = os.path.join(wireshark_path, "tshark.exe")
+						dumpcap_path = os.path.join(wireshark_path, "dumpcap.exe")
+
+						config = load_config()
+						target_ip = config.get('Network', 'ip', fallback=None)
+
+						# 1. tshark 프로세스 실행
+						if os.path.exists(tshark_path):
+								try:
+										# 인터페이스 번호 찾기
+										interface_cmd = [tshark_path, "-D"]
+										result = subprocess.run(interface_cmd, capture_output=True, text=True, timeout=10)
+										if result.returncode == 0:
+												self.log_error(f"tshark 인터페이스 목록 조회 성공", additional_info={"output": result.stdout[:200]})
+
+												# 선택된 인터페이스의 번호 찾기
+												interface_number = self.get_interface_number(result.stdout, self.selected_interface)
+
+												if interface_number:
+														# tshark 실행 명령어 구성
+														if target_ip:
+																capture_filter = f"host {target_ip} or port 5060"
+														else:
+																capture_filter = "port 5060"
+
+														tshark_cmd = [
+																tshark_path,
+																"-i", str(interface_number),
+																"-f", capture_filter,
+																"-l"  # 실시간 출력
+														]
+
+														# tshark 프로세스 시작 (백그라운드)
+														self.tshark_process = subprocess.Popen(
+																tshark_cmd,
+																stdout=subprocess.PIPE,
+																stderr=subprocess.PIPE,
+																creationflags=subprocess.CREATE_NO_WINDOW
+														)
+														self.log_error("tshark 프로세스 시작됨", additional_info={"pid": self.tshark_process.pid})
+												else:
+														self.log_error(f"인터페이스 '{self.selected_interface}' 번호를 찾을 수 없습니다")
+								except Exception as e:
+										self.log_error(f"tshark 실행 실패: {e}")
+						else:
+								self.log_error(f"tshark.exe를 찾을 수 없습니다: {tshark_path}")
+
+						# 2. dumpcap 프로세스 실행
+						if os.path.exists(dumpcap_path):
+								try:
+										# dumpcap 인터페이스 목록 조회
+										dumpcap_cmd = [dumpcap_path, "-D"]
+										result = subprocess.run(dumpcap_cmd, capture_output=True, text=True, timeout=10)
+										if result.returncode == 0:
+												self.log_error(f"dumpcap 인터페이스 목록 조회 성공", additional_info={"output": result.stdout[:200]})
+
+												# 선택된 인터페이스의 번호 찾기
+												interface_number = self.get_interface_number(result.stdout, self.selected_interface)
+
+												if interface_number:
+														# dumpcap 실행 명령어 구성 (임시 파일로 캡처)
+														temp_file = os.path.join(os.getcwd(), "temp_capture.pcap")
+														if target_ip:
+																capture_filter = f"host {target_ip} or port 5060"
+														else:
+																capture_filter = "port 5060"
+
+														dumpcap_cmd = [
+																dumpcap_path,
+																"-i", str(interface_number),
+																"-f", capture_filter,
+																"-w", temp_file,
+																"-b", "files:3"  # 3개 파일로 로테이션
+														]
+
+														# dumpcap 프로세스 시작 (백그라운드)
+														self.dumpcap_process = subprocess.Popen(
+																dumpcap_cmd,
+																stdout=subprocess.PIPE,
+																stderr=subprocess.PIPE,
+																creationflags=subprocess.CREATE_NO_WINDOW
+														)
+														self.log_error("dumpcap 프로세스 시작됨", additional_info={"pid": self.dumpcap_process.pid})
+												else:
+														self.log_error(f"dumpcap용 인터페이스 '{self.selected_interface}' 번호를 찾을 수 없습니다")
+								except Exception as e:
+										self.log_error(f"dumpcap 실행 실패: {e}")
+						else:
+								self.log_error(f"dumpcap.exe를 찾을 수 없습니다: {dumpcap_path}")
+
+				except Exception as e:
+						self.log_error(f"Wireshark 프로세스 시작 실패: {e}")
+
+		def get_interface_number(self, interface_list, interface_name):
+				"""인터페이스 목록에서 선택된 인터페이스의 번호 찾기"""
+				try:
+						lines = interface_list.strip().split('\n')
+						for line in lines:
+								if interface_name in line:
+										parts = line.split('.')
+										if len(parts) > 0 and parts[0].strip().isdigit():
+												return int(parts[0].strip())
+						return None
+				except Exception as e:
+						self.log_error(f"인터페이스 번호 추출 실패: {e}")
+						return None
+
+		def stop_wireshark_processes(self):
+				"""tshark와 dumpcap 프로세스 종료"""
+				try:
+						# tshark 프로세스 종료
+						if hasattr(self, 'tshark_process') and self.tshark_process:
+								try:
+										self.tshark_process.terminate()
+										self.tshark_process.wait(timeout=5)
+										self.log_error("tshark 프로세스 종료됨")
+								except subprocess.TimeoutExpired:
+										self.tshark_process.kill()
+										self.log_error("tshark 프로세스 강제 종료됨")
+								except Exception as e:
+										self.log_error(f"tshark 프로세스 종료 실패: {e}")
+								finally:
+										self.tshark_process = None
+
+						# dumpcap 프로세스 종료
+						if hasattr(self, 'dumpcap_process') and self.dumpcap_process:
+								try:
+										self.dumpcap_process.terminate()
+										self.dumpcap_process.wait(timeout=5)
+										self.log_error("dumpcap 프로세스 종료됨")
+								except subprocess.TimeoutExpired:
+										self.dumpcap_process.kill()
+										self.log_error("dumpcap 프로세스 강제 종료됨")
+								except Exception as e:
+										self.log_error(f"dumpcap 프로세스 종료 실패: {e}")
+								finally:
+										self.dumpcap_process = None
+
+						# 임시 캡처 파일 정리
+						temp_file = os.path.join(os.getcwd(), "temp_capture.pcap")
+						try:
+								if os.path.exists(temp_file):
+										os.remove(temp_file)
+										self.log_error("임시 캡처 파일 삭제됨")
+						except Exception as e:
+								self.log_error(f"임시 캡처 파일 삭제 실패: {e}")
+
+				except Exception as e:
+						self.log_error(f"Wireshark 프로세스 종료 실패: {e}")
 
 		def restart_packet_capture(self, new_ip=None):
 				"""패킷 캡처 재시작 (Network IP 변경 시 사용)"""
@@ -831,6 +1021,9 @@ class Dashboard(QMainWindow):
 												# capture 종료 플래그 설정 (나중에 capture_packets에서 확인)
 												self.capture_stop_requested = True
 												self.capture = None
+
+												# tshark와 dumpcap 프로세스 종료
+												self.stop_wireshark_processes()
 										except Exception as e:
 												print(f"캡처 객체 종료 중 오류: {e}")
 
@@ -912,38 +1105,121 @@ class Dashboard(QMainWindow):
 						if target_ip:
 								# Wireshark와 동일한 단순 필터
 								display_filter = f'(host {target_ip}) and (sip or udp)'
-								self.log_to_sip_console(f"포트미러링 필터 적용: {display_filter}", "INFO")
+								self.safe_log(f"포트미러링 필터 적용: {display_filter}", "INFO")
 								print(f"사용중인 필터: {display_filter}")
 						else:
 								# 모든 SIP 패킷 캡처 (테스트용)
 								display_filter = 'sip'
-								self.log_to_sip_console(f"SIP 전용 필터 적용: {display_filter}", "INFO")
+								self.safe_log(f"SIP 전용 필터 적용: {display_filter}", "INFO")
 								print(f"사용중인 필터: {display_filter}")
 
-						# 디버깅 모드: 필터 없이 모든 패킷 캡처 (임시)
-						debug_mode = True  # SIP 패킷을 찾기 위한 디버깅
+						# 개선된 필터링 및 디버깅 모드
+						debug_mode = False  # 디버깅 모드 활성화 여부
+
 						if debug_mode:
 								print("🔍 디버깅 모드: 모든 패킷 캡처 시작")
-								self.log_to_sip_console("🔍 디버깅 모드: 모든 패킷 캡처", "INFO")
+								self.safe_log("디버깅 모드: 모든 패킷 캡처", "INFO")
 								capture = pyshark.LiveCapture(interface=interface)  # 필터 없음
 						else:
-								capture = pyshark.LiveCapture(
-										interface=interface,
-										display_filter=display_filter
-								)
+								# 개선된 필터: 더 넓은 범위로 SIP 패킷 캡처
+								if target_ip:
+										# IP 기반 필터를 더 관대하게 변경
+										fallback_filter = f'host {target_ip} or sip or (udp and port 5060)'
+										print(f"폴백 필터: {fallback_filter}")
+								else:
+										# SIP 및 RTP 패킷을 모두 캡처
+										fallback_filter = 'sip or (udp and portrange 5060-5080) or (udp and portrange 10000-20000)'
+
+								try:
+										# 먼저 필터 없이 시도 (가장 안정적)
+										print("필터 없이 모든 패킷 캡처 시도...")
+										capture = pyshark.LiveCapture(interface=interface)
+										self.safe_log("필터 없는 패킷 캡처로 시작", "INFO")
+								except Exception as filter_error:
+										print(f"LiveCapture 생성 실패: {filter_error}")
+										self.safe_log(f"캡처 객체 생성 실패: {filter_error}", "ERROR")
+										return
 
 						# 전역 변수로 capture 객체 저장 (재시작 시 사용)
 						self.capture = capture
 
 						# 패킷 캡처 시작
-						self.log_to_sip_console(f"패킷 캡처 시작 - 인터페이스: {interface}", "INFO")
-						packet_count = 0
-						for packet in capture.sniff_continuously():
+						self.safe_log(f"패킷 캡처 시작 - 인터페이스: {interface}", "INFO")
+
+						# tshark 프로세스 실행 테스트 및 강제 실행
+						tshark_path = os.path.join(get_wireshark_path(), "tshark.exe")
+						self.safe_log(f"tshark 경로: {tshark_path}", "INFO")
+
+						# tshark 직접 실행 테스트
+						try:
+								test_cmd = [tshark_path, "-D"]
+								result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10, encoding='utf-8', errors='replace')
+								if result.returncode == 0:
+										self.safe_log("tshark 실행 가능 확인", "INFO")
+								else:
+										error_msg = result.stderr
+										self.safe_log(f"tshark 실행 실패: {error_msg}", "ERROR")
+										return
+						except Exception as e:
+								error_str = str(e)
+								self.safe_log(f"tshark 테스트 실패: {error_str}", "ERROR")
+								return
+
+						# pyshark 캡처 프로세스 강제 시작
+						try:
+								self.safe_log("패킷 캡처 시작 중...", "INFO")
+								
+								# 실제로 dumpcap/tshark를 시작하려면 패킷을 읽어야 함
+								packet_iter = iter(capture.sniff_continuously())
+								
+								# 첫 패킷 시도 (5초 타임아웃)
+								import time
+								import threading
+								
+								first_packet = None
+								
+								def get_first_packet():
+										nonlocal first_packet
+										try:
+												first_packet = next(packet_iter)
+												self.safe_log("✅ 첫 패킷 획득 성공 - tshark/dumpcap 실행됨", "INFO")
+										except Exception as e:
+												self.safe_log(f"첫 패킷 획득 실패: {e}", "ERROR")
+								
+								# 별도 스레드에서 첫 패킷 시도
+								packet_thread = threading.Thread(target=get_first_packet, daemon=True)
+								packet_thread.start()
+								packet_thread.join(timeout=5)
+								
+								if packet_thread.is_alive():
+										self.safe_log("⚠️ SIP 패킷 캡처 타임아웃 - 더 넓은 필터로 재시도", "WARNING")
+										# SIP 필터를 제거하고 모든 UDP 패킷 캡처
+										capture = pyshark.LiveCapture(interface=interface, bpf_filter="udp")
+										packet_iter = iter(capture.sniff_continuously())
+										
+										packet_thread = threading.Thread(target=get_first_packet, daemon=True)
+										packet_thread.start()
+										packet_thread.join(timeout=3)
+										
+										if packet_thread.is_alive():
+												self.safe_log("❌ 패킷 캡처 완전 실패 - tshark/dumpcap 시작 안됨", "ERROR")
+												return
+										else:
+												self.safe_log("✅ UDP 패킷 캡처 시작됨 - tshark/dumpcap 실행됨", "INFO")
+								
+								packet_count = 1 if first_packet else 0
+								
+						except Exception as e:
+								self.safe_log(f"패킷 캡처 시작 실패: {e}", "ERROR")
+								return
+
+						# 계속해서 패킷 처리
+						for packet in packet_iter:
 								try:
 										# 캡처 중지 요청 확인
 										if hasattr(self, 'capture_stop_requested') and self.capture_stop_requested:
 												print("패킷 캡처 중지 요청 감지됨")
-												self.log_to_sip_console("패킷 캡처 중지 요청으로 종료", "INFO")
+												self.safe_log("패킷 캡처 중지 요청으로 종료", "INFO")
 												break
 
 										packet_count += 1
@@ -963,29 +1239,30 @@ class Dashboard(QMainWindow):
 										process = psutil.Process()
 										memory_percent = process.memory_percent()
 										if memory_percent > 80:
-												self.log_error("높은 메모리 사용량", additional_info={"memory_percent": memory_percent})
+												self.safe_log(f"높은 메모리 사용량: {memory_percent}%", "WARNING")
 
-										# SIP 패킷 처리
+										# SIP 패킷 처리 - 메인 스레드로 Signal 발송
 										if hasattr(packet, 'sip'):
 												print(f"★★★ SIP 패킷 발견! (#{packet_count}) ★★★")
-												self.log_to_sip_console(f"★ SIP 패킷 감지됨! (#{packet_count})", "SIP")
-												self.analyze_sip_packet(packet)
+												self.safe_log(f"★ SIP 패킷 감지됨! (#{packet_count})", "SIP")
+												# 백그라운드 스레드에서 메인 스레드로 SIP 패킷 분석 요청
+												self.sip_packet_signal.emit(packet)
 										elif hasattr(packet, 'udp'):
 												if self.is_rtp_packet(packet):
 														self.handle_rtp_packet(packet)
 												# UDP 패킷 로그 제거 (너무 많음)
 
 								except Exception as packet_error:
-										self.log_error("패킷 처리 중 오류", packet_error)
+										self.safe_log(f"패킷 처리 중 오류: {packet_error}", "ERROR")
 										# 중지 요청이 있으면 오류 상황에서도 종료
 										if hasattr(self, 'capture_stop_requested') and self.capture_stop_requested:
 												break
 										continue
 
 				except KeyboardInterrupt:
-						self.log_error("사용자에 의한 캡처 중단")
+						self.safe_log("사용자에 의한 캡처 중단", "INFO")
 				except Exception as capture_error:
-						self.log_error("캡처 프로세스 오류", capture_error)
+						self.safe_log(f"캡처 프로세스 오류: {capture_error}", "ERROR")
 
 				finally:
 						try:
@@ -995,17 +1272,17 @@ class Dashboard(QMainWindow):
 										else:
 												capture.close()
 								else:
-										self.log_error("캡처 프로세스가 초기화되지 않았습니다")
+										self.safe_log("캡처 프로세스가 초기화되지 않았습니다", "ERROR")
 						except Exception as close_error:
-								self.log_error("캡처 종료 실패", close_error)
+								self.safe_log(f"캡처 종료 실패: {close_error}", "ERROR")
 
 						try:
 								if loop and not loop.is_closed():
 										loop.close()
 								else:
-										self.log_error("이벤트 루프가 초기화되지 않았습니다")
+										self.safe_log("이벤트 루프가 초기화되지 않았습니다", "ERROR")
 						except Exception as loop_error:
-								self.log_error("이벤트 루프 종료 실패", loop_error)
+								self.safe_log(f"이벤트 루프 종료 실패: {loop_error}", "ERROR")
 
 						# self.cleanup_existing_dumpcap()  # 캡처 종료 후 프로세스 정리
 
@@ -1110,7 +1387,8 @@ class Dashboard(QMainWindow):
 				extension_container.setFixedSize(200, 700)
 				extension_container.setStyleSheet("""
 					QWidget#extension_container {
-						background-color: #000000;
+						background-color: #2c3e50;
+						border: 1px solid #34495e;
 						border-radius: 5px;
 						margin: 10px;
 					}
@@ -1207,14 +1485,28 @@ class Dashboard(QMainWindow):
 		def toggle_led_color(self, led_indicator):
 				"""LED 색상을 노란색과 녹색 사이에서 토글"""
 				try:
-						# LED 객체가 여전히 유효한지 확인
-						if led_indicator is None or not hasattr(led_indicator, 'isVisible'):
+						# 메인 스레드에서 실행되는지 확인
+						from PySide6.QtCore import QThread
+						if QThread.currentThread() != self.thread():
+								# 메인 스레드가 아닌 경우 QTimer.singleShot으로 메인 스레드에 전달
+								self.safe_log("내선번호 LED 깜박임 - 메인 스레드로 전달", "INFO")
+								# QTimer를 백그라운드 스레드에서 사용하면 안됨 - 무시
 								return
 
+						# 실제 LED 토글 로직은 별도 메서드로 분리
+						self.toggle_led_color_safe(led_indicator)
+				except Exception as e:
+						print(f"LED 토글 중 오류: {e}")
+
+		def toggle_led_color_safe(self, led_indicator):
+				"""메인 스레드에서 안전하게 LED 색상을 토글"""
+				try:
 						# LED가 표시되지 않거나 삭제된 경우 타이머 정지
 						if not led_indicator.isVisible() or led_indicator.parent() is None:
-								if hasattr(led_indicator, 'led_timer'):
+								if hasattr(led_indicator, 'led_timer') and led_indicator.led_timer:
 										led_indicator.led_timer.stop()
+										led_indicator.led_timer.deleteLater()
+										led_indicator.led_timer = None
 								return
 
 						if hasattr(led_indicator, 'is_yellow'):
@@ -1242,11 +1534,13 @@ class Dashboard(QMainWindow):
 											}
 										""")
 										led_indicator.is_yellow = True
-				except RuntimeError:
-						# C++ 객체가 삭제된 경우 타이머 정지
-						if hasattr(led_indicator, 'led_timer'):
+				except (RuntimeError, AttributeError):
+						# C++ 객체가 삭제된 경우 타이머 정리
+						if hasattr(led_indicator, 'led_timer') and led_indicator.led_timer:
 								try:
 										led_indicator.led_timer.stop()
+										led_indicator.led_timer.deleteLater()
+										led_indicator.led_timer = None
 								except:
 										pass
 
@@ -1256,12 +1550,47 @@ class Dashboard(QMainWindow):
 						# 위젯의 모든 자식 위젯을 확인
 						for child in widget.findChildren(QLabel):
 								if hasattr(child, 'led_timer') and child.led_timer is not None:
-										child.led_timer.stop()
-										child.led_timer.deleteLater()
+										try:
+												child.led_timer.stop()
+												child.led_timer.deleteLater()
+												child.led_timer = None
+										except (RuntimeError, AttributeError):
+												pass
 								if hasattr(child, 'is_yellow'):
-										delattr(child, 'is_yellow')
-				except:
+										try:
+												delattr(child, 'is_yellow')
+										except AttributeError:
+												pass
+				except Exception as e:
+						print(f"LED 타이머 정리 중 오류: {e}")
 						pass
+
+		def start_led_timer_in_main_thread(self, led_indicator):
+				"""메인 스레드에서 LED 타이머 시작"""
+				try:
+						# 메인 스레드에서 실행되는지 확인
+						from PySide6.QtCore import QThread
+						if QThread.currentThread() != self.thread():
+								# 메인 스레드가 아닌 경우 시그널을 통해 메인 스레드로 전달
+								self.safe_log("내선번호 LED 타이머 시작 - 메인 스레드로 전달", "INFO")
+								self.start_led_timer_signal.emit(led_indicator)
+								return
+
+						# 기존 타이머가 있다면 정리
+						if hasattr(led_indicator, 'led_timer') and led_indicator.led_timer is not None:
+								led_indicator.led_timer.stop()
+								led_indicator.led_timer.deleteLater()
+								led_indicator.led_timer = None
+
+						led_timer = QTimer(self)  # 메인 윈도우를 부모로 설정하여 메인 스레드에서 실행 보장
+						led_timer.setInterval(750)
+						led_timer.timeout.connect(lambda: self.toggle_led_color(led_indicator))
+						led_timer.start()
+
+						# LED 타이머를 LED 인디케이터에 연결하여 나중에 정리할 수 있도록
+						led_indicator.led_timer = led_timer
+				except Exception as e:
+						print(f"LED 타이머 생성 중 오류: {e}")
 
 		def add_extension(self, extension):
 				"""새 내선번호 추가"""
@@ -1269,23 +1598,24 @@ class Dashboard(QMainWindow):
 					self.sip_extensions.add(extension)
 					self.update_extension_display()
 
+
 		def refresh_extension_list_with_register(self, extension):
 				"""SIP REGISTER로 감지된 내선번호로 목록을 갱신 (Signal을 통해 메인 스레드에서 처리)"""
 				if extension:
-					print(f"🎯 SIP REGISTER 감지: 내선번호 {extension} 등록 요청")
-					self.log_to_sip_console(f"🎯 SIP REGISTER 감지: 내선번호 {extension} 등록 요청", "SIP")
+					print(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청")
+					self.log_to_sip_console(f"SIP REGISTER 감지: 내선번호 {extension} 등록 요청", "SIP")
 					print(f"Signal 발송 준비: extension_update_signal.emit({extension})")
 					# 메인 스레드에서 처리하도록 Signal 발신
 					self.extension_update_signal.emit(extension)
 					print(f"Signal 발송 완료: {extension}")
 				else:
-					print("❌ REGISTER에서 내선번호 추출 실패")
-					self.log_to_sip_console("❌ REGISTER에서 내선번호 추출 실패", "WARNING")
+					print("REGISTER에서 내선번호 추출 실패")
+					self.log_to_sip_console("REGISTER에서 내선번호 추출 실패", "WARNING")
 
 		def update_extension_in_main_thread(self, extension):
 				"""메인 스레드에서 내선번호 업데이트 처리"""
-				print(f"🎯 메인 스레드에서 내선번호 처리 시작: {extension}")
-				self.log_to_sip_console(f"🎯 메인 스레드에서 내선번호 처리: {extension}", "SIP")
+				print(f"메인 스레드에서 내선번호 처리 시작: {extension}")
+				self.log_to_sip_console(f"메인 스레드에서 내선번호 처리: {extension}", "SIP")
 
 				# 현재 내선번호 목록 상태 출력 (간소화)
 				print(f"현재 내선번호 목록: {self.sip_extensions}")
@@ -1293,8 +1623,8 @@ class Dashboard(QMainWindow):
 				# 실제 등록된 내선번호 추가
 				if extension and extension not in self.sip_extensions:
 						self.sip_extensions.add(extension)
-						print(f"✅ 내선번호 {extension}를 목록에 추가")
-						self.log_to_sip_console(f"✅ 내선번호 {extension} 추가됨", "SIP")
+						print(f"내선번호 {extension}를 목록에 추가")
+						self.log_to_sip_console(f"내선번호 {extension} 추가됨", "SIP")
 
 						# UI 업데이트
 						print("UI 업데이트 시작...")
@@ -1303,21 +1633,21 @@ class Dashboard(QMainWindow):
 						self.log_to_sip_console(f"내선번호 {extension} UI 업데이트 완료", "SIP")
 				else:
 						if not extension:
-								print("❌ 빈 내선번호")
-								self.log_to_sip_console("❌ 빈 내선번호", "WARNING")
+								print("빈 내선번호")
+								self.log_to_sip_console("빈 내선번호", "WARNING")
 						else:
-								print(f"ℹ️ 내선번호 {extension}는 이미 등록됨")
+								print(f"내선번호 {extension}는 이미 등록됨")
 								self.log_to_sip_console(f"내선번호 {extension}는 이미 등록됨", "INFO")
 
 		def update_extension_display(self):
 				"""내선번호 표시 업데이트 - 왼쪽 사이드바 박스"""
 				print(f"내선번호 UI 업데이트: {len(self.sip_extensions)}개")
-				self.log_to_sip_console(f"📱 내선번호 UI 업데이트: {len(self.sip_extensions)}개", "SIP")
+				self.log_to_sip_console(f"내선번호 UI 업데이트: {len(self.sip_extensions)}개", "SIP")
 
 				# extension_list_layout 존재 확인
 				if not hasattr(self, 'extension_list_layout'):
-						print("❌ extension_list_layout이 없습니다!")
-						self.log_to_sip_console("❌ extension_list_layout이 없습니다!", "ERROR")
+						print("extension_list_layout이 없습니다!")
+						self.log_to_sip_console("extension_list_layout이 없습니다!", "ERROR")
 						return
 
 				# 기존 위젯들 제거 (타이머도 함께 정리)
@@ -1397,14 +1727,11 @@ class Dashboard(QMainWindow):
 							}
 						""")
 
-						# LED 깜박임 애니메이션 효과 (QTimer 사용)
-						led_timer = QTimer()
-						led_timer.timeout.connect(lambda: self.toggle_led_color(led_indicator))
-						led_timer.start(750)  # 0.75초마다 색상 전환
+						# LED 깜박임 애니메이션 효과 (Signal 사용하여 메인 스레드에서 실행)
+						self.start_led_timer_signal.emit(led_indicator)
 
 						# LED 상태 초기화
 						led_indicator.is_yellow = True  # 노란색 상태 추적
-						led_indicator.led_timer = led_timer  # GC 방지
 
 						# 내선번호 컸테이너 내부에 레이블과 LED 배치
 						extension_inner_layout.addWidget(extension_label)
@@ -2152,6 +2479,26 @@ class Dashboard(QMainWindow):
 						print(f"로깅 중 오류 발생: {e}")
 						sys.stderr.write(f"Critical logging error: {e}\n")
 						sys.stderr.flush()
+
+		def analyze_sip_packet_in_main_thread(self, packet):
+				"""메인 스레드에서 안전하게 SIP 패킷 분석"""
+				try:
+						# 메인 스레드에서 실행되는지 확인
+						from PySide6.QtCore import QThread
+						if QThread.currentThread() != self.thread():
+								print("경고: SIP 패킷 분석이 메인 스레드가 아닌 곳에서 호출됨")
+								# 메인 스레드가 아닌 경우 무시 (이미 시그널을 통해 호출되었으므로)
+								self.safe_log("메인 스레드가 아닌 곳에서 호출된 SIP 패킷 분석 무시", "WARNING")
+								return
+						else:
+								print("메인 스레드에서 SIP 패킷 분석 시작")
+								self.log_to_sip_console("메인 스레드에서 SIP 패킷 분석 시작", "INFO")
+
+						# 실제 SIP 패킷 분석 수행
+						self.analyze_sip_packet(packet)
+				except Exception as e:
+						print(f"SIP 패킷 분석 중 오류: {e}")
+						self.log_error("SIP 패킷 분석 오류", e)
 
 		def analyze_sip_packet(self, packet):
 				print(f"\n=== SIP 패킷 분석 시작 ===")
@@ -3214,6 +3561,21 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						print(f"첫 번째 등록 처리 중 오류: {e}")
 
+		def safe_log(self, message, level="INFO"):
+				"""스레드 안전한 로깅 함수 - QTimer 대신 시그널 사용"""
+				try:
+						if hasattr(self, 'safe_log_signal'):
+								self.safe_log_signal.emit(message, level)
+						else:
+								# 시그널이 없는 경우 직접 호출 (메인 스레드에서만)
+								from PySide6.QtCore import QThread
+								if QThread.currentThread() == self.thread():
+										self.log_to_sip_console(message, level)
+								else:
+										print(f"[{level}] {message}")  # 워커 스레드에서는 콘솔 출력만
+				except Exception as e:
+						print(f"safe_log 오류: {e}")
+
 		def cleanup_existing_dumpcap(self):
 				"""기존 Dumpcap 프로세스 정리"""
 				try:
@@ -3415,44 +3777,44 @@ class Dashboard(QMainWindow):
 				"""클라이언트 서비스를 단계별로 시작하고 안정화하는 헬퍼 메서드"""
 				try:
 						# 웹서비스 단계별 시작
-						self.log_to_sip_console("🚀 웹 서비스 단계별 시작...", "INFO")
-						
+						self.log_to_sip_console("웹 서비스 단계별 시작...", "INFO")
+
 						# 1단계: 기존 서비스 정리
 						self._cleanup_existing_services()
-						
+
 						# 2단계: Nginx 시작 및 확인
 						if not self._start_and_verify_nginx():
-								self.log_to_sip_console("❌ Nginx 시작 실패", "ERROR")
+								self.log_to_sip_console("Nginx 시작 실패", "ERROR")
 								return False
-						
-						# 3단계: MongoDB 시작 및 확인  
+
+						# 3단계: MongoDB 시작 및 확인
 						if not self._start_and_verify_mongodb():
-								self.log_to_sip_console("❌ MongoDB 시작 실패", "ERROR")
+								self.log_to_sip_console("MongoDB 시작 실패", "ERROR")
 								return False
-						
+
 						# 4단계: NestJS 시작 및 확인
 						if not self._start_and_verify_nestjs():
-								self.log_to_sip_console("❌ NestJS 시작 실패", "ERROR")
+								self.log_to_sip_console("NestJS 시작 실패", "ERROR")
 								return False
-						
+
 						# 5단계: 전체 서비스 최종 검증
 						if self._verify_all_services():
-								self.log_to_sip_console("✅ 모든 웹 서비스 정상 동작 확인!", "INFO")
+								self.log_to_sip_console("모든 웹 서비스 정상 동작 확인!", "INFO")
 								self._show_service_urls()
-								
+
 								# 6단계: 웹서비스 안정화 완료 후 SIP 패킷 캡처 시작
 								self.log_to_sip_console("📡 SIP 패킷 모니터링 시작...", "INFO")
-								QTimer.singleShot(2000, self.start_packet_capture)  # 2초 후 SIP 시작
-								
+								self.start_packet_capture()  # SIP 시작
+
 								return True
 						else:
-								self.log_to_sip_console("❌ 일부 서비스에 문제가 있습니다", "ERROR")
+								self.log_to_sip_console("일부 서비스에 문제가 있습니다", "ERROR")
 								return False
 
 				except Exception as e:
 						print(f"웹 서비스 시작 실패: {str(e)}")
 						self.log_error("웹 서비스 시작 실패", e)
-						self.log_to_sip_console("❌ 웹 서비스 시작 실패", "ERROR")
+						self.log_to_sip_console("웹 서비스 시작 실패", "ERROR")
 						return False
 
 		def _cleanup_existing_services(self):
@@ -3467,65 +3829,65 @@ class Dashboard(QMainWindow):
 										pass
 						import time
 						time.sleep(2)  # 프로세스 정리 대기
-						self.log_to_sip_console("✅ 기존 서비스 정리 완료", "INFO")
+						self.log_to_sip_console("기존 서비스 정리 완료", "INFO")
 				except Exception as e:
-						self.log_to_sip_console(f"⚠️ 기존 서비스 정리 중 오류: {str(e)}", "WARNING")
+						self.log_to_sip_console(f"기존 서비스 정리 중 오류: {str(e)}", "WARNING")
 
 		def _start_and_verify_nginx(self, retry_count=2):
 				"""Nginx 시작 및 상태 확인 (재시도 로직 포함)"""
 				for attempt in range(retry_count + 1):
 						try:
 								if attempt > 0:
-										self.log_to_sip_console(f"🔄 Nginx 재시도 {attempt}/{retry_count}", "INFO")
+										self.log_to_sip_console(f"Nginx 재시도 {attempt}/{retry_count}", "INFO")
 								else:
-										self.log_to_sip_console("🌐 Nginx 웹서버 시작 중...", "INFO")
-								
+										self.log_to_sip_console("Nginx 웹서버 시작 중...", "INFO")
+
 								# 기존 Nginx 프로세스 정리
 								os.system('taskkill /f /im nginx.exe >nul 2>&1')
 								import time
 								time.sleep(1)
-								
+
 								# Nginx 시작
 								import configparser
 								config = configparser.ConfigParser()
 								config.read('settings.ini', encoding='utf-8')
 								mode = config.get('General', 'mode', fallback='development')
-								
+
 								if mode == 'development':
 										work_dir = config.get('General', 'dir_path', fallback=os.getcwd())
 								else:
 										work_dir = os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'Recap Voice')
-								
+
 								nginx_path = os.path.join(work_dir, 'nginx', 'nginx.exe')
 								nginx_conf = os.path.join(work_dir, 'nginx', 'conf', 'nginx.conf')
-								
+
 								if not os.path.exists(nginx_path):
-										self.log_to_sip_console(f"❌ Nginx 실행파일을 찾을 수 없음: {nginx_path}", "ERROR")
+										self.log_to_sip_console(f"Nginx 실행파일을 찾을 수 없음: {nginx_path}", "ERROR")
 										return False
-								
-								subprocess.Popen([nginx_path, '-c', nginx_conf], 
+
+								subprocess.Popen([nginx_path, '-c', nginx_conf],
 																creationflags=subprocess.CREATE_NO_WINDOW)
-								
+
 								# Nginx 시작 대기 및 확인
 								time.sleep(3)
-								
+
 								if self._check_process_running('nginx.exe'):
-										self.log_to_sip_console("✅ Nginx 웹서버 정상 시작", "INFO")
+										self.log_to_sip_console("Nginx 웹서버 정상 시작", "INFO")
 										return True
 								else:
 										if attempt < retry_count:
-												self.log_to_sip_console("⚠️ Nginx 시작 실패, 재시도 중...", "WARNING")
+												self.log_to_sip_console("Nginx 시작 실패, 재시도 중...", "WARNING")
 												time.sleep(2)
 										else:
-												self.log_to_sip_console("❌ Nginx 프로세스 시작 실패", "ERROR")
-								
+												self.log_to_sip_console("Nginx 프로세스 시작 실패", "ERROR")
+
 						except Exception as e:
 								if attempt < retry_count:
-										self.log_to_sip_console(f"⚠️ Nginx 시작 중 오류, 재시도 중: {str(e)}", "WARNING")
+										self.log_to_sip_console(f"Nginx 시작 중 오류, 재시도 중: {str(e)}", "WARNING")
 										time.sleep(2)
 								else:
-										self.log_to_sip_console(f"❌ Nginx 시작 중 오류: {str(e)}", "ERROR")
-				
+										self.log_to_sip_console(f"Nginx 시작 중 오류: {str(e)}", "ERROR")
+
 				return False
 
 		def _start_and_verify_mongodb(self, retry_count=2):
@@ -3533,39 +3895,39 @@ class Dashboard(QMainWindow):
 				for attempt in range(retry_count + 1):
 						try:
 								if attempt > 0:
-										self.log_to_sip_console(f"🔄 MongoDB 재시도 {attempt}/{retry_count}", "INFO")
+										self.log_to_sip_console(f"MongoDB 재시도 {attempt}/{retry_count}", "INFO")
 								else:
-										self.log_to_sip_console("🗄️ MongoDB 데이터베이스 시작 중...", "INFO")
-								
+										self.log_to_sip_console("MongoDB 데이터베이스 시작 중...", "INFO")
+
 								# 기존 MongoDB 프로세스 정리
 								os.system('taskkill /f /im mongod.exe >nul 2>&1')
 								import time
 								time.sleep(2)
-								
+
 								# MongoDB 설정 읽기
 								import configparser
 								config = configparser.ConfigParser()
 								config.read('settings.ini', encoding='utf-8')
 								mode = config.get('General', 'mode', fallback='development')
 								mongodb_host = config.get('Network', 'host', fallback='127.0.0.1')
-								
+
 								if mode == 'development':
 										work_dir = config.get('General', 'dir_path', fallback=os.getcwd())
 								else:
 										work_dir = os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'Recap Voice')
-								
+
 								mongod_path = os.path.join(work_dir, 'mongodb', 'bin', 'mongod.exe')
 								db_path = os.path.join(work_dir, 'mongodb', 'data', 'db')
 								log_path = os.path.join(work_dir, 'mongodb', 'log', 'mongodb.log')
-								
+
 								if not os.path.exists(mongod_path):
-										self.log_to_sip_console(f"❌ MongoDB 실행파일을 찾을 수 없음: {mongod_path}", "ERROR")
+										self.log_to_sip_console(f"MongoDB 실행파일을 찾을 수 없음: {mongod_path}", "ERROR")
 										return False
-								
+
 								# 필요한 디렉토리 생성
 								os.makedirs(db_path, exist_ok=True)
 								os.makedirs(os.path.dirname(log_path), exist_ok=True)
-								
+
 								# MongoDB 시작
 								subprocess.Popen([
 										mongod_path,
@@ -3575,29 +3937,29 @@ class Dashboard(QMainWindow):
 										'--port', '27017',
 										'--bind_ip', f'0.0.0.0,{mongodb_host}'
 								], creationflags=subprocess.CREATE_NO_WINDOW)
-								
+
 								# MongoDB 시작 대기 및 확인
 								for i in range(15):  # 최대 15초 대기
 										time.sleep(1)
 										if self._check_mongodb_connection():
-												self.log_to_sip_console("✅ MongoDB 데이터베이스 정상 시작", "INFO")
+												self.log_to_sip_console("MongoDB 데이터베이스 정상 시작", "INFO")
 												return True
 										if i < 14:  # 마지막 시도가 아닌 경우만 메시지 출력
 												self.log_to_sip_console(f"⏳ MongoDB 연결 대기 중... ({i+1}/15)", "INFO")
-								
+
 								if attempt < retry_count:
-										self.log_to_sip_console("⚠️ MongoDB 연결 실패, 재시도 중...", "WARNING")
+										self.log_to_sip_console("MongoDB 연결 실패, 재시도 중...", "WARNING")
 										time.sleep(3)
 								else:
-										self.log_to_sip_console("❌ MongoDB 연결 실패", "ERROR")
-								
+										self.log_to_sip_console("MongoDB 연결 실패", "ERROR")
+
 						except Exception as e:
 								if attempt < retry_count:
-										self.log_to_sip_console(f"⚠️ MongoDB 시작 중 오류, 재시도 중: {str(e)}", "WARNING")
+										self.log_to_sip_console(f"MongoDB 시작 중 오류, 재시도 중: {str(e)}", "WARNING")
 										time.sleep(3)
 								else:
-										self.log_to_sip_console(f"❌ MongoDB 시작 중 오류: {str(e)}", "ERROR")
-				
+										self.log_to_sip_console(f"MongoDB 시작 중 오류: {str(e)}", "ERROR")
+
 				return False
 
 		def _start_and_verify_nestjs(self, retry_count=2):
@@ -3605,81 +3967,81 @@ class Dashboard(QMainWindow):
 				for attempt in range(retry_count + 1):
 						try:
 								if attempt > 0:
-										self.log_to_sip_console(f"🔄 NestJS 재시도 {attempt}/{retry_count}", "INFO")
+										self.log_to_sip_console(f"NestJS 재시도 {attempt}/{retry_count}", "INFO")
 								else:
 										self.log_to_sip_console("⚡ NestJS 애플리케이션 시작 중...", "INFO")
-								
+
 								# 기존 Node.js 프로세스 정리
 								os.system('taskkill /f /im node.exe >nul 2>&1')
 								import time
 								time.sleep(2)
-								
+
 								# 설정 읽기
 								import configparser
 								config = configparser.ConfigParser()
 								config.read('settings.ini', encoding='utf-8')
 								mode = config.get('General', 'mode', fallback='development')
-								
+
 								if mode == 'development':
 										work_dir = config.get('General', 'dir_path', fallback=os.getcwd())
 								else:
 										work_dir = os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'Recap Voice')
-								
+
 								client_dir = os.path.join(work_dir, 'packetwave_client')
 								log_path = os.path.join(work_dir, 'logs', 'nestjs.log')
-								
+
 								if not os.path.exists(client_dir):
-										self.log_to_sip_console(f"❌ NestJS 프로젝트 디렉토리를 찾을 수 없음: {client_dir}", "ERROR")
+										self.log_to_sip_console(f"NestJS 프로젝트 디렉토리를 찾을 수 없음: {client_dir}", "ERROR")
 										return False
-								
+
 								# 로그 디렉토리 생성
 								os.makedirs(os.path.dirname(log_path), exist_ok=True)
-								
+
 								# NestJS 시작
 								if mode == 'development':
 										cmd = 'npm run start:dev'
 								else:
 										cmd = 'npm run start'
-								
+
 								subprocess.Popen(
 										f'cmd /c "cd /d {client_dir} && {cmd} > {log_path} 2>&1"',
 										shell=True,
 										creationflags=subprocess.CREATE_NO_WINDOW
 								)
-								
+
 								# NestJS 로그 모니터링 시작 (첫 번째 시도에서만)
 								if attempt == 0:
 										self._start_nestjs_log_monitoring()
-								
+
 								# NestJS 시작 대기 및 확인
 								for i in range(20):  # 최대 20초 대기
 										time.sleep(1)
 										if self._check_nestjs_connection():
-												self.log_to_sip_console("✅ NestJS 애플리케이션 정상 시작", "INFO")
+												self.log_to_sip_console("NestJS 애플리케이션 정상 시작", "INFO")
 												return True
 										if i < 19:  # 마지막 시도가 아닌 경우만 메시지 출력
 												self.log_to_sip_console(f"⏳ NestJS 시작 대기 중... ({i+1}/20)", "INFO")
-								
+
 								if attempt < retry_count:
-										self.log_to_sip_console("⚠️ NestJS 시작 실패, 재시도 중...", "WARNING")
+										self.log_to_sip_console("NestJS 시작 실패, 재시도 중...", "WARNING")
 										time.sleep(5)
 								else:
-										self.log_to_sip_console("❌ NestJS 시작 실패", "ERROR")
-								
+										self.log_to_sip_console("NestJS 시작 실패", "ERROR")
+
 						except Exception as e:
 								if attempt < retry_count:
-										self.log_to_sip_console(f"⚠️ NestJS 시작 중 오류, 재시도 중: {str(e)}", "WARNING")
+										self.log_to_sip_console(f"NestJS 시작 중 오류, 재시도 중: {str(e)}", "WARNING")
 										time.sleep(5)
 								else:
-										self.log_to_sip_console(f"❌ NestJS 시작 중 오류: {str(e)}", "ERROR")
-				
+										self.log_to_sip_console(f"NestJS 시작 중 오류: {str(e)}", "ERROR")
+
 				return False
 
 		def _check_process_running(self, process_name):
 				"""프로세스 실행 상태 확인"""
 				try:
 						import subprocess
-						result = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {process_name}'], 
+						result = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {process_name}'],
 																		capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
 						return process_name.lower() in result.stdout.lower()
 				except:
@@ -3711,12 +4073,12 @@ class Dashboard(QMainWindow):
 						nginx_ok = self._check_process_running('nginx.exe')
 						mongodb_ok = self._check_mongodb_connection()
 						nestjs_ok = self._check_nestjs_connection()
-						
-						self.log_to_sip_console("📊 서비스 상태 검증:", "INFO")
-						self.log_to_sip_console(f"  • Nginx: {'✅' if nginx_ok else '❌'}", "INFO")
-						self.log_to_sip_console(f"  • MongoDB: {'✅' if mongodb_ok else '❌'}", "INFO")
-						self.log_to_sip_console(f"  • NestJS: {'✅' if nestjs_ok else '❌'}", "INFO")
-						
+
+						self.log_to_sip_console("서비스 상태 검증:", "INFO")
+						self.log_to_sip_console(f"  • Nginx: {'' if nginx_ok else ''}", "INFO")
+						self.log_to_sip_console(f"  • MongoDB: {'' if mongodb_ok else ''}", "INFO")
+						self.log_to_sip_console(f"  • NestJS: {'' if nestjs_ok else ''}", "INFO")
+
 						return nginx_ok and mongodb_ok and nestjs_ok
 				except Exception as e:
 						self.log_to_sip_console(f"서비스 검증 중 오류: {str(e)}", "ERROR")
@@ -3730,10 +4092,10 @@ class Dashboard(QMainWindow):
 						config.read('settings.ini', encoding='utf-8')
 						web_ip = config.get('Network', 'ip', fallback='127.0.0.1')
 						web_port = config.get('Network', 'port', fallback='8080')
-						self.log_to_sip_console(f"🌐 웹 인터페이스: http://{web_ip}:{web_port}/login", "INFO")
+						self.log_to_sip_console(f"웹 인터페이스: http://{web_ip}:{web_port}/login", "INFO")
 						self.log_to_sip_console(f"⚡ NestJS API: http://localhost:3000", "INFO")
 				except Exception as e:
-						self.log_to_sip_console("🌐 웹 인터페이스: http://127.0.0.1:8080/login", "INFO")
+						self.log_to_sip_console("웹 인터페이스: http://127.0.0.1:8080/login", "INFO")
 
 
 		def _start_nestjs_log_monitoring(self):
@@ -3756,15 +4118,15 @@ class Dashboard(QMainWindow):
 																				# ANSI 색상 코드 제거
 																				clean_text = remove_ansi_codes(clean_line)
 																				if 'Starting Nest application' in clean_text:
-																						self.log_to_sip_console("🚀 NestJS 애플리케이션 시작", "NESTJS")
+																						self.log_to_sip_console("NestJS 애플리케이션 시작", "NESTJS")
 																				elif 'Nest application successfully started' in clean_text:
-																						self.log_to_sip_console("✅ NestJS 애플리케이션 시작 완료", "NESTJS")
+																						self.log_to_sip_console("NestJS 애플리케이션 시작 완료", "NESTJS")
 																						# 서비스 상태 검증 실행
 																						threading.Thread(target=self._verify_nestjs_status, daemon=True).start()
 																				elif 'Application is running on' in clean_text:
-																						self.log_to_sip_console("🌐 NestJS 서버 실행 중: localhost:3000", "NESTJS")
+																						self.log_to_sip_console("NestJS 서버 실행 중: localhost:3000", "NESTJS")
 																				elif 'ERROR' in clean_text.upper():
-																						self.log_to_sip_console(f"❌ {remove_ansi_codes(clean_line)}", "ERROR")
+																						self.log_to_sip_console(f"{remove_ansi_codes(clean_line)}", "ERROR")
 																				else:
 																						# 중요한 로그만 표시 (노이즈 감소)
 																						if any(keyword in clean_text for keyword in ['dependencies initialized', 'route', 'Controller']):
@@ -3778,7 +4140,7 @@ class Dashboard(QMainWindow):
 						# 별도 스레드에서 로그 모니터링 실행
 						log_thread = threading.Thread(target=monitor_log, daemon=True)
 						log_thread.start()
-						self.log_to_sip_console("📊 NestJS 로그 모니터링 시작", "INFO")
+						self.log_to_sip_console("NestJS 로그 모니터링 시작", "INFO")
 
 				except Exception as e:
 						self.log_to_sip_console(f"로그 모니터링 시작 실패: {str(e)}", "ERROR")
@@ -3791,19 +4153,19 @@ class Dashboard(QMainWindow):
 						time.sleep(2)  # NestJS 완전 시작 대기
 						response = requests.get('http://localhost:3000', timeout=10)
 						if response.status_code == 200:
-								self.log_to_sip_console("✅ NestJS 서비스 정상 동작 확인", "NESTJS")
+								self.log_to_sip_console("NestJS 서비스 정상 동작 확인", "NESTJS")
 								return True
 						else:
-								self.log_to_sip_console(f"⚠️ NestJS 서비스 응답 오류: {response.status_code}", "WARNING")
+								self.log_to_sip_console(f"NestJS 서비스 응답 오류: {response.status_code}", "WARNING")
 								return False
 				except requests.exceptions.ConnectionError:
-						self.log_to_sip_console("⚠️ NestJS 서비스 연결 실패 - 서비스가 아직 시작 중일 수 있습니다", "WARNING")
+						self.log_to_sip_console("NestJS 서비스 연결 실패 - 서비스가 아직 시작 중일 수 있습니다", "WARNING")
 						return False
 				except requests.exceptions.Timeout:
-						self.log_to_sip_console("⚠️ NestJS 서비스 응답 시간 초과", "WARNING")
+						self.log_to_sip_console("NestJS 서비스 응답 시간 초과", "WARNING")
 						return False
 				except Exception as e:
-						self.log_to_sip_console(f"⚠️ NestJS 서비스 상태 확인 오류: {str(e)}", "WARNING")
+						self.log_to_sip_console(f"NestJS 서비스 상태 확인 오류: {str(e)}", "WARNING")
 						return False
 
 				# UI 버튼 스타일 업데이트
@@ -4109,6 +4471,9 @@ class Dashboard(QMainWindow):
 
 		def quit_application(self):
 				try:
+						# 타이머와 리소스 정리
+						self.cleanup()
+
 						# WebSocket 서버 종료
 						if hasattr(self, 'websocket_server') and self.websocket_server:
 								try:

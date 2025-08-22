@@ -3,7 +3,7 @@ import json
 from pymongo import MongoClient
 
 MONGO_URI = "mongodb://localhost:27017"
-DB_NAME = "record_packet"
+DB_NAME = "packetwave"
 
 def apply_schemas(schema_dir):
     client = MongoClient(MONGO_URI)
