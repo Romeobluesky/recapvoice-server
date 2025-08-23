@@ -253,7 +253,7 @@ class SettingsPopup(QDialog):
 		layout = QHBoxLayout()
 
 		# Record IP 라벨 생성 및 고정 너비 설정
-		record_ip_label = QLabel('Record IP:')
+		record_ip_label = QLabel('포트미러링 IP:')
 		record_ip_label.setFixedWidth(80)  # 라벨 너비 고정
 
 		# 이더넷 인터페이스 콤보박스
@@ -449,11 +449,11 @@ class SettingsPopup(QDialog):
 		"""설정 저장"""
 		# 현재 MAC 주소 가져오기 (저장 시에도 항상 최신 MAC 주소 사용)
 		current_mac = self.get_mac_address()
-		
+
 		# Network IP 변경 감지를 위해 이전 값 저장
 		old_network_ip = self.config.get('Network', 'ip', fallback='') if 'Network' in self.config else ''
 		new_network_ip = self.ip_combo.currentText()
-		
+
 		# 설정값 업데이트
 		settings_data = {
 			'Extension': {
@@ -496,7 +496,7 @@ class SettingsPopup(QDialog):
 		# 설정 변경 시그널 발생
 		self.settings_changed.emit(settings_data)
 		self.path_changed.emit(settings_data['Recording']['save_path'])
-		
+
 		# Network IP 변경 시 별도 신호 발송
 		if old_network_ip != new_network_ip:
 			print(f"Network IP 변경 감지: {old_network_ip} → {new_network_ip}")

@@ -4042,10 +4042,10 @@ class Dashboard(QMainWindow):
 								import configparser
 								config = configparser.ConfigParser()
 								config.read('settings.ini', encoding='utf-8')
-								mode = config.get('General', 'mode', fallback='development')
+								mode = config.get('Environment', 'mode', fallback='development')
 
 								if mode == 'development':
-										work_dir = config.get('General', 'dir_path', fallback=os.getcwd())
+										work_dir = config.get('DefaultDirectory', 'dir_path', fallback=os.getcwd())
 								else:
 										work_dir = os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'Recap Voice')
 
@@ -4066,7 +4066,7 @@ class Dashboard(QMainWindow):
 										cmd = 'npm run start'
 
 								subprocess.Popen(
-										f'cmd /c "cd /d {client_dir} && {cmd} > {log_path} 2>&1"',
+										f'cmd /c "cd /d "{client_dir}" && {cmd} > "{log_path}" 2>&1"',
 										shell=True,
 										creationflags=subprocess.CREATE_NO_WINDOW
 								)
@@ -4103,8 +4103,7 @@ class Dashboard(QMainWindow):
 				"""프로세스 실행 상태 확인"""
 				try:
 						import subprocess
-						result = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {process_name}'],
-																		capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+						result = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {process_name}'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
 						return process_name.lower() in result.stdout.lower()
 				except:
 						return False
