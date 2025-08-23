@@ -1,0 +1,51 @@
+> packetwave_clint@0.0.1 start:dev
+> nest start --watch Files (x86)\Recap Voice\logs\nestjs.log
+
+[2J[3J[H[[90m오후 11:27:20[0m] Starting compilation in watch mode...
+
+[[90m오후 11:27:24[0m] Found 0 errors. Watching for file changes.
+
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseModule dependencies initialized[39m[38;5;3m +35ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mServeStaticModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseCoreModule dependencies initialized[39m[38;5;3m +12ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseModule dependencies initialized[39m[38;5;3m +4ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMembersModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuthModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mFilesModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAppController {/}:[39m[38;5;3m +16ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/, GET} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/login, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/register, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/users, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mMembersController {/members}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/members, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/members/:member_id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/members, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/members/update/:id, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/members/delete/:id, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mFilesController {/files}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/latest, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/search, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/stream/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/download/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/text/:path(*), GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/info/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/files/transcribe/:id, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/auth}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/register, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/login, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/logout, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23692  - [39m2025. 08. 22. 오후 11:27:25 [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +3ms[39m
+WebSocket server is running
+Application is running on: http://localhost:3000

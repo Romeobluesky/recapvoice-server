@@ -4643,55 +4643,23 @@ def main():
 
 					# 명령줄 인수 처리
 					parser = argparse.ArgumentParser(description="Recap Voice - VoIP SIP 신호 감지 및 클라이언트 알림 시스템")
-					parser.add_argument("--test", action="store_true", help="테스트 모드로 실행")
 					parser.add_argument("--log-level", choices=["debug", "info", "warning", "error"], default="info", help="로그 레벨 설정")
 					args = parser.parse_args()
 
-					# 단일 인스턴스 확인 (테스트 모드가 아닐 때만)
-					if not args.test:
-							client = QLocalSocket()
-							client.connectToServer("RecapVoiceInstance")
+					# 단일 인스턴스 확인
+					client = QLocalSocket()
+					client.connectToServer("RecapVoiceInstance")
 
-							if client.waitForConnected(500):
-									# 이미 실행 중인 경우
-									client.write(b"show")
-									client.disconnectFromServer()
-									app.quit()
-									sys.exit(0)
+					if client.waitForConnected(500):
+							# 이미 실행 중인 경우
+							client.write(b"show")
+							client.disconnectFromServer()
+							app.quit()
+							sys.exit(0)
 
 					# 새 인스턴스 시작
 					window = Dashboard()
 
-					# 테스트 모드 처리
-					if args.test:
-							print("\n" + "="*50)
-							print("테스트 모드로 실행합니다.")
-							print("="*50 + "\n")
-
-							# 테스트 모듈 가져오기
-							try:
-									import test_sip_call
-
-									print("대시보드 초기화 완료")
-									print("5초 후 테스트를 시작합니다...")
-
-									for i in range(5, 0, -1):
-											print(f"{i}...")
-											time.sleep(1)
-
-									# 테스트 실행
-									test_sip_call.simulate_sip_call(window)
-
-									# 테스트 완료 후 종료
-									print("\n테스트가 완료되었습니다.")
-									print("프로그램을 종료합니다.")
-									sys.exit(0)
-							except ImportError:
-									print("테스트 모듈을 가져올 수 없습니다: test_sip_call.py")
-									print("일반 모드로 실행합니다.")
-							except Exception as e:
-									print(f"테스트 실행 중 오류 발생: {e}")
-									print("일반 모드로 실행합니다.")
 
 					# 일반 모드로 실행
 					window.show()
