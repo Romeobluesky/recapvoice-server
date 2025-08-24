@@ -4293,8 +4293,8 @@ class Dashboard(QMainWindow):
 				try:
 						config = configparser.ConfigParser()
 						config.read('settings.ini', encoding='utf-8')
-						ip_address = config.get('Network', 'ip', fallback='127.0.0.1')
-						port = config.get('Network', 'port', fallback='8080')
+						ip_address = config.get('MongoDB', 'host', fallback='127.0.0.1')
+						port = 8080
 						url = f"http://{ip_address}:{port}"
 						print(f"관리사이트 열기: {url}")
 						QDesktopServices.openUrl(QUrl(url))

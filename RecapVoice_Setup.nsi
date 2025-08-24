@@ -80,11 +80,7 @@ Function .onInit
     Abort
 
     uninst:
-        # 재설치 전 환경 변수 완전 정리
-        DetailPrint "Cleaning environment variables before reinstall..."
-        Call CleanupEnvironmentVariables
-
-        # 이전 버전 제거
+        # 이전 버전 제거 (환경변수는 삭제 프로그램에서 정리됨)
         ExecWait '$R0 _?=$INSTDIR'
 
     done:
@@ -172,25 +168,16 @@ Section "MainSection"
 
    SetOutPath "$INSTDIR"
 
-   # 기존 PATH 값 보존하면서 새로운 경로 추가
-   Push "C:\Program Files\nodejs"
-   Call AddToPath
-   Push "C:\Program Files\Npcap"
-   Call AddToPath
-   Push "C:\Program Files\Wireshark"
-   Call AddToPath
-   Push "C:\Program Files\ffmpeg\bin"
-   Call AddToPath
-   Push "$INSTDIR\nginx"
-   Call AddToPath
-   Push "$INSTDIR\mongodb\bin"
-   Call AddToPath
-   Push "$INSTDIR\packetwave_client\node_modules"
-   Call AddToPath
+   # 항상 기존 환경변수를 정리한 후 새로 설정 (멱등성 보장)
+   DetailPrint "Cleaning existing RecapVoice environment variables..."
+   Call CleanupRecapVoiceEnvironment
 
-   # 환경변수 설정 후 로그 출력
+   DetailPrint "Setting up RecapVoice environment with new variable system..."
+   Call SetupRecapVoiceEnvironment
+
+   # 최종 PATH 확인 및 로그 출력
    ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   DetailPrint "Updated PATH: $0"
+   DetailPrint "Final PATH configured with variables: $0"
 
    # 바로가기 생성
    CreateDirectory "$SMPROGRAMS\${APP_NAME}"
@@ -258,62 +245,6 @@ Function ReplaceInFile
   Pop $0
 FunctionEnd
 
-Function AddToPath
-   Exch $0  ; 추가할 경로
-   Push $1  ; 현재 PATH 값
-   Push $2  ; 임시 변수
-   Push $3  ; 문자열 길이 저장용
-
-   # 현재 시스템의 PATH 값을 가져옴
-   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-
-   # 이미 경로가 존재하는지 확인
-   Push $1
-   Push "$0"
-   Call StrStr
-   Pop $2
-   StrCmp $2 "" NotFound Found
-
-   Found:
-      DetailPrint "'$0' 경로가 이미 PATH에 존재합니다."
-      Goto done
-
-   NotFound:
-      # 새로운 PATH 길이 계산
-      StrLen $3 $1
-      StrLen $2 $0
-      IntOp $3 $3 + $2
-      IntOp $3 $3 + 1  # 세미콜론 길이 추가
-
-      # PATH 길이 체크 (8000자 제한, 여유 공간 확보)
-      ${If} $3 > 8000
-         MessageBox MB_OK|MB_ICONEXCLAMATION "PATH 환경변수가 너무 깁니다. 새로운 경로를 추가할 수 없습니다."
-         Goto done
-      ${EndIf}
-
-      # 새 경로 추가 (기존 PATH 유지)
-      ${If} $1 != ""
-         StrCpy $2 $1 1 -1  # 마지막 문자 확인
-         ${If} $2 != ";"
-            StrCpy $1 "$1;"  # 세미콜론 추가
-         ${EndIf}
-         StrCpy $1 "$1$0"  # 새 경로 추가
-      ${Else}
-         StrCpy $1 "$0"
-      ${EndIf}
-
-      # PATH 환경 변수 업데이트
-      WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $1
-      SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
-      DetailPrint "'$0' 경로가 PATH에 추가되었습니다."
-
-done:
-   Pop $3
-   Pop $2
-   Pop $1
-   Pop $0
-FunctionEnd
-
 Function StrStr
    Exch $R1
    Exch
@@ -338,86 +269,217 @@ Function StrStr
    Exch $R1
 FunctionEnd
 
-Function CleanupEnvironmentVariables
+Function CleanupRecapVoiceEnvironment
    Push $0
    Push $1
 
-   DetailPrint "Removing all Recap Voice related PATH entries..."
+   DetailPrint "Cleaning up all RecapVoice environment variables..."
 
-   # 현재 PATH 읽기
-   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
+   # PATH에서 RecapVoice 관련 모든 경로 및 변수 참조 제거
+   Call RemoveRecapVoiceFromPath
 
-   # 각 경로를 순차적으로 제거
-   Push "$INSTDIR\nginx"
-   Call RemoveFromPathInstall
-   Push "$INSTDIR\mongodb\bin"
-   Call RemoveFromPathInstall
-   Push "$INSTDIR\packetwave_client\node_modules"
-   Call RemoveFromPathInstall
-   Push "C:\Program Files\nodejs"
-   Call RemoveFromPathInstall
-   Push "C:\Program Files\Npcap"
-   Call RemoveFromPathInstall
-   Push "C:\Program Files\Wireshark"
-   Call RemoveFromPathInstall
-   Push "C:\Program Files\ffmpeg\bin"
-   Call RemoveFromPathInstall
-
-   # 변경사항 적용
-   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
-   DetailPrint "Environment variables cleaned successfully"
+   # 공통 환경변수 삭제 로직 호출
+   Call DeleteRecapVoiceEnvironmentVariables
 
    Pop $1
    Pop $0
 FunctionEnd
 
-Function RemoveFromPathInstall
-   Exch $0
+Function DeleteRecapVoiceEnvironmentVariables
+   DetailPrint "Removing individual RecapVoice environment variables..."
+
+   # RecapVoice 관련 변수들 삭제
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_NGINX"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_MONGODB"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_CLIENT"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_NODEMODULES"
+
+   # 외부 의존성 변수들 삭제 (RecapVoice가 설치한 것들)
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "NODEJS_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "NPCAP_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "WIRESHARK_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "FFMPEG_HOME"
+
+   # 변경사항 적용
+   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+   DetailPrint "RecapVoice environment variables cleaned successfully"
+FunctionEnd
+
+Function RemoveRecapVoiceFromPath
+   Push $0
+   Push $1
+
+   # 현재 PATH 읽기
+   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
+   DetailPrint "Removing RecapVoice paths from PATH..."
+
+   # 실제로 PATH에서 제거
+   Push "%RECAPVOICE_NGINX%"
+   Call RemoveFromPathInstall
+   Push "%RECAPVOICE_MONGODB%"
+   Call RemoveFromPathInstall
+   Push "%RECAPVOICE_NODEMODULES%"
+   Call RemoveFromPathInstall
+   Push "%NODEJS_HOME%"
+   Call RemoveFromPathInstall
+   Push "%NPCAP_HOME%"
+   Call RemoveFromPathInstall
+   Push "%WIRESHARK_HOME%"
+   Call RemoveFromPathInstall
+   Push "%FFMPEG_HOME%\bin"
+   Call RemoveFromPathInstall
+
+   DetailPrint "RecapVoice paths removed from PATH"
+
+   Pop $1
+   Pop $0
+FunctionEnd
+
+Function SetupRecapVoiceEnvironment
+   Push $0
+
+   DetailPrint "Setting up RecapVoice environment variables..."
+
+   # 기본 RecapVoice 경로 변수 설정
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_HOME" "$INSTDIR"
+   DetailPrint "Set RECAPVOICE_HOME=$INSTDIR"
+
+   # RecapVoice 내부 경로들 설정
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_NGINX" "%RECAPVOICE_HOME%\nginx"
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_MONGODB" "%RECAPVOICE_HOME%\mongodb\bin"
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_CLIENT" "%RECAPVOICE_HOME%\packetwave_client"
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_NODEMODULES" "%RECAPVOICE_CLIENT%\node_modules"
+
+   DetailPrint "Set RecapVoice internal path variables"
+
+   # 외부 의존성 경로들 설정
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "NODEJS_HOME" "C:\Program Files\nodejs"
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "NPCAP_HOME" "C:\Program Files\Npcap"
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "WIRESHARK_HOME" "C:\Program Files\Wireshark"
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "FFMPEG_HOME" "C:\Program Files\ffmpeg"
+
+   DetailPrint "Set external dependency path variables"
+
+   # PATH에 변수 참조 방식으로 추가
+   Call AddRecapVoiceVariablesToPath
+
+   # 변경사항 적용
+   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+   DetailPrint "RecapVoice environment setup completed"
+
+   Pop $0
+FunctionEnd
+
+Function AddRecapVoiceVariablesToPath
+   Push $0
    Push $1
    Push $2
-   Push $3
-   Push $4
-   Push $5
-   Push $6
+
+   # 현재 PATH 읽기
+   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
+   DetailPrint "Adding RecapVoice variables to PATH..."
+
+   # 새로운 경로들을 변수 참조 방식으로 추가
+   StrCpy $2 "%NODEJS_HOME%;%NPCAP_HOME%;%WIRESHARK_HOME%;%FFMPEG_HOME%\bin;%RECAPVOICE_NGINX%;%RECAPVOICE_MONGODB%;%RECAPVOICE_NODEMODULES%"
+
+   # 기존 PATH가 비어있지 않으면 세미콜론으로 연결
+   ${If} $1 != ""
+      StrCpy $0 $1 1 -1  # 마지막 문자 확인
+      ${If} $0 != ";"
+         StrCpy $1 "$1;"  # 세미콜론 추가
+      ${EndIf}
+      StrCpy $1 "$1$2"  # 새 경로들 추가
+   ${Else}
+      StrCpy $1 "$2"
+   ${EndIf}
+
+   # PATH 길이 체크
+   StrLen $0 $1
+   ${If} $0 > 8000
+      MessageBox MB_OK|MB_ICONEXCLAMATION "PATH 환경변수가 너무 깁니다. 일부 기능이 제한될 수 있습니다."
+   ${EndIf}
+
+   # PATH 업데이트
+   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $1
+   DetailPrint "Added RecapVoice variables to PATH: $2"
+
+   Pop $2
+   Pop $1
+   Pop $0
+FunctionEnd
+
+Function RemoveFromPathInstall
+   Exch $0  # 제거할 문자열
+   Push $1  # 현재 PATH
+   Push $2  # 새로운 PATH
+   Push $3  # 임시 토큰
+   Push $4  # 현재 카운터
+   Push $5  # 토큰 길이
 
    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   StrCpy $5 $1 1 -1 # 마지막 문자 가져오기
+   StrCpy $2 ""  # 새로운 PATH 초기화
+   StrCpy $4 0   # 카운터 초기화
 
-   ${If} $5 != ";"
-      StrCpy $1 "$1;" # 마지막에 세미콜론 추가
-   ${EndIf}
+   # PATH를 세미콜론으로 분리해서 처리
+   parse_loop:
+      # 다음 세미콜론 위치 찾기
+      StrCpy $5 0
+      search_semicolon:
+         StrCpy $3 $1 1 $5
+         StrCmp $3 "" token_end
+         StrCmp $3 ";" token_found
+         IntOp $5 $5 + 1
+         Goto search_semicolon
 
-   Push $1
-   Push "$0;"
-   Call StrStr
+      token_found:
+         StrCpy $3 $1 $5  # 토큰 추출
+         IntOp $5 $5 + 1
+         StrCpy $1 $1 "" $5  # 나머지 문자열
+         Goto check_token
+
+      token_end:
+         StrCpy $3 $1  # 마지막 토큰
+         StrCpy $1 ""
+
+      check_token:
+         # 현재 토큰이 제거할 문자열과 같은지 확인
+         StrCmp $3 "$0" skip_token
+         StrCmp $3 "" skip_token  # 빈 토큰 건너뛰기
+
+         # 토큰을 새로운 PATH에 추가
+         StrCmp $2 "" first_token
+         StrCpy $2 "$2;$3"
+         Goto continue_loop
+
+         first_token:
+         StrCpy $2 "$3"
+         Goto continue_loop
+
+      skip_token:
+         DetailPrint "Removing token: '$3'"
+
+      continue_loop:
+         StrCmp $1 "" done_parsing
+         Goto parse_loop
+
+   done_parsing:
+      # 새로운 PATH 설정
+      WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $2
+      DetailPrint "Updated PATH (removed '$0')"
+
+   Pop $5
+   Pop $4
+   Pop $3
    Pop $2
-   StrCmp $2 "" done
-
-   StrLen $3 "$0;"
-   StrLen $4 $2
-   StrCpy $5 $1 -$4 # 제거할 부분 이전까지
-   StrCpy $6 $2 "" $3 # 제거할 부분 이후부터
-   StrCpy $3 "$5$6"
-
-   StrCpy $5 $3 1 -1 # 마지막 문자 확인
-   ${If} $5 == ";"
-      StrCpy $3 $3 -1 # 마지막 세미콜론 제거
-   ${EndIf}
-
-   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $3
-   DetailPrint "Removed '$0' from PATH"
-
-   done:
-      Pop $6
-      Pop $5
-      Pop $4
-      Pop $3
-      Pop $2
-      Pop $1
-      Pop $0
+   Pop $1
+   Pop $0
 FunctionEnd
 
 Section "Uninstall"
+   # 개선된 녹음 파일 처리 프로세스 (가장 먼저 실행)
+   Call un.HandleRecordingFilesAdvanced
+
    # 실행 중인 프로세스 종료
    DetailPrint "Terminating running processes..."
    ExecWait 'taskkill /f /im "Recap Voice.exe" /t'
@@ -428,20 +490,9 @@ Section "Uninstall"
 
    Sleep 2000  # 프로세스가 완전히 종료되길 기다림
 
-   # 환경 변수 제거
-   DetailPrint "Removing environment variables..."
-   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   !insertmacro un.RemovePath "$INSTDIR\nginx"
-   !insertmacro un.RemovePath "$INSTDIR\mongodb\bin"
-   !insertmacro un.RemovePath "$INSTDIR\packetwave_client\node_modules"
-   !insertmacro un.RemovePath "C:\Program Files\nodejs"
-   !insertmacro un.RemovePath "C:\Program Files\Npcap"
-   !insertmacro un.RemovePath "C:\Program Files\Wireshark"
-   !insertmacro un.RemovePath "C:\Program Files\ffmpeg\bin"
-
-   # 환경 변수 변경사항 적용
-   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
-   DetailPrint "Environment variables removed successfully"
+   # RecapVoice 환경변수 완전 정리
+   DetailPrint "Cleaning up RecapVoice environment variables..."
+   Call un.CleanupRecapVoiceEnvironment
 
    # 바탕화면 아이콘 제거
    SetShellVarContext all
@@ -454,16 +505,6 @@ Section "Uninstall"
    Delete "$INSTDIR\uninstall.exe"
    RMDir /r /REBOOTOK "$INSTDIR"
 
-   # 녹음 파일 폴더 삭제 여부 확인
-   MessageBox MB_YESNO "음성 녹음 파일이 저장된 폴더를 삭제하시겠습니까?" IDNO skip_delete_records
-   SetShellVarContext all
-   RMDir /r "$INSTDIR\RecapVoiceRecord"
-   Goto records_deletion_done
-
-   skip_delete_records:
-   DetailPrint "음성 녹음 파일을 보존합니다."
-
-   records_deletion_done:
 
    # 제어판에서 프로그램 제거
    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
@@ -475,70 +516,268 @@ Section "Uninstall"
 SectionEnd
 
 Function un.RemoveFromPath
-   Exch $0
-   Push $1
-   Push $2
+   Exch $0  # 제거할 문자열
+   Push $1  # 현재 PATH
+   Push $2  # 새로운 PATH
+   Push $3  # 임시 토큰
+   Push $4  # 현재 카운터
+   Push $5  # 토큰 길이
+
+   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
+   StrCpy $2 ""  # 새로운 PATH 초기화
+   StrCpy $4 0   # 카운터 초기화
+
+   # PATH를 세미콜론으로 분리해서 처리
+   parse_loop:
+      # 다음 세미콜론 위치 찾기
+      StrCpy $5 0
+      search_semicolon:
+         StrCpy $3 $1 1 $5
+         StrCmp $3 "" token_end
+         StrCmp $3 ";" token_found
+         IntOp $5 $5 + 1
+         Goto search_semicolon
+
+      token_found:
+         StrCpy $3 $1 $5  # 토큰 추출
+         IntOp $5 $5 + 1
+         StrCpy $1 $1 "" $5  # 나머지 문자열
+         Goto check_token
+
+      token_end:
+         StrCpy $3 $1  # 마지막 토큰
+         StrCpy $1 ""
+
+      check_token:
+         # 현재 토큰이 제거할 문자열과 같은지 확인
+         StrCmp $3 "$0" skip_token
+         StrCmp $3 "" skip_token  # 빈 토큰 건너뛰기
+
+         # 토큰을 새로운 PATH에 추가
+         StrCmp $2 "" first_token
+         StrCpy $2 "$2;$3"
+         Goto continue_loop
+
+         first_token:
+         StrCpy $2 "$3"
+         Goto continue_loop
+
+      skip_token:
+         DetailPrint "Removing token: '$3'"
+
+      continue_loop:
+         StrCmp $1 "" done_parsing
+         Goto parse_loop
+
+   done_parsing:
+      # 새로운 PATH 설정
+      WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $2
+      DetailPrint "Updated PATH (removed '$0')"
+
+   Pop $5
+   Pop $4
+   Pop $3
+   Pop $2
+   Pop $1
+   Pop $0
+FunctionEnd
+
+Function un.StrReplace
+   Exch $0 ; Replacement
+   Exch
+   Exch $1 ; Search
+   Exch
+   Exch 2
+   Exch $2 ; Source
    Push $3
    Push $4
    Push $5
    Push $6
+   Push $7
+   Push $8
+   Push $9
 
-   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
-   StrCpy $5 $1 1 -1 # 마지막 문자 가져오기
+   StrCpy $3 ""
+   StrLen $4 $1
+   StrLen $6 $2
+   StrCpy $7 0
 
-   ${If} $5 != ";"
-      StrCpy $1 "$1;" # 마지막에 세미콜론 추가
+   ${If} $4 == 0
+     StrCpy $0 $2
+     Goto done
    ${EndIf}
 
-   Push $1
-   Push "$0;"
-   Call un.StrStr
-   Pop $2
-   StrCmp $2 "" done
+   loop:
+     StrCpy $5 $2 $4 $7
+     StrCmp $5 $1 found
+     StrCmp $7 $6 done
+     StrCpy $5 $2 1 $7
+     StrCpy $3 "$3$5"
+     IntOp $7 $7 + 1
+     Goto loop
 
-   StrLen $3 "$0;"
-   StrLen $4 $2
-   StrCpy $5 $1 -$4 # 제거할 부분 이전까지
-   StrCpy $6 $2 "" $3 # 제거할 부분 이후부터
-   StrCpy $3 "$5$6"
-
-   StrCpy $5 $3 1 -1 # 마지막 문자 확인
-   ${If} $5 == ";"
-      StrCpy $3 $3 -1 # 마지막 세미콜론 제거
-   ${EndIf}
-
-   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH" $3
+   found:
+     StrCpy $3 "$3$0"
+     IntOp $7 $7 + $4
+     Goto loop
 
    done:
-      Pop $6
-      Pop $5
-      Pop $4
-      Pop $3
-      Pop $2
-      Pop $1
-      Pop $0
+     StrCpy $5 $2 "" $7
+     StrCpy $0 "$3$5"
+
+   Pop $9
+   Pop $8
+   Pop $7
+   Pop $6
+   Pop $5
+   Pop $4
+   Pop $3
+   Pop $2
+   Pop $1
+   Exch $0
 FunctionEnd
 
-Function un.StrStr
-   Exch $R1 ; st=haystack, $R1=needle
-   Exch     ; st=needle, $R1=haystack
-   Exch $R2 ; $R2=needle, $R1=haystack
-   Push $R3
-   Push $R4
-   Push $R5
-   StrLen $R3 $R1
-   StrLen $R4 $R2
-   StrCpy $R5 0
-   loop:
-     StrCpy $R1 $R2 $R3 $R5
-     StrCmp $R1 $R4 done
-     StrCmp $R1 "" done
-     IntOp $R5 $R5 + 1
-     Goto loop
-   done:
-   Pop $R5
-   Pop $R4
-   Pop $R3
-   Pop $R2
-   Exch $R1
+Function un.HandleRecordingFilesAdvanced
+   Push $0  ; Recording path from settings
+   Push $1  ; User choice
+
+   # 1단계: 초기 확인
+   MessageBox MB_YESNO|MB_ICONQUESTION "음성 녹음 파일을 확인하고 처리하시겠습니까?$\n$\n'예'를 누르면 녹음 파일 폴더를 열어드립니다." IDNO skip_all_records
+
+   # 2단계: settings.ini에서 실제 저장 경로 읽기 (ReadINIStr 사용)
+   ${If} ${FileExists} "$INSTDIR\settings.ini"
+      DetailPrint "Found settings.ini file"
+      ReadINIStr $0 "$INSTDIR\settings.ini" "Recording" "save_path"
+
+      ${If} $0 != ""
+         # / 를 \ 로 변환
+         Push $0
+         Push "/"
+         Push "\"
+         Call un.StrReplace
+         Pop $0
+         DetailPrint "Found recording path in settings.ini: $0"
+      ${Else}
+         DetailPrint "save_path not found in settings.ini"
+         StrCpy $0 "$INSTDIR\RecapVoiceRecord"  # 기본값
+         DetailPrint "Using default recording path: $0"
+      ${EndIf}
+   ${Else}
+      DetailPrint "settings.ini file not found"
+      StrCpy $0 "$INSTDIR\RecapVoiceRecord"  # 기본값
+      DetailPrint "Using default recording path: $0"
+   ${EndIf}
+
+   # 3단계: 폴더가 존재하는지 확인
+   ${If} ${FileExists} "$0"
+      # 4단계: 폴더 탐색기로 녹음 파일 경로 열기
+      DetailPrint "Opening recording folder: $0"
+      ExecShell "open" "$0"
+
+      # 5단계: 사용자에게 백업 시간 제공
+      MessageBox MB_OK|MB_ICONINFORMATION "녹음 파일 폴더가 열렸습니다.$\n$\n필요한 파일을 다른 위치로 백업하신 후 '확인'을 눌러주세요.$\n$\n시간 제한은 없으니 천천히 작업하세요."
+
+      # 6단계: 최종 삭제 확인
+      MessageBox MB_YESNO|MB_ICONEXCLAMATION "백업이 완료되었나요?$\n$\n'예'를 누르면 녹음 파일 폴더를 삭제합니다.$\n'아니오'를 누르면 폴더를 보존합니다." IDNO skip_deletion
+
+      # 7단계: 실제 삭제 실행
+      DetailPrint "Deleting recording folder: $0"
+      SetShellVarContext all
+      RMDir /r "$0"
+      MessageBox MB_OK|MB_ICONINFORMATION "녹음 파일 폴더가 삭제되었습니다."
+      Goto cleanup_done
+
+   ${Else}
+      MessageBox MB_OK|MB_ICONINFORMATION "녹음 파일 폴더를 찾을 수 없습니다.$\n경로: $0"
+      Goto cleanup_done
+   ${EndIf}
+
+   skip_deletion:
+   DetailPrint "User chose to preserve recording files at: $0"
+
+   # 폴더를 다시 열어줄지 확인
+   MessageBox MB_YESNO|MB_ICONQUESTION "폴더를 다시 열어서 추가 백업 작업을 하시겠습니까?$\n$\n'예': 폴더를 다시 엽니다$\n'아니오': 백업을 완료합니다" IDNO backup_complete
+
+   # 폴더 다시 열기
+   DetailPrint "Re-opening recording folder for additional backup: $0"
+   ExecShell "open" "$0"
+   MessageBox MB_OK|MB_ICONINFORMATION "추가 백업 작업을 완료하신 후 '확인'을 눌러주세요."
+
+   backup_complete:
+   MessageBox MB_OK|MB_ICONINFORMATION "녹음 파일을 보존합니다.$\n경로: $0"
+   Goto cleanup_done
+
+   skip_all_records:
+   DetailPrint "User skipped recording file handling"
+
+   cleanup_done:
+   Pop $1
+   Pop $0
+FunctionEnd
+
+Function un.CleanupRecapVoiceEnvironment
+   Push $0
+   Push $1
+
+   DetailPrint "Cleaning up all RecapVoice environment variables..."
+
+   # PATH에서 RecapVoice 관련 모든 경로 및 변수 참조 제거
+   Call un.RemoveRecapVoiceFromPath
+
+   # 공통 환경변수 삭제 로직 호출 (설치용 함수 재사용)
+   Call un.DeleteRecapVoiceEnvironmentVariables
+
+   Pop $1
+   Pop $0
+FunctionEnd
+
+Function un.RemoveRecapVoiceFromPath
+   Push $0
+   Push $1
+
+   # 현재 PATH 읽기
+   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "PATH"
+   DetailPrint "Removing RecapVoice paths from PATH..."
+
+   # 변수 참조들 제거
+   Push "%RECAPVOICE_NGINX%"
+   Call un.RemoveFromPath
+   Push "%RECAPVOICE_MONGODB%"
+   Call un.RemoveFromPath
+   Push "%RECAPVOICE_NODEMODULES%"
+   Call un.RemoveFromPath
+   Push "%NODEJS_HOME%"
+   Call un.RemoveFromPath
+   Push "%NPCAP_HOME%"
+   Call un.RemoveFromPath
+   Push "%WIRESHARK_HOME%"
+   Call un.RemoveFromPath
+   Push "%FFMPEG_HOME%\bin"
+   Call un.RemoveFromPath
+
+   DetailPrint "RecapVoice paths removed from PATH"
+
+   Pop $1
+   Pop $0
+FunctionEnd
+
+Function un.DeleteRecapVoiceEnvironmentVariables
+   DetailPrint "Removing individual RecapVoice environment variables..."
+
+   # RecapVoice 관련 변수들 삭제
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_NGINX"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_MONGODB"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_CLIENT"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "RECAPVOICE_NODEMODULES"
+
+   # 외부 의존성 변수들 삭제 (RecapVoice가 설치한 것들)
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "NODEJS_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "NPCAP_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "WIRESHARK_HOME"
+   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "FFMPEG_HOME"
+
+   # 변경사항 적용
+   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+   DetailPrint "RecapVoice environment variables cleaned successfully"
 FunctionEnd
