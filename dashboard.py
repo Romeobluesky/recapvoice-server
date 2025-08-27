@@ -28,6 +28,7 @@ import requests
 import json
 from pydub import AudioSegment
 from pymongo import MongoClient
+from extension_recording_manager import get_recording_manager
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtNetwork import *
@@ -35,11 +36,8 @@ from PySide6.QtWidgets import *
 
 # 로컬 모듈
 from config_loader import load_config, get_wireshark_path
-from packet_monitor import PacketMonitor
 from settings_popup import SettingsPopup
-from voip_monitor import VoipMonitor
 from wav_merger import WavMerger
-from rtpstream_manager import RTPStreamManager
 from flow_layout import FlowLayout
 from callstate_machine import CallStateMachine
 from callstate_machine import CallState
@@ -296,6 +294,14 @@ class Dashboard(QMainWindow):
 								self.first_registration = False
 								self.packet_get = 0
 								# 토글 기능 제거 - 관련 변수들 제거
+
+								# 통화별 녹음 관리자 초기화
+								self.recording_manager = get_recording_manager(logger=self, dashboard_instance=self)
+
+								# 녹음 상태 모니터링 타이머 설정
+								self.recording_status_timer = QTimer()
+								self.recording_status_timer.timeout.connect(self.update_recording_status_display)
+								self.recording_status_timer.start(10000)  # 10초마다 업데이트
 
 								# 메모리 캐시 초기화
 								gc.collect()
@@ -883,8 +889,9 @@ class Dashboard(QMainWindow):
 								self.log_error("Wireshark가 설치되어 있지 않습니다")
 								return
 
-						# tshark와 dumpcap 실행 확인 및 시작
-						self.start_wireshark_processes()
+						# tshark와 dumpcap 실행 확인 및 시작 (비활성화)
+						# self.start_wireshark_processes()  # ExtensionRecordingManager가 통화별 dumpcap 관리
+						self.log_error("통화별 녹음 시스템 활성화 - 별도 Wireshark 프로세스 실행 생략", level="info")
 
 						# 캡처 스레드 시작
 						self.capture_thread = threading.Thread(
@@ -949,48 +956,9 @@ class Dashboard(QMainWindow):
 						else:
 								self.log_error(f"tshark.exe를 찾을 수 없습니다: {tshark_path}")
 
-						# 2. dumpcap 프로세스 실행
-						if os.path.exists(dumpcap_path):
-								try:
-										# dumpcap 인터페이스 목록 조회
-										dumpcap_cmd = [dumpcap_path, "-D"]
-										result = subprocess.run(dumpcap_cmd, capture_output=True, text=True, timeout=10)
-										if result.returncode == 0:
-												self.log_error(f"dumpcap 인터페이스 목록 조회 성공", additional_info={"output": result.stdout[:200]})
-
-												# 선택된 인터페이스의 번호 찾기
-												interface_number = self.get_interface_number(result.stdout, self.selected_interface)
-
-												if interface_number:
-														# dumpcap 실행 명령어 구성 (임시 파일로 캡처)
-														temp_file = os.path.join(os.getcwd(), "temp_capture.pcap")
-														if target_ip:
-																capture_filter = f"host {target_ip} or port 5060"
-														else:
-																capture_filter = "port 5060"
-
-														dumpcap_cmd = [
-																dumpcap_path,
-																"-i", str(interface_number),
-																"-f", capture_filter,
-																"-w", temp_file,
-																"-b", "files:3"  # 3개 파일로 로테이션
-														]
-
-														# dumpcap 프로세스 시작 (백그라운드)
-														self.dumpcap_process = subprocess.Popen(
-																dumpcap_cmd,
-																stdout=subprocess.PIPE,
-																stderr=subprocess.PIPE,
-																creationflags=subprocess.CREATE_NO_WINDOW
-														)
-														self.log_error("dumpcap 프로세스 시작됨", additional_info={"pid": self.dumpcap_process.pid})
-												else:
-														self.log_error(f"dumpcap용 인터페이스 '{self.selected_interface}' 번호를 찾을 수 없습니다")
-								except Exception as e:
-										self.log_error(f"dumpcap 실행 실패: {e}")
-						else:
-								self.log_error(f"dumpcap.exe를 찾을 수 없습니다: {dumpcap_path}")
+						# 2. dumpcap 프로세스 실행 (제거됨)
+						# ExtensionRecordingManager가 통화별 dumpcap을 관리하므로 전역 dumpcap 불필요
+						self.log_error("통화별 녹음 시스템 활성화됨 - 전역 dumpcap 비활성화", level="info")
 
 				except Exception as e:
 						self.log_error(f"Wireshark 프로세스 시작 실패: {e}")
@@ -1026,28 +994,11 @@ class Dashboard(QMainWindow):
 								finally:
 										self.tshark_process = None
 
-						# dumpcap 프로세스 종료
-						if hasattr(self, 'dumpcap_process') and self.dumpcap_process:
-								try:
-										self.dumpcap_process.terminate()
-										self.dumpcap_process.wait(timeout=5)
-										self.log_error("dumpcap 프로세스 종료됨")
-								except subprocess.TimeoutExpired:
-										self.dumpcap_process.kill()
-										self.log_error("dumpcap 프로세스 강제 종료됨")
-								except Exception as e:
-										self.log_error(f"dumpcap 프로세스 종료 실패: {e}")
-								finally:
-										self.dumpcap_process = None
+						# dumpcap 프로세스 종료 (제거됨)
+						# ExtensionRecordingManager가 통화별 dumpcap을 관리하므로 전역 dumpcap 정리 불필요
 
-						# 임시 캡처 파일 정리
-						temp_file = os.path.join(os.getcwd(), "temp_capture.pcap")
-						try:
-								if os.path.exists(temp_file):
-										os.remove(temp_file)
-										self.log_error("임시 캡처 파일 삭제됨")
-						except Exception as e:
-								self.log_error(f"임시 캡처 파일 삭제 실패: {e}")
+						# 임시 캡처 파일 정리 (제거됨)
+						# 통화별 녹음 시스템에서 임시 파일을 자체 관리
 
 				except Exception as e:
 						self.log_error(f"Wireshark 프로세스 종료 실패: {e}")
@@ -1297,8 +1248,8 @@ class Dashboard(QMainWindow):
 												self.sip_packet_signal.emit(packet)
 										elif hasattr(packet, 'udp'):
 												if self.is_rtp_packet(packet):
+														self.log_error(f"🎵 RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", level="info")
 														self.handle_rtp_packet(packet)
-												# UDP 패킷 로그 제거 (너무 많음)
 
 								except Exception as packet_error:
 										self.safe_log(f"패킷 처리 중 오류: {packet_error}", "ERROR")
@@ -2833,6 +2784,9 @@ class Dashboard(QMainWindow):
 														"from_state": "IN_CALL",
 														"to_state": "TERMINATED"
 												})
+
+												# 통화 종료 시 녹음 종료 훅
+												self._on_call_terminated(call_id)
 										else:
 												self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 														"call_id": call_id,
@@ -3036,6 +2990,9 @@ class Dashboard(QMainWindow):
 																		"from_state": "TRYING",
 																		"to_state": "IN_CALL"
 																})
+
+																# 통화 시작 시 녹음 시작 훅
+																self._on_call_started(call_id)
 														else:
 																self.log_error("잘못된 상태 전이 시도 무시", level="info", additional_info={
 																		"call_id": call_id,
@@ -3260,7 +3217,10 @@ class Dashboard(QMainWindow):
 						if version != 2:
 								return False
 						payload_type = payload[1] & 0x7F
-						return payload_type in [0, 8]
+						# 오디오 Payload Type 범위 확장 (0-127 중 일반적인 오디오 타입들)
+						# 0=PCMU, 8=PCMA, 9=G722, 18=G729 등 포함
+						audio_payload_types = [0, 8, 9, 10, 11, 18, 96, 97, 98, 99, 100, 101, 102, 103]
+						return payload_type in audio_payload_types or (96 <= payload_type <= 127)
 				except Exception as e:
 						print(f"RTP 패킷 확인 중 오류: {e}")
 						return False
@@ -3562,50 +3522,8 @@ class Dashboard(QMainWindow):
 										})
 										if new_status == '통화종료':
 												self.active_calls[call_id]['end_time'] = datetime.datetime.now()
-												if hasattr(self, 'stream_manager'):
-														stream_info_in = None
-														stream_info_out = None
-														in_key = f"{call_id}_IN"
-														if in_key in self.stream_manager.active_streams:
-																stream_info_in = self.stream_manager.finalize_stream(in_key)
-														out_key = f"{call_id}_OUT"
-														if out_key in self.stream_manager.active_streams:
-																stream_info_out = self.stream_manager.finalize_stream(out_key)
-														if stream_info_in and stream_info_out:
-																try:
-																		# 파일 경로에서 파일명 뒷자리 제거
-																		file_dir = stream_info_in['file_dir']
-																		timestamp = os.path.basename(file_dir)[:-2]
-																		local_num = self.active_calls[call_id]['from_number']
-																		remote_num = self.active_calls[call_id]['to_number']
-
-																		merged_file = self.wav_merger.merge_and_save(
-																				timestamp,
-																				local_num,
-																				remote_num,
-																				stream_info_in['filepath'],
-																				stream_info_out['filepath'],
-																				file_dir
-																		)
-																		html_file = None
-																		if merged_file:
-																				# active_calls에서 저장된 packet 정보 가져오기
-																				packet = self.active_calls[call_id].get('packet', None)
-																				self._save_to_mongodb(
-																						merged_file, html_file,
-																						local_num, remote_num, call_id, packet
-																				)
-
-																		# 파일 삭제
-																		#try:
-																		#		if os.path.exists(stream_info_in['filepath']):
-																		#				os.remove(stream_info_in['filepath'])
-																		#		if os.path.exists(stream_info_out['filepath']):
-																		#				os.remove(stream_info_out['filepath'])
-																		#except Exception as e:
-																		#		print(f"파일 삭제 중 오류: {e}")
-																except Exception as e:
-																		print(f"파일 처리 중 오류: {e}")
+												# RTPStreamManager 완전 제거됨 - ExtensionRecordingManager가 통화 녹음 처리
+												# 통화 종료 시 ExtensionRecordingManager가 자동으로 변환 및 저장 처리함
 
 										extension = self.get_extension_from_call(call_id)
 										received_number = self.active_calls[call_id].get('to_number', "")
@@ -3641,21 +3559,22 @@ class Dashboard(QMainWindow):
 		def cleanup_existing_dumpcap(self):
 				"""기존 Dumpcap 프로세스 정리"""
 				try:
+						# ExtensionRecordingManager가 통화별 dumpcap을 관리하므로
+						# 전역 dumpcap 정리는 선택적으로만 수행
+						dumpcap_count = 0
 						for proc in psutil.process_iter(['pid', 'name']):
 								if proc.info['name'] and 'dumpcap' in proc.info['name'].lower():
-										try:
-												proc.kill()
-												self.log_error("기존 Dumpcap 프로세스 종료", level="info", additional_info={"pid": proc.info['pid']})
-										except Exception as e:
-												self.log_error("Dumpcap 프로세스 종료 실패", e)
+										dumpcap_count += 1
+
+						if dumpcap_count > 0:
+								self.log_error(f"기존 dumpcap 프로세스 {dumpcap_count}개 감지됨 - ExtensionRecordingManager가 관리", level="info")
 				except Exception as e:
-						self.log_error("Dumpcap 프로세스 정리 중 오류", e)
+						self.log_error("Dumpcap 프로세스 확인 중 오류", e)
 
 		def handle_rtp_packet(self, packet):
 				try:
-						if not hasattr(self, 'stream_manager'):
-								self.stream_manager = RTPStreamManager()
-								self.log_error("RTP 스트림 매니저 생성", level="info")
+						# RTPStreamManager 완전 제거 - ExtensionRecordingManager가 녹음 처리
+						pass
 
 						# SIP 정보 확인 및 처리
 						if hasattr(packet, 'sip'):
@@ -3730,14 +3649,8 @@ class Dashboard(QMainWindow):
 												if len(audio_data) == 0:
 														continue
 
-												stream_key = self.stream_manager.create_stream(
-														call_id, direction, call_info, phone_ip_str
-												)
-
-												if stream_key:
-														self.stream_manager.process_packet(
-																stream_key, audio_data, sequence, payload_type
-														)
+												# RTPStreamManager 완전 제거 - ExtensionRecordingManager가 녹음 처리
+												pass
 
 										except Exception as payload_error:
 												self.log_error("페이로드 분석 오류", payload_error)
@@ -4321,10 +4234,27 @@ class Dashboard(QMainWindow):
 						per_lv8_update = ""
 						per_lv9_update = ""
 
-						sip_layer = packet.sip
+						# packet이 None인 경우 안전 처리
+						sip_layer = None
+						if packet and hasattr(packet, 'sip'):
+								sip_layer = packet.sip
 						# 통화 유형에 따른 권한 설정
-						# 내선 간 통화인 경우
-						if is_extension(local_num) and is_extension(remote_num):
+						# packet이 없는 경우 기본 권한 설정 (ExtensionRecordingManager에서 호출시)
+						if packet is None:
+								# 내선번호를 기반으로 기본 권한 설정
+								if is_extension(local_num):
+										member_doc = self.members.find_one({"extension_num": local_num})
+										if member_doc:
+												per_lv8 = member_doc.get('per_lv8', '')
+												per_lv9 = member_doc.get('per_lv9', '')
+								elif is_extension(remote_num):
+										member_doc = self.members.find_one({"extension_num": remote_num})
+										if member_doc:
+												per_lv8 = member_doc.get('per_lv8', '')
+												per_lv9 = member_doc.get('per_lv9', '')
+
+						# 내선 간 통화인 경우 (packet이 있는 경우만)
+						elif is_extension(local_num) and is_extension(remote_num):
 								if packet and hasattr(packet, 'sip'):
 										if hasattr(sip_layer, 'method') and sip_layer.method == 'INVITE':
 
@@ -4535,6 +4465,14 @@ class Dashboard(QMainWindow):
 						# 타이머와 리소스 정리
 						self.cleanup()
 
+						# 통화별 녹음 관리자 정리
+						if hasattr(self, 'recording_manager') and self.recording_manager:
+								try:
+										self.recording_manager.cleanup_all_recordings()
+										print("통화별 녹음 프로세스 정리 완료")
+								except Exception as e:
+										print(f"녹음 프로세스 정리 실패: {e}")
+
 						# WebSocket 서버 종료
 						if hasattr(self, 'websocket_server') and self.websocket_server:
 								try:
@@ -4675,5 +4613,160 @@ def main():
 						f.write(traceback.format_exc())
 						f.write("\n")
 				sys.exit(1)
+
+# ============ 통화별 녹음 관리 메서드 ============
+
+def _on_call_started(self, call_id: str):
+	"""통화 시작 시 호출되는 훅 메서드 (CallState.TRYING → IN_CALL)"""
+	try:
+		if call_id not in self.active_calls:
+			self.log_error(f"통화 정보 없음: {call_id}")
+			return
+
+		call_info = self.active_calls[call_id]
+		extension = self.get_extension_from_call(call_id)
+		from_number = call_info.get('from_number', '')
+		to_number = call_info.get('to_number', '')
+
+		if not extension:
+			self.log_error(f"내선번호 정보 없음: {call_id}")
+			return
+
+		# 통화별 녹음 시작
+		success = self.recording_manager.start_call_recording(
+			call_id=call_id,
+			extension=extension,
+			from_number=from_number,
+			to_number=to_number
+		)
+
+		if success:
+			self.log_error(f"통화 녹음 시작: {call_id} (내선: {extension})", level="info")
+		else:
+			self.log_error(f"통화 녹음 시작 실패: {call_id}")
+
+	except Exception as e:
+		self.log_error(f"통화 시작 훅 오류: {e}")
+
+def _on_call_terminated(self, call_id: str):
+	"""통화 종료 시 호출되는 훅 메서드 (CallState.IN_CALL → TERMINATED)"""
+	try:
+		# 통화별 녹음 종료
+		recording_info = self.recording_manager.stop_call_recording(call_id)
+
+		if recording_info:
+			# 별도 스레드에서 변환 및 저장
+			conversion_thread = threading.Thread(
+				target=self._handle_recording_conversion,
+				args=(recording_info,),
+				daemon=True
+			)
+			conversion_thread.start()
+
+			extension = recording_info.get('extension', 'unknown')
+			self.log_error(f"통화 녹음 종료: {call_id} (내선: {extension})", level="info")
+
+			# 녹음 상태 즉시 업데이트 (UI 반영)
+			QTimer.singleShot(100, self.update_recording_status_display)
+		else:
+			self.log_error(f"통화 녹음 정보 없음: {call_id}")
+
+		# 녹음 종료 후 상태 업데이트 (지연 실행으로 확실한 반영)
+		QTimer.singleShot(500, self.update_recording_status_display)
+
+	except Exception as e:
+		self.log_error(f"통화 종료 훅 오류: {e}")
+
+def _handle_recording_conversion(self, recording_info: dict):
+	"""녹음 파일 변환 및 저장 처리 (별도 스레드)"""
+	try:
+		success = self.recording_manager.convert_and_save(recording_info)
+
+		if success:
+			extension = recording_info.get('extension', 'unknown')
+			self.log_error(f"녹음 파일 변환 시작: 내선 {extension}", level="info")
+		else:
+			self.log_error("녹음 파일 변환 실패")
+
+	except Exception as e:
+		self.log_error(f"녹음 변환 처리 오류: {e}")
+
+def get_active_recordings_status(self) -> str:
+	"""현재 진행 중인 녹음 상태 반환"""
+	try:
+		active_recordings = self.recording_manager.get_active_recordings()
+		count = len(active_recordings)
+
+		if count == 0:
+			return "녹음 중인 통화 없음"
+		else:
+			extensions = [info.get('extension', 'unknown') for info in active_recordings.values()]
+			return f"녹음 중: {count}개 통화 (내선: {', '.join(extensions)})"
+
+	except Exception as e:
+		self.log_error(f"녹음 상태 조회 오류: {e}")
+		return "녹음 상태 조회 실패"
+
+def update_recording_status_display(self):
+	"""녹음 상태를 UI에 표시 (타이머 콜백)"""
+	try:
+		if not hasattr(self, 'recording_manager') or not self.recording_manager:
+			return
+
+		# 현재 녹음 상태 조회
+		active_recordings = self.recording_manager.get_active_recordings()
+		count = len(active_recordings)
+
+		# 이전 상태와 다르면 로그 출력
+		current_count = getattr(self, '_last_recording_count', -1)
+
+		if count > 0:
+			# 진행 중인 녹음이 있는 경우
+			extensions_info = []
+			for call_id, info in active_recordings.items():
+				extension = info.get('extension', 'unknown')
+				start_time = info.get('start_time')
+				if start_time:
+					duration = (datetime.datetime.now() - start_time).total_seconds()
+					duration_str = f"{int(duration//60)}:{int(duration%60):02d}"
+					extensions_info.append(f"{extension}({duration_str})")
+				else:
+					extensions_info.append(extension)
+
+			# 첫 시작이거나 카운트가 변경되었을 때만 로그 출력
+			if current_count != count:
+				if current_count == -1:
+					# 첫 시작
+					status_msg = f"🎙️ 녹음 시작: {count}개 통화 - {', '.join(extensions_info)}"
+				else:
+					# 녹음 추가
+					status_msg = f"🎙️ 녹음 추가: {count}개 통화 - {', '.join(extensions_info)}"
+				self.log_to_sip_console(status_msg, "RECORDING")
+
+		# 녹음 종료 확인 - 녹음 개수가 감소한 경우
+		if current_count != count and current_count != -1:  # -1은 첫 시작 상태
+			if count == 0 and current_count > 0:
+				self.log_to_sip_console("🎙️ 모든 녹음 완료", "RECORDING")
+			elif count < current_count and current_count > 0:
+				# 일부 녹음 종료
+				ended_count = current_count - count
+				self.log_to_sip_console(f"🎙️ {ended_count}개 통화 녹음 완료 (현재: {count}개)", "RECORDING")
+
+				# 디버깅을 위한 상세 로그 추가
+				self.log_error(f"녹음 상태 변경 감지: {current_count} → {count} (감소: {ended_count}개)", level="info")
+
+		# 상태 저장 (항상 업데이트)
+		self._last_recording_count = count
+
+	except Exception as e:
+		self.log_error(f"녹음 상태 표시 오류: {e}")
+
+# Dashboard 클래스에 메서드 추가 (실제로는 위 메서드들을 Dashboard 클래스 내부로 이동해야 함)
+Dashboard._on_call_started = _on_call_started
+Dashboard._on_call_terminated = _on_call_terminated
+Dashboard._handle_recording_conversion = _handle_recording_conversion
+Dashboard.get_active_recordings_status = get_active_recordings_status
+Dashboard.update_recording_status_display = update_recording_status_display
+
 if __name__ == "__main__":
 		main()

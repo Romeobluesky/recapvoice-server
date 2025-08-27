@@ -7,6 +7,7 @@ import configparser
 import wave
 import audioop
 import traceback
+import hashlib
 
 class RTPStreamManager:
 		def __init__(self):
@@ -33,19 +34,33 @@ class RTPStreamManager:
 								
 								today = datetime.datetime.now().strftime("%Y%m%d")
 								
-								# 통화별 시간 저장을 위한 딕셔너리가 없으면 생성
+								# 통화별 시간과 고유 식별자 저장을 위한 딕셔너리가 없으면 생성
 								if not hasattr(self, 'call_start_times'):
 										self.call_start_times = {}
+								if not hasattr(self, 'call_unique_ids'):
+										self.call_unique_ids = {}
+								if not hasattr(self, 'stream_start_times'):
+										self.stream_start_times = {}
 								
-								# call_id에 대한 시간이 없으면 새로 생성
+								# call_id에 대한 정보가 없으면 새로 생성
 								if call_id not in self.call_start_times:
 										if 'start_time' in call_info:
-												self.call_start_times[call_id] = call_info['start_time'].strftime("%H%M%S")
+												self.call_start_times[call_id] = call_info['start_time'].strftime("%H%M%S%f")[:9]
 										else:
-												self.call_start_times[call_id] = datetime.datetime.now().strftime("%H%M%S")
+												self.call_start_times[call_id] = datetime.datetime.now().strftime("%H%M%S%f")[:9]
+										
+										# call_id를 해싱하여 고유 식별자 생성 (6자리)
+										call_hash = hashlib.md5(call_id.encode()).hexdigest()[:6]
+										self.call_unique_ids[call_id] = call_hash
 								
-								# 저장된 시간 사용
+								# 저장된 정보 사용
 								time_str = self.call_start_times[call_id]
+								call_hash = self.call_unique_ids[call_id]
+								
+								# 스트림별 개별 시작 시간 기록 (정확한 동기화를 위해)
+								stream_start_time = datetime.datetime.now()
+								self.stream_start_times[stream_key] = stream_start_time
+								print(f"스트림 {direction} 시작 시간 기록: {stream_start_time.strftime('%H:%M:%S.%f')}")
 								
 								# 디렉토리 경로 생성 및 확인
 								file_dir = os.path.join(base_path, today, phone_ip, time_str)
@@ -56,9 +71,19 @@ class RTPStreamManager:
 												print(f"디렉토리 생성 실패: {e}")
 												return None
 												
-								# 파일명 생성
-								filename = f"{time_str}_{direction}_{call_info['from_number']}_{call_info['to_number']}_{today}.wav"
-								filepath = os.path.join(file_dir, filename)
+								# 파일명 생성 (call_id 해시를 포함하여 완전 고유성 보장)
+								base_filename = f"{time_str}_{direction}_{call_info['from_number']}_{call_info['to_number']}_{today}_{call_hash}.wav"
+								filepath = os.path.join(file_dir, base_filename)
+								
+								# 추가 보안: 여전히 파일이 존재하는 경우 순차번호 추가 (극히 드문 경우)
+								counter = 1
+								while os.path.exists(filepath):
+										filename = f"{time_str}_{direction}_{call_info['from_number']}_{call_info['to_number']}_{today}_{call_hash}_{counter:03d}.wav"
+										filepath = os.path.join(file_dir, filename)
+										counter += 1
+										if counter > 999:  # 무한 루프 방지
+												print(f"파일 중복 해결 실패: {base_filename}")
+												break
 								
 								try:
 										with wave.open(filepath, 'wb') as wav_file:
@@ -69,8 +94,14 @@ class RTPStreamManager:
 										print(f"WAV 파일 초기화 실패: {e}")
 										return None
 										
+								print(f"새로운 스트림 생성: {stream_key}")
+								print(f"파일 경로: {filepath}")
+								print(f"Call ID: {call_id}")
+								print(f"Call Hash: {call_hash}")
+								
 								self.active_streams[stream_key] = {
 										'call_id': call_id,
+										'call_hash': call_hash,  # 고유 식별자 추가
 										'direction': direction,
 										'call_info': call_info,
 										'phone_ip': phone_ip,
@@ -275,11 +306,77 @@ class RTPStreamManager:
 										if stream_info['audio_data']:
 												self._write_to_wav(stream_key, 8)
 										stream_info['saved'] = True
+										print(f"스트림 종료 완료: {stream_key}")
+										print(f"최종 파일: {stream_info['filepath']}")
+								
+								# call_start_times 및 call_unique_ids에서 해당 call_id 정보 정리
+								call_id = stream_info['call_id']
+								if hasattr(self, 'call_start_times') and call_id in self.call_start_times:
+										# 해당 call_id의 모든 스트림이 종료된 경우에만 정리
+										call_streams = [key for key in self.active_streams.keys() if self.active_streams[key]['call_id'] == call_id]
+										if len(call_streams) <= 1:  # 현재 스트림이 마지막인 경우
+												self.call_start_times.pop(call_id, None)
+												if hasattr(self, 'call_unique_ids'):
+														self.call_unique_ids.pop(call_id, None)
+												print(f"Call ID {call_id} 정보 정리 완료")
+								
 								return dict(stream_info)
 				except Exception as e:
 						print(f"스트림 종료 중 오류: {e}")
 						print(traceback.format_exc())
 						return None
+
+		def get_memory_usage_summary(self):
+				"""현재 메모리 사용량 요약 정보 반환"""
+				try:
+						total_memory = 0
+						call_memory = {}
+						stream_count = len(self.active_streams)
+						
+						for stream_key, stream_info in self.active_streams.items():
+								call_id = stream_info['call_id']
+								memory_usage = len(stream_info['audio_data'])
+								total_memory += memory_usage
+								
+								if call_id not in call_memory:
+										call_memory[call_id] = 0
+								call_memory[call_id] += memory_usage
+						
+						return {
+								'total_streams': stream_count,
+								'total_memory_bytes': total_memory,
+								'total_memory_mb': round(total_memory / (1024 * 1024), 2),
+								'call_memory_usage': call_memory,
+								'avg_memory_per_stream': round(total_memory / stream_count, 2) if stream_count > 0 else 0
+						}
+				except Exception as e:
+						print(f"메모리 사용량 조회 실패: {e}")
+						return {}
+
+		def cleanup_finished_calls(self):
+				"""완료된 통화의 메모리 정리"""
+				try:
+						finished_streams = []
+						for stream_key, stream_info in self.active_streams.items():
+								if stream_info.get('saved', False):
+										finished_streams.append(stream_key)
+						
+						for stream_key in finished_streams:
+								try:
+										if stream_key in self.stream_locks:
+												del self.stream_locks[stream_key]
+										if stream_key in self.file_locks:
+												del self.file_locks[stream_key]
+										if stream_key in self.active_streams:
+												del self.active_streams[stream_key]
+										print(f"완료된 스트림 정리: {stream_key}")
+								except Exception as e:
+										print(f"스트림 정리 실패 {stream_key}: {e}")
+										
+						return len(finished_streams)
+				except Exception as e:
+						print(f"완료된 통화 정리 실패: {e}")
+						return 0
 
 		def save_file_info(self, file_info):
 				try:

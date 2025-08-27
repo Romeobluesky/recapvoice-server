@@ -76,7 +76,7 @@ if (Test-Path "settings.ini") {
     Write-Host "Modifying settings.ini for production..."
     $content = Get-Content $settingsPath -Raw -Encoding UTF8
     $installPath = "C:\Program Files (x86)\Recap Voice"
-    
+
     # 경로 설정 수정 (forward slash 패턴으로 매칭)
     $content = $content -replace "save_path\s*=\s*D:/PacketWaveRecord", "save_path = $installPath/RecapVoiceRecord"
     $content = $content -replace "dir_path\s*=\s*D:/Work_state/packet_wave", "dir_path = $installPath"

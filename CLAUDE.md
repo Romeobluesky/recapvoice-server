@@ -96,9 +96,10 @@ npm run stop
 {base_path}/PacketWaveRecord/
 ├── {server_ip}/
 │   └── {date}/
-│       ├── {time}_{from}_{to}_{call_id}_in.wav
-│       ├── {time}_{from}_{to}_{call_id}_out.wav
-│       └── {time}_{from}_{to}_{call_id}_merge.wav
+│       └── {from_number}_{to_number}/
+│           ├── {time}_IN_{from}_{to}_{date}_{call_hash}.wav
+│           ├── {time}_OUT_{from}_{to}_{date}_{call_hash}.wav
+│           └── {time}_MERGE_{from}_{to}_{date}.wav
 ```
 
 ### Application Structure
