@@ -35,7 +35,8 @@
       "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"test_ethernet3.pcapng\" -Y \"sip or rtp\")",
       "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"test_ethernet3.pcapng\")",
       "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"test_new_filter.pcapng\" -Y \"rtp\")",
-      "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"test_new_filter.pcapng\" -Y \"rtp\" -c 5)"
+      "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"test_new_filter.pcapng\" -Y \"rtp\" -c 5)",
+      "Bash(del:*)"
     ],
     "deny": [],
     "additionalDirectories": [

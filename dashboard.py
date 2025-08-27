@@ -292,6 +292,10 @@ class Dashboard(QMainWindow):
 								self.sip_registrations = {}
 								self.sip_extensions = set()  # SIP 내선번호 집합
 								self.first_registration = False
+								
+								# RTP 패킷 카운터 시스템
+								self.rtp_counters = {}  # 연결별 패킷 카운터 저장
+								self.rtp_display_lines = {}  # 각 연결의 콘솔 표시 관리
 								self.packet_get = 0
 								# 토글 기능 제거 - 관련 변수들 제거
 
@@ -544,6 +548,12 @@ class Dashboard(QMainWindow):
 						# LED 타이머들 정리
 						if hasattr(self, 'extension_list_container'):
 								self.cleanup_led_timers(self.extension_list_container)
+						
+						# RTP 카운터 정리
+						if hasattr(self, 'rtp_counters'):
+								self.rtp_counters.clear()
+						if hasattr(self, 'rtp_display_lines'):
+								self.rtp_display_lines.clear()
 
 						print("타이머 정리 완료")
 				except Exception as e:
@@ -1248,7 +1258,7 @@ class Dashboard(QMainWindow):
 												self.sip_packet_signal.emit(packet)
 										elif hasattr(packet, 'udp'):
 												if self.is_rtp_packet(packet):
-														self.log_error(f"🎵 RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", level="info")
+														self.log_rtp_with_counter(packet)
 														self.handle_rtp_packet(packet)
 
 								except Exception as packet_error:
@@ -2493,6 +2503,67 @@ class Dashboard(QMainWindow):
 						sys.stderr.write(f"Critical logging error: {e}\n")
 						sys.stderr.flush()
 
+		def log_rtp_with_counter(self, packet):
+				"""RTP 패킷을 카운터 기반으로 로깅 (터미널 스팸 방지)"""
+				try:
+						# 연결 식별키 생성 (양방향 구분)
+						connection_key = f"{packet.ip.src}:{packet.udp.srcport}→{packet.ip.dst}:{packet.udp.dstport}"
+						
+						# 카운터 초기화 또는 증가
+						if connection_key not in self.rtp_counters:
+								# 새로운 연결 - 새 라인에 시작
+								self.rtp_counters[connection_key] = 1
+								try:
+										print(f"[1] ♪ RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}")
+								except UnicodeEncodeError:
+										print(f"[1] RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}")
+								sys.stdout.flush()
+						else:
+								# 기존 연결 - 같은 라인에서 카운터 업데이트
+								self.rtp_counters[connection_key] += 1
+								try:
+										print(f"\r[{self.rtp_counters[connection_key]}] ♪ RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", end='', flush=True)
+								except UnicodeEncodeError:
+										print(f"\r[{self.rtp_counters[connection_key]}] RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", end='', flush=True)
+								
+				except Exception as e:
+						# 오류 발생 시 기본 로깅으로 대체
+						self.log_error(f"RTP 카운터 로깅 오류: {e}", level="warning")
+						self.log_error(f"🎵 RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", level="info")
+
+		def cleanup_rtp_counters_for_call(self, call_id):
+				"""통화 종료 시 해당 통화의 RTP 카운터 정리"""
+				try:
+						with self.active_calls_lock:
+								if call_id not in self.active_calls:
+										return
+								
+								call_info = self.active_calls[call_id]
+								# 통화 관련 IP/포트 정보로 카운터 정리
+								if 'media_endpoints' in call_info:
+										for endpoint in call_info['media_endpoints']:
+												# 양방향 연결키 생성하여 정리
+												src_key_pattern = f"{endpoint.get('src_ip')}:{endpoint.get('src_port')}"
+												dst_key_pattern = f"{endpoint.get('dst_ip')}:{endpoint.get('dst_port')}"
+												
+												# 관련 카운터 찾아서 제거
+												keys_to_remove = []
+												for key in self.rtp_counters:
+														if src_key_pattern in key or dst_key_pattern in key:
+																keys_to_remove.append(key)
+												
+												for key in keys_to_remove:
+														del self.rtp_counters[key]
+														if key in self.rtp_display_lines:
+																del self.rtp_display_lines[key]
+								
+								# 통화 종료 시 새 줄 출력 (다음 로그와 구분)
+								print("\n")
+								sys.stdout.flush()
+								
+				except Exception as e:
+						self.log_error(f"RTP 카운터 정리 중 오류: {e}", level="warning")
+
 		def analyze_sip_packet_in_main_thread(self, packet):
 				"""메인 스레드에서 안전하게 SIP 패킷 분석"""
 				try:
@@ -3081,6 +3152,10 @@ class Dashboard(QMainWindow):
 										'end_time': datetime.datetime.now(),
 										'result': '정상종료'
 								})
+				
+				# RTP 카운터 정리
+				self.cleanup_rtp_counters_for_call(call_id)
+				
 				self.update_voip_status()
 				extension = self.get_extension_from_call(call_id)
 				if extension:
