@@ -2589,6 +2589,8 @@ class Dashboard(QMainWindow):
 				self.log_to_sip_console("SIP 패킷 분석 시작", "SIP")
 
 				# 포트미러링 환경에서 패킷 정보 추가 출력
+				src_ip = None
+				dst_ip = None
 				if hasattr(packet, 'ip'):
 						src_ip = getattr(packet.ip, 'src', 'unknown')
 						dst_ip = getattr(packet.ip, 'dst', 'unknown')
@@ -2668,6 +2670,9 @@ class Dashboard(QMainWindow):
 																		"to_user": str(sip_layer.to_user)
 															})
 															return
+
+														# SDP에서 RTP 포트 정보 추출 및 ExtensionRecordingManager에 전달
+														self._extract_and_update_sdp_info(sip_layer, call_id, from_number, to_number)
 
 														# 내선번호 확인
 														extension = None
@@ -2783,7 +2788,7 @@ class Dashboard(QMainWindow):
 										# REGISTER 처리
 										elif 'REGISTER' in request_line:
 												try:
-														self._handle_register_request(sip_layer, call_id, request_line)
+														self._handle_register_request(sip_layer, call_id, request_line, src_ip, dst_ip)
 												except Exception as register_error:
 														self.log_error("REGISTER 처리 중 오류", register_error)
 														return
@@ -2955,12 +2960,14 @@ class Dashboard(QMainWindow):
 								if extension:
 										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
-		def _handle_register_request(self, sip_layer, call_id, request_line):
+		def _handle_register_request(self, sip_layer, call_id, request_line, src_ip=None, dst_ip=None):
 				"""REGISTER 요청 처리를 위한 헬퍼 메소드"""
 				try:
 						print(f"=== SIP REGISTER 감지 ===")
 						print(f"Request Line: {request_line}")
+						print(f"IP 정보 - Source: {src_ip}, Destination: {dst_ip}")
 						self.log_to_sip_console(f"SIP REGISTER 감지 - {request_line}", "SIP")
+						self.log_to_sip_console(f"IP 정보 - 송신: {src_ip}, 수신: {dst_ip}", "SIP")
 
 						# 포트미러링 환경에서 더 많은 헤더 정보 확인
 						extension = None
@@ -3019,11 +3026,29 @@ class Dashboard(QMainWindow):
 						if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
 								# SIP 등록된 내선번호를 사이드바에 추가
 								self.refresh_extension_list_with_register(extension)
+								
+								# 내선-IP 매핑을 ExtensionRecordingManager에 전달
+								if hasattr(self, 'recording_manager') and self.recording_manager:
+										# 192.168 대역의 IP를 내선 IP로 판단
+										extension_ip = None
+										if src_ip and src_ip.startswith('192.168.'):
+												extension_ip = src_ip
+										elif dst_ip and dst_ip.startswith('192.168.'):
+												extension_ip = dst_ip
+										
+										if extension_ip:
+												self.recording_manager.update_extension_ip_mapping(extension, extension_ip)
+												print(f"📍 내선-IP 매핑 등록: {extension} → {extension_ip}")
+												self.log_to_sip_console(f"내선-IP 매핑 등록: {extension} → {extension_ip}", "SIP")
+										else:
+												print(f"⚠️ 내선 {extension}의 IP 정보를 찾을 수 없음 (src: {src_ip}, dst: {dst_ip})")
+								
 								self.log_to_sip_console(f"내선번호 {extension} 등록 완료", "SIP")
 								self.log_error("SIP REGISTER 처리 완료", level="info", additional_info={
 										"extension": extension,
 										"call_id": call_id,
-										"method": "REGISTER"
+										"method": "REGISTER",
+										"extension_ip": extension_ip if 'extension_ip' in locals() else None
 								})
 						else:
 								print(f"유효하지 않은 내선번호: {extension}")
@@ -3031,6 +3056,56 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						print(f"REGISTER 처리 중 오류: {e}")
 						self.log_error("REGISTER 요청 처리 중 오류", e)
+
+		def _extract_and_update_sdp_info(self, sip_layer, call_id, from_number, to_number):
+				"""SIP INVITE에서 SDP 정보를 추출하여 ExtensionRecordingManager에 전달"""
+				try:
+						if not hasattr(self, 'recording_manager') or not self.recording_manager:
+								return
+								
+						# SDP 정보 추출
+						sdp_info = {}
+						rtp_ports = []
+						
+						# SIP 메시지 본문에서 SDP 찾기
+						if hasattr(sip_layer, 'msg_body'):
+								sdp_body = str(sip_layer.msg_body)
+								print(f"🎵 SDP 본문 감지: {sdp_body[:200]}..." if len(sdp_body) > 200 else f"🎵 SDP 본문: {sdp_body}")
+								
+								# m=audio 포트 추출
+								import re
+								audio_matches = re.findall(r'm=audio (\d+) RTP', sdp_body)
+								for port_str in audio_matches:
+										try:
+												port = int(port_str)
+												if 1024 <= port <= 65535:
+														rtp_ports.append(port)
+														rtp_ports.append(port + 1)  # RTCP 포트도 포함
+										except ValueError:
+												continue
+								
+								if rtp_ports:
+										print(f"📡 RTP 포트 추출됨: {rtp_ports}")
+										self.log_to_sip_console(f"RTP 포트 추출: {rtp_ports}", "SIP")
+										
+										# SDP 정보 구성
+										sdp_info = {
+												'rtp_ports': list(set(rtp_ports)),  # 중복 제거
+												'from_number': from_number,
+												'to_number': to_number,
+												'sdp_body': sdp_body[:500]  # 처음 500자만 저장
+										}
+										
+										# ExtensionRecordingManager에 SIP 정보 업데이트
+										self.recording_manager.update_call_sip_info(call_id, sdp_info)
+								else:
+										print("⚠️ SDP에서 RTP 포트를 찾을 수 없음")
+						else:
+								print("⚠️ SIP INVITE에 SDP 본문이 없음")
+								
+				except Exception as e:
+						self.log_error(f"SDP 정보 추출 실패: {e}")
+						print(f"SDP 추출 오류: {e}")
 
 		def _handle_sip_response(self, sip_layer, call_id):
 				"""SIP 응답 처리를 위한 헬퍼 메소드"""

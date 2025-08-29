@@ -61,6 +61,11 @@ class ExtensionRecordingManager:
         self.temp_dir = Path("temp_recordings")
         self.temp_dir.mkdir(exist_ok=True)
 
+        # 내선-IP 동적 매핑 시스템
+        self.extension_ip_mapping: Dict[str, str] = {}  # extension_number -> ip_address
+        self.call_sip_info: Dict[str, Dict] = {}  # call_id -> sip_info (ports, ips, etc)
+        self.mapping_lock = threading.Lock()
+
     def _get_interface_number(self) -> str:
         """네트워크 인터페이스 번호 가져오기"""
         try:
@@ -157,6 +162,154 @@ class ExtensionRecordingManager:
             self.logger.error(f"녹음 경로 가져오기 실패: {e}")
             return os.path.join(os.getcwd(), 'PacketWaveRecord')
 
+    def update_extension_ip_mapping(self, extension: str, ip_address: str):
+        """내선번호와 IP 주소 매핑 업데이트"""
+        with self.mapping_lock:
+            self.extension_ip_mapping[extension] = ip_address
+            self.logger.info(f"내선-IP 매핑 업데이트: {extension} → {ip_address}")
+
+    def get_extension_ip(self, extension: str) -> Optional[str]:
+        """내선번호에 해당하는 IP 주소 조회"""
+        with self.mapping_lock:
+            return self.extension_ip_mapping.get(extension)
+
+    def update_call_sip_info(self, call_id: str, sip_info: Dict):
+        """통화별 SIP 정보 업데이트"""
+        with self.mapping_lock:
+            if call_id not in self.call_sip_info:
+                self.call_sip_info[call_id] = {}
+            self.call_sip_info[call_id].update(sip_info)
+            self.logger.info(f"통화 SIP 정보 업데이트: {call_id} → {sip_info}")
+
+    def get_call_sip_info(self, call_id: str) -> Dict:
+        """통화별 SIP 정보 조회"""
+        with self.mapping_lock:
+            return self.call_sip_info.get(call_id, {})
+
+    def _extract_sip_info_from_dashboard(self, call_id: str, extension: str) -> Dict:
+        """Dashboard에서 SIP 정보 추출"""
+        sip_info = {}
+        try:
+            if self.dashboard and hasattr(self.dashboard, 'active_calls'):
+                with getattr(self.dashboard, 'active_calls_lock', threading.Lock()):
+                    if call_id in self.dashboard.active_calls:
+                        call_data = self.dashboard.active_calls[call_id]
+                        
+                        # SIP 관련 정보 추출
+                        sip_info = {
+                            'call_id': call_id,
+                            'from_number': call_data.get('from_number', ''),
+                            'to_number': call_data.get('to_number', ''),
+                            'extension': extension,
+                            'status': call_data.get('status', ''),
+                        }
+                        
+                        self.logger.info(f"Dashboard에서 SIP 정보 추출: {sip_info}")
+                        
+            return sip_info
+        except Exception as e:
+            self.logger.error(f"Dashboard SIP 정보 추출 실패: {e}")
+            return {}
+
+    def _generate_dynamic_filter(self, call_id: str, extension: str, from_number: str, to_number: str) -> str:
+        """통화별 동적 캡처 필터 생성"""
+        try:
+            # 1. 내선 IP 조회
+            extension_ip = self.get_extension_ip(extension)
+            if not extension_ip:
+                # Dashboard의 SIP 분석으로부터 내선 IP 자동 감지 시도
+                extension_ip = self._detect_extension_ip_from_dashboard(extension)
+                
+            # 2. SIP 정보 조회
+            call_sip_info = self.get_call_sip_info(call_id)
+            
+            # 3. 기본 필터 (기존 방식)
+            base_filter = "(port 5060) or (udp and portrange 1024-65535)"
+            
+            # 4. 내선 IP 기반 필터 추가
+            if extension_ip:
+                # 해당 내선 IP와 관련된 트래픽만 캡처
+                ip_filter = f"host {extension_ip}"
+                dynamic_filter = f"({base_filter}) and ({ip_filter})"
+                
+                self.logger.info(f"동적 필터 생성 (IP 기반): {dynamic_filter}")
+                return dynamic_filter
+            
+            # 5. SIP 포트 정보가 있는 경우 추가 최적화
+            if call_sip_info.get('rtp_ports'):
+                rtp_ports = call_sip_info['rtp_ports']
+                if len(rtp_ports) == 1:
+                    port_filter = f"udp port {rtp_ports[0]}"
+                elif len(rtp_ports) == 2:
+                    port_filter = f"udp portrange {min(rtp_ports)}-{max(rtp_ports)}"
+                else:
+                    port_filter = f"udp and ({' or '.join(f'port {p}' for p in rtp_ports)})"
+                    
+                optimized_filter = f"(port 5060) or ({port_filter})"
+                self.logger.info(f"동적 필터 생성 (포트 기반): {optimized_filter}")
+                return optimized_filter
+            
+            # 6. 기본 필터 반환
+            self.logger.warning(f"동적 필터 생성 실패, 기본 필터 사용: {base_filter}")
+            return base_filter
+            
+        except Exception as e:
+            self.logger.error(f"동적 필터 생성 실패: {e}")
+            return "(port 5060) or (udp and portrange 1024-65535)"
+
+    def _detect_extension_ip_from_dashboard(self, extension: str) -> Optional[str]:
+        """Dashboard의 내선 정보에서 IP 자동 감지"""
+        try:
+            if not self.dashboard:
+                return None
+                
+            # Dashboard의 내선 정보 조회
+            if hasattr(self.dashboard, 'extension_widgets'):
+                for ext_num, widget_data in self.dashboard.extension_widgets.items():
+                    if str(ext_num) == str(extension):
+                        # 위젯에서 IP 정보 추출 (실제 구현에 따라 조정 필요)
+                        if hasattr(widget_data, 'ip_address'):
+                            detected_ip = widget_data.ip_address
+                            self.update_extension_ip_mapping(extension, detected_ip)
+                            return detected_ip
+            
+            # SIP REGISTER 패킷 기반 동적 IP 감지 시도
+            detected_ip = self._detect_ip_from_sip_register(extension)
+            if detected_ip:
+                self.update_extension_ip_mapping(extension, detected_ip)
+                return detected_ip
+                
+        except Exception as e:
+            self.logger.error(f"Dashboard에서 내선 IP 감지 실패: {e}")
+            
+        return None
+
+    def _detect_ip_from_sip_register(self, extension: str) -> Optional[str]:
+        """SIP REGISTER 패킷으로부터 내선 IP 감지"""
+        try:
+            if not self.dashboard or not hasattr(self.dashboard, 'extension_widgets'):
+                return None
+                
+            # Dashboard의 내선 등록 정보에서 IP 검색
+            for ext_num, ext_data in getattr(self.dashboard, 'extension_widgets', {}).items():
+                if str(ext_num) == str(extension):
+                    # 내선 위젯에서 IP 정보 추출
+                    if hasattr(ext_data, 'text') and hasattr(ext_data, 'ip'):
+                        return ext_data.ip
+                    elif hasattr(ext_data, 'toolTip'):
+                        # 툴팁에서 IP 정보 추출 시도
+                        tooltip = ext_data.toolTip()
+                        import re
+                        ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
+                        matches = re.findall(ip_pattern, tooltip)
+                        if matches:
+                            return matches[0]
+                            
+            return None
+        except Exception as e:
+            self.logger.error(f"SIP REGISTER 기반 IP 감지 실패: {e}")
+            return None
+
     def start_call_recording(self, call_id: str, extension: str, from_number: str, to_number: str) -> bool:
         """통화별 녹음 시작"""
         try:
@@ -189,23 +342,18 @@ class ExtensionRecordingManager:
                 if self.dashboard_logger:
                     self.dashboard_logger.log_error(f"녹음 시작 준비: {pcapng_filename}", level="info")
 
-                # 네트워크 설정에서 타겟 IP 가져오기
-                target_ip = self.config.get('Network', 'ip', fallback=None)
+                # Dashboard에서 SIP 정보 추출 및 저장
+                sip_info = self._extract_sip_info_from_dashboard(call_id, extension)
+                if sip_info:
+                    self.update_call_sip_info(call_id, sip_info)
 
-                # 통화별 특화 필터 생성 - 각 통화의 고유한 패킷만 캡처
-                if target_ip:
-                    # 포트미러링 환경: 모든 VoIP 트래픽 캡처 (호스트 필터 제거)
-                    # 포트미러링으로 1.1.1.2에 미러링된 모든 SIP/RTP 트래픽 캡처
-                    # 더 넓은 UDP 포트 범위로 RTP 패킷 확실히 캡처
-                    capture_filter = "(port 5060) or (udp and portrange 1024-65535)"
-                else:
-                    # 일반 환경: 내선번호별 특화 필터
-                    # 해당 내선번호와 관련된 SIP/RTP 트래픽만 캡처
-                    capture_filter = f"(port 5060) or (udp and portrange 1024-65535)"
-
-                # 추가: 통화별 고유 식별을 위한 코멘트 (로그용)
+                # 동적 필터 생성
+                capture_filter = self._generate_dynamic_filter(call_id, extension, from_number, to_number)
+                
+                # 통화별 고유 식별을 위한 코멘트 (로그용)
                 filter_comment = f"Extension {extension}: {from_number} <-> {to_number}"
-                self.logger.info(f"통화별 특화 필터: {filter_comment}")
+                self.logger.info(f"🎯 동적 필터 적용: {filter_comment}")
+                self.logger.info(f"📡 캡처 필터: {capture_filter}")
 
                 # Dumpcap 명령어 구성
                 dumpcap_cmd = [
@@ -494,17 +642,23 @@ class ExtensionRecordingManager:
             return False
 
         finally:
-            # 변환 완료 후 임시 pcapng 파일 삭제
+            # 변환 완료 후 임시 pcapng 파일 삭제 - 테스트를 위해 주석 처리
+            # if pcapng_path and os.path.exists(pcapng_path):
+            #     try:
+            #         os.remove(pcapng_path)
+            #         self.logger.info(f"🗑️ 임시 파일 삭제 완료: {os.path.basename(pcapng_path)}")
+            #         if self.dashboard_logger:
+            #             self.dashboard_logger.log_error(f"🗑️ 임시 파일 정리: {os.path.basename(pcapng_path)}", level="info")
+            #     except Exception as cleanup_error:
+            #         self.logger.error(f"임시 파일 삭제 실패: {cleanup_error}")
+            #         if self.dashboard_logger:
+            #             self.dashboard_logger.log_error(f"⚠️ 임시 파일 삭제 실패: {str(cleanup_error)}", level="warning")
+            
+            # 테스트용: pcapng 파일이 temp_recordings에 보존됨
             if pcapng_path and os.path.exists(pcapng_path):
-                try:
-                    os.remove(pcapng_path)
-                    self.logger.info(f"🗑️ 임시 파일 삭제 완료: {os.path.basename(pcapng_path)}")
-                    if self.dashboard_logger:
-                        self.dashboard_logger.log_error(f"🗑️ 임시 파일 정리: {os.path.basename(pcapng_path)}", level="info")
-                except Exception as cleanup_error:
-                    self.logger.error(f"임시 파일 삭제 실패: {cleanup_error}")
-                    if self.dashboard_logger:
-                        self.dashboard_logger.log_error(f"⚠️ 임시 파일 삭제 실패: {str(cleanup_error)}", level="warning")
+                self.logger.info(f"📁 테스트용 pcapng 파일 보존됨: {os.path.basename(pcapng_path)}")
+                if self.dashboard_logger:
+                    self.dashboard_logger.log_error(f"📁 테스트용 pcapng 보존: {os.path.basename(pcapng_path)}", level="info")
 
     def _merge_existing_files(self, in_file: Path, out_file: Path, from_number: str, to_number: str, time_str: str, save_dir: Path, call_hash: str = ''):
         """기존 IN/OUT WAV 파일들을 MERGE 파일로 병합"""
@@ -1160,6 +1314,31 @@ class ExtensionRecordingManager:
             self.logger.error(f"해시 기반 파일 검색 오류: {e}")
             return False
 
+    def _is_private_ip(self, ip: str) -> bool:
+        """RFC 1918 사설 IP 대역 확인"""
+        try:
+            import ipaddress
+            ip_obj = ipaddress.ip_address(ip)
+            return ip_obj.is_private
+        except:
+            # fallback: 문자열 기반 확인
+            return (ip.startswith('192.168.') or 
+                   ip.startswith('10.') or 
+                   ip.startswith('172.') and ip.split('.')[1] in [str(i) for i in range(16, 32)])
+
+    def _is_in_ip_range(self, ip: str, ip_range: str) -> bool:
+        """IP가 지정된 대역에 속하는지 확인"""
+        try:
+            import ipaddress
+            ip_obj = ipaddress.ip_address(ip)
+            network = ipaddress.ip_network(ip_range, strict=False)
+            return ip_obj in network
+        except:
+            # CIDR 표기법이 아닌 경우 문자열 매칭
+            if '/' not in ip_range:
+                return ip.startswith(ip_range.rstrip('.'))
+            return False
+
     def _extract_rtp_streams_from_pcapng(self, pcapng_path: str, from_number: str, to_number: str, start_time: datetime.datetime = None) -> Dict:
         """pcapng 파일에서 RTP 스트림을 추출하여 IN/OUT으로 분리 - 통화별 고유 식별 개선"""
         if not pyshark:
@@ -1177,8 +1356,10 @@ class ExtensionRecordingManager:
             self.logger.info(f"통화별 RTP 스트림 추출: {pcapng_path} (FROM: {from_number}, TO: {to_number})")
 
             # 서버 IP 설정 (전역 변수로 미리 로드)
-            server_ip = self.config.get('Network', 'ip', fallback='192.168.1.1')
+            server_ip = self.config.get('Network', 'ip', fallback='127.0.0.1')
+            extension_ip_range = self.config.get('Network', 'extension_ip_range', fallback='auto')
             self.logger.info(f"⚙️ 설정된 서버 IP: {server_ip}")
+            self.logger.info(f"⚙️ 내선 IP 대역 설정: {extension_ip_range}")
             # 서버 IP 디버깅 완료
 
             # 통화별 시간 범위 계산 (pcapng 파일의 경우 start_time을 None으로 설정하여 시간 필터 비활성화)
@@ -1349,18 +1530,26 @@ class ExtensionRecordingManager:
                     # IN/OUT 구분을 동적으로 개선 (실제 네트워크 환경 기반)
                     # 우선순위: 1) 설정된 서버IP 2) 192.168 대역 감지 3) 패킷 분석 기반 추론
 
-                    # 실제 패킷에서 내선 IP 동적 감지
-                    if hasattr(self, '_detected_extension_ip'):
-                        extension_ip = self._detected_extension_ip
-                    else:
-                        # 192.168 대역의 IP를 내선으로 추정
-                        if src_ip.startswith('192.168.') or dst_ip.startswith('192.168.'):
-                            extension_ip = src_ip if src_ip.startswith('192.168.') else dst_ip
-                            self._detected_extension_ip = extension_ip
-                            self.logger.info(f"⚙️ 내선 IP 자동 감지: {extension_ip}")
+                    # 실제 패킷에서 내선 IP 동적 감지 (각 통화별 독립)
+                    if 'detected_extension_ip' not in locals():
+                        if extension_ip_range != 'auto':
+                            # 수동 설정된 IP 대역 사용
+                            if self._is_in_ip_range(src_ip, extension_ip_range) or self._is_in_ip_range(dst_ip, extension_ip_range):
+                                detected_extension_ip = src_ip if self._is_in_ip_range(src_ip, extension_ip_range) else dst_ip
+                                self.logger.info(f"⚙️ 내선 IP 감지 (설정된 대역): {detected_extension_ip}")
+                            else:
+                                detected_extension_ip = server_ip
+                                self.logger.info(f"⚙️ 기본 서버 IP 사용: {detected_extension_ip}")
                         else:
-                            extension_ip = server_ip  # 기본값 사용
-                            self.logger.info(f"⚙️ 기본 내선 IP 사용: {extension_ip}")
+                            # 자동 감지: 사설 IP 대역을 내선으로 추정 (RFC 1918 표준)
+                            if self._is_private_ip(src_ip) or self._is_private_ip(dst_ip):
+                                detected_extension_ip = src_ip if self._is_private_ip(src_ip) else dst_ip
+                                self.logger.info(f"⚙️ 내선 IP 자동 감지 (사설): {detected_extension_ip}")
+                            else:
+                                detected_extension_ip = server_ip  # 기본값 사용
+                                self.logger.info(f"⚙️ 기본 내선 IP 사용: {detected_extension_ip}")
+                    
+                    extension_ip = detected_extension_ip
 
                     if src_ip == extension_ip:
                         # 내선에서 보내는 패킷 = OUT (내선 → 상대방)
@@ -1396,8 +1585,8 @@ class ExtensionRecordingManager:
             self.logger.info(f"✅ 통화별 RTP 추출 완료 ({from_number}↔{to_number})")
             self.logger.info(f"   📊 패킷 통계: UDP 전체 {packet_count}개, RTP 처리됨 {processed_packets}개")
             self.logger.info(f"   📞 방향별: IN {in_count}개 (상대방→내선), OUT {out_count}개 (내선→상대방)")
-            if hasattr(self, '_detected_extension_ip'):
-                self.logger.info(f"   🔍 감지된 내선 IP: {self._detected_extension_ip}")
+            if 'detected_extension_ip' in locals():
+                self.logger.info(f"   🔍 감지된 내선 IP: {detected_extension_ip}")
             self.logger.info(f"   ⚙️ 설정된 서버 IP: {server_ip}")
             if call_rtp_ports:
                 self.logger.info(f"   🔌 RTP 포트: {sorted(call_rtp_ports)}")
