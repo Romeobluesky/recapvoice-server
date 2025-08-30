@@ -141,5 +141,5 @@ npm run stop
 - Log files in logs/ directory for debugging
 
 ## 프로그램에서 현재 제외 된 폴더
-- models
-- modules
+- @models/
+- @modules/

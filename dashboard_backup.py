@@ -36,11 +36,8 @@ from PySide6.QtWidgets import *
 
 # 로컬 모듈
 from config_loader import load_config, get_wireshark_path
-from packet_monitor import PacketMonitor
 from settings_popup import SettingsPopup
-from voip_monitor import VoipMonitor
 from wav_merger import WavMerger
-from rtpstream_manager import RTPStreamManager  # 점진적 전환 예정
 from flow_layout import FlowLayout
 from callstate_machine import CallStateMachine
 from callstate_machine import CallState
@@ -295,6 +292,10 @@ class Dashboard(QMainWindow):
 								self.sip_registrations = {}
 								self.sip_extensions = set()  # SIP 내선번호 집합
 								self.first_registration = False
+
+								# RTP 패킷 카운터 시스템
+								self.rtp_counters = {}  # 연결별 패킷 카운터 저장
+								self.rtp_display_lines = {}  # 각 연결의 콘솔 표시 관리
 								self.packet_get = 0
 								# 토글 기능 제거 - 관련 변수들 제거
 
@@ -547,6 +548,12 @@ class Dashboard(QMainWindow):
 						# LED 타이머들 정리
 						if hasattr(self, 'extension_list_container'):
 								self.cleanup_led_timers(self.extension_list_container)
+
+						# RTP 카운터 정리
+						if hasattr(self, 'rtp_counters'):
+								self.rtp_counters.clear()
+						if hasattr(self, 'rtp_display_lines'):
+								self.rtp_display_lines.clear()
 
 						print("타이머 정리 완료")
 				except Exception as e:
@@ -1251,8 +1258,8 @@ class Dashboard(QMainWindow):
 												self.sip_packet_signal.emit(packet)
 										elif hasattr(packet, 'udp'):
 												if self.is_rtp_packet(packet):
+														self.log_rtp_with_counter(packet)
 														self.handle_rtp_packet(packet)
-												# UDP 패킷 로그 제거 (너무 많음)
 
 								except Exception as packet_error:
 										self.safe_log(f"패킷 처리 중 오류: {packet_error}", "ERROR")
@@ -2496,6 +2503,67 @@ class Dashboard(QMainWindow):
 						sys.stderr.write(f"Critical logging error: {e}\n")
 						sys.stderr.flush()
 
+		def log_rtp_with_counter(self, packet):
+				"""RTP 패킷을 카운터 기반으로 로깅 (터미널 스팸 방지)"""
+				try:
+						# 연결 식별키 생성 (양방향 구분)
+						connection_key = f"{packet.ip.src}:{packet.udp.srcport}→{packet.ip.dst}:{packet.udp.dstport}"
+
+						# 카운터 초기화 또는 증가
+						if connection_key not in self.rtp_counters:
+								# 새로운 연결 - 새 라인에 시작
+								self.rtp_counters[connection_key] = 1
+								try:
+										print(f"[1] ♪ RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}")
+								except UnicodeEncodeError:
+										print(f"[1] RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}")
+								sys.stdout.flush()
+						else:
+								# 기존 연결 - 같은 라인에서 카운터 업데이트
+								self.rtp_counters[connection_key] += 1
+								try:
+										print(f"\r[{self.rtp_counters[connection_key]}] ♪ RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", end='', flush=True)
+								except UnicodeEncodeError:
+										print(f"\r[{self.rtp_counters[connection_key]}] RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", end='', flush=True)
+
+				except Exception as e:
+						# 오류 발생 시 기본 로깅으로 대체
+						self.log_error(f"RTP 카운터 로깅 오류: {e}", level="warning")
+						self.log_error(f"🎵 RTP 패킷 감지됨 - {packet.ip.src}:{packet.udp.srcport} → {packet.ip.dst}:{packet.udp.dstport}", level="info")
+
+		def cleanup_rtp_counters_for_call(self, call_id):
+				"""통화 종료 시 해당 통화의 RTP 카운터 정리"""
+				try:
+						with self.active_calls_lock:
+								if call_id not in self.active_calls:
+										return
+
+								call_info = self.active_calls[call_id]
+								# 통화 관련 IP/포트 정보로 카운터 정리
+								if 'media_endpoints' in call_info:
+										for endpoint in call_info['media_endpoints']:
+												# 양방향 연결키 생성하여 정리
+												src_key_pattern = f"{endpoint.get('src_ip')}:{endpoint.get('src_port')}"
+												dst_key_pattern = f"{endpoint.get('dst_ip')}:{endpoint.get('dst_port')}"
+
+												# 관련 카운터 찾아서 제거
+												keys_to_remove = []
+												for key in self.rtp_counters:
+														if src_key_pattern in key or dst_key_pattern in key:
+																keys_to_remove.append(key)
+
+												for key in keys_to_remove:
+														del self.rtp_counters[key]
+														if key in self.rtp_display_lines:
+																del self.rtp_display_lines[key]
+
+								# 통화 종료 시 새 줄 출력 (다음 로그와 구분)
+								print("\n")
+								sys.stdout.flush()
+
+				except Exception as e:
+						self.log_error(f"RTP 카운터 정리 중 오류: {e}", level="warning")
+
 		def analyze_sip_packet_in_main_thread(self, packet):
 				"""메인 스레드에서 안전하게 SIP 패킷 분석"""
 				try:
@@ -2521,6 +2589,8 @@ class Dashboard(QMainWindow):
 				self.log_to_sip_console("SIP 패킷 분석 시작", "SIP")
 
 				# 포트미러링 환경에서 패킷 정보 추가 출력
+				src_ip = None
+				dst_ip = None
 				if hasattr(packet, 'ip'):
 						src_ip = getattr(packet.ip, 'src', 'unknown')
 						dst_ip = getattr(packet.ip, 'dst', 'unknown')
@@ -2600,6 +2670,9 @@ class Dashboard(QMainWindow):
 																		"to_user": str(sip_layer.to_user)
 															})
 															return
+
+														# SDP에서 RTP 포트 정보 추출 및 ExtensionRecordingManager에 전달
+														self._extract_and_update_sdp_info(sip_layer, call_id, from_number, to_number)
 
 														# 내선번호 확인
 														extension = None
@@ -2715,7 +2788,7 @@ class Dashboard(QMainWindow):
 										# REGISTER 처리
 										elif 'REGISTER' in request_line:
 												try:
-														self._handle_register_request(sip_layer, call_id, request_line)
+														self._handle_register_request(sip_layer, call_id, request_line, src_ip, dst_ip)
 												except Exception as register_error:
 														self.log_error("REGISTER 처리 중 오류", register_error)
 														return
@@ -2887,12 +2960,14 @@ class Dashboard(QMainWindow):
 								if extension:
 										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
-		def _handle_register_request(self, sip_layer, call_id, request_line):
+		def _handle_register_request(self, sip_layer, call_id, request_line, src_ip=None, dst_ip=None):
 				"""REGISTER 요청 처리를 위한 헬퍼 메소드"""
 				try:
 						print(f"=== SIP REGISTER 감지 ===")
 						print(f"Request Line: {request_line}")
+						print(f"IP 정보 - Source: {src_ip}, Destination: {dst_ip}")
 						self.log_to_sip_console(f"SIP REGISTER 감지 - {request_line}", "SIP")
+						self.log_to_sip_console(f"IP 정보 - 송신: {src_ip}, 수신: {dst_ip}", "SIP")
 
 						# 포트미러링 환경에서 더 많은 헤더 정보 확인
 						extension = None
@@ -2951,11 +3026,29 @@ class Dashboard(QMainWindow):
 						if extension and len(extension) == 4 and extension[0] in ['1','2','3','4','5','6','7','8','9']:
 								# SIP 등록된 내선번호를 사이드바에 추가
 								self.refresh_extension_list_with_register(extension)
+
+								# 내선-IP 매핑을 ExtensionRecordingManager에 전달
+								if hasattr(self, 'recording_manager') and self.recording_manager:
+										# 192.168 대역의 IP를 내선 IP로 판단
+										extension_ip = None
+										if src_ip and src_ip.startswith('192.168.'):
+												extension_ip = src_ip
+										elif dst_ip and dst_ip.startswith('192.168.'):
+												extension_ip = dst_ip
+
+										if extension_ip:
+												self.recording_manager.update_extension_ip_mapping(extension, extension_ip)
+												print(f"📍 내선-IP 매핑 등록: {extension} → {extension_ip}")
+												self.log_to_sip_console(f"내선-IP 매핑 등록: {extension} → {extension_ip}", "SIP")
+										else:
+												print(f"⚠️ 내선 {extension}의 IP 정보를 찾을 수 없음 (src: {src_ip}, dst: {dst_ip})")
+
 								self.log_to_sip_console(f"내선번호 {extension} 등록 완료", "SIP")
 								self.log_error("SIP REGISTER 처리 완료", level="info", additional_info={
 										"extension": extension,
 										"call_id": call_id,
-										"method": "REGISTER"
+										"method": "REGISTER",
+										"extension_ip": extension_ip if 'extension_ip' in locals() else None
 								})
 						else:
 								print(f"유효하지 않은 내선번호: {extension}")
@@ -2963,6 +3056,56 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						print(f"REGISTER 처리 중 오류: {e}")
 						self.log_error("REGISTER 요청 처리 중 오류", e)
+
+		def _extract_and_update_sdp_info(self, sip_layer, call_id, from_number, to_number):
+				"""SIP INVITE에서 SDP 정보를 추출하여 ExtensionRecordingManager에 전달"""
+				try:
+						if not hasattr(self, 'recording_manager') or not self.recording_manager:
+								return
+
+						# SDP 정보 추출
+						sdp_info = {}
+						rtp_ports = []
+
+						# SIP 메시지 본문에서 SDP 찾기
+						if hasattr(sip_layer, 'msg_body'):
+								sdp_body = str(sip_layer.msg_body)
+								print(f"🎵 SDP 본문 감지: {sdp_body[:200]}..." if len(sdp_body) > 200 else f"🎵 SDP 본문: {sdp_body}")
+
+								# m=audio 포트 추출
+								import re
+								audio_matches = re.findall(r'm=audio (\d+) RTP', sdp_body)
+								for port_str in audio_matches:
+										try:
+												port = int(port_str)
+												if 1024 <= port <= 65535:
+														rtp_ports.append(port)
+														rtp_ports.append(port + 1)  # RTCP 포트도 포함
+										except ValueError:
+												continue
+
+								if rtp_ports:
+										print(f"📡 RTP 포트 추출됨: {rtp_ports}")
+										self.log_to_sip_console(f"RTP 포트 추출: {rtp_ports}", "SIP")
+
+										# SDP 정보 구성
+										sdp_info = {
+												'rtp_ports': list(set(rtp_ports)),  # 중복 제거
+												'from_number': from_number,
+												'to_number': to_number,
+												'sdp_body': sdp_body[:500]  # 처음 500자만 저장
+										}
+
+										# ExtensionRecordingManager에 SIP 정보 업데이트
+										self.recording_manager.update_call_sip_info(call_id, sdp_info)
+								else:
+										print("⚠️ SDP에서 RTP 포트를 찾을 수 없음")
+						else:
+								print("⚠️ SIP INVITE에 SDP 본문이 없음")
+
+				except Exception as e:
+						self.log_error(f"SDP 정보 추출 실패: {e}")
+						print(f"SDP 추출 오류: {e}")
 
 		def _handle_sip_response(self, sip_layer, call_id):
 				"""SIP 응답 처리를 위한 헬퍼 메소드"""
@@ -3084,6 +3227,10 @@ class Dashboard(QMainWindow):
 										'end_time': datetime.datetime.now(),
 										'result': '정상종료'
 								})
+
+				# RTP 카운터 정리
+				self.cleanup_rtp_counters_for_call(call_id)
+
 				self.update_voip_status()
 				extension = self.get_extension_from_call(call_id)
 				if extension:
@@ -3220,7 +3367,10 @@ class Dashboard(QMainWindow):
 						if version != 2:
 								return False
 						payload_type = payload[1] & 0x7F
-						return payload_type in [0, 8]
+						# 오디오 Payload Type 범위 확장 (0-127 중 일반적인 오디오 타입들)
+						# 0=PCMU, 8=PCMA, 9=G722, 18=G729 등 포함
+						audio_payload_types = [0, 8, 9, 10, 11, 18, 96, 97, 98, 99, 100, 101, 102, 103]
+						return payload_type in audio_payload_types or (96 <= payload_type <= 127)
 				except Exception as e:
 						print(f"RTP 패킷 확인 중 오류: {e}")
 						return False
@@ -3522,53 +3672,8 @@ class Dashboard(QMainWindow):
 										})
 										if new_status == '통화종료':
 												self.active_calls[call_id]['end_time'] = datetime.datetime.now()
-												if hasattr(self, 'stream_manager'):
-														stream_info_in = None
-														stream_info_out = None
-														in_key = f"{call_id}_IN"
-														if in_key in self.stream_manager.active_streams:
-																stream_info_in = self.stream_manager.finalize_stream(in_key)
-														out_key = f"{call_id}_OUT"
-														if out_key in self.stream_manager.active_streams:
-																stream_info_out = self.stream_manager.finalize_stream(out_key)
-														if stream_info_in and stream_info_out:
-																try:
-																		# 파일 경로에서 파일명 뒷자리 제거
-																		file_dir = stream_info_in['file_dir']
-																		timestamp = os.path.basename(file_dir)[:-2]
-																		local_num = self.active_calls[call_id]['from_number']
-																		remote_num = self.active_calls[call_id]['to_number']
-																		# Generate call_hash from call_id for consistency
-																		call_hash = call_id[:8] if len(call_id) >= 8 else call_id
-
-																		merged_file = self.wav_merger.merge_and_save(
-																				timestamp,
-																				local_num,
-																				remote_num,
-																				stream_info_in['filepath'],
-																				stream_info_out['filepath'],
-																				file_dir,
-																				call_hash
-																		)
-																		html_file = None
-																		if merged_file:
-																				# active_calls에서 저장된 packet 정보 가져오기
-																				packet = self.active_calls[call_id].get('packet', None)
-																				self._save_to_mongodb(
-																						merged_file, html_file,
-																						local_num, remote_num, call_id, packet
-																				)
-
-																		# 파일 삭제
-																		#try:
-																		#		if os.path.exists(stream_info_in['filepath']):
-																		#				os.remove(stream_info_in['filepath'])
-																		#		if os.path.exists(stream_info_out['filepath']):
-																		#				os.remove(stream_info_out['filepath'])
-																		#except Exception as e:
-																		#		print(f"파일 삭제 중 오류: {e}")
-																except Exception as e:
-																		print(f"파일 처리 중 오류: {e}")
+												# RTPStreamManager 완전 제거됨 - ExtensionRecordingManager가 통화 녹음 처리
+												# 통화 종료 시 ExtensionRecordingManager가 자동으로 변환 및 저장 처리함
 
 										extension = self.get_extension_from_call(call_id)
 										received_number = self.active_calls[call_id].get('to_number', "")
@@ -3618,9 +3723,8 @@ class Dashboard(QMainWindow):
 
 		def handle_rtp_packet(self, packet):
 				try:
-						if not hasattr(self, 'stream_manager'):
-								self.stream_manager = RTPStreamManager()
-								self.log_error("RTP 스트림 매니저 생성", level="info")
+						# RTPStreamManager 완전 제거 - ExtensionRecordingManager가 녹음 처리
+						pass
 
 						# SIP 정보 확인 및 처리
 						if hasattr(packet, 'sip'):
@@ -3695,14 +3799,8 @@ class Dashboard(QMainWindow):
 												if len(audio_data) == 0:
 														continue
 
-												stream_key = self.stream_manager.create_stream(
-														call_id, direction, call_info, phone_ip_str
-												)
-
-												if stream_key:
-														self.stream_manager.process_packet(
-																stream_key, audio_data, sequence, payload_type
-														)
+												# RTPStreamManager 완전 제거 - ExtensionRecordingManager가 녹음 처리
+												pass
 
 										except Exception as payload_error:
 												self.log_error("페이로드 분석 오류", payload_error)
@@ -4286,10 +4384,27 @@ class Dashboard(QMainWindow):
 						per_lv8_update = ""
 						per_lv9_update = ""
 
-						sip_layer = packet.sip
+						# packet이 None인 경우 안전 처리
+						sip_layer = None
+						if packet and hasattr(packet, 'sip'):
+								sip_layer = packet.sip
 						# 통화 유형에 따른 권한 설정
-						# 내선 간 통화인 경우
-						if is_extension(local_num) and is_extension(remote_num):
+						# packet이 없는 경우 기본 권한 설정 (ExtensionRecordingManager에서 호출시)
+						if packet is None:
+								# 내선번호를 기반으로 기본 권한 설정
+								if is_extension(local_num):
+										member_doc = self.members.find_one({"extension_num": local_num})
+										if member_doc:
+												per_lv8 = member_doc.get('per_lv8', '')
+												per_lv9 = member_doc.get('per_lv9', '')
+								elif is_extension(remote_num):
+										member_doc = self.members.find_one({"extension_num": remote_num})
+										if member_doc:
+												per_lv8 = member_doc.get('per_lv8', '')
+												per_lv9 = member_doc.get('per_lv9', '')
+
+						# 내선 간 통화인 경우 (packet이 있는 경우만)
+						elif is_extension(local_num) and is_extension(remote_num):
 								if packet and hasattr(packet, 'sip'):
 										if hasattr(sip_layer, 'method') and sip_layer.method == 'INVITE':
 
