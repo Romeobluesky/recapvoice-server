@@ -2664,6 +2664,21 @@ class Dashboard(QMainWindow):
 														from_number = self.extract_full_number(sip_layer.from_user)
 														to_number = self.extract_full_number(sip_layer.to_user)
 
+														# 당겨받기(*8) 시나리오 감지 및 처리
+														is_call_pickup = False
+														if to_number == '8' or sip_layer.to_user.strip() == '*8':
+															print("당겨받기(*8) 시나리오 감지...")
+															actual_caller = self.find_ringing_caller()
+															if actual_caller:
+																print(f"당겨받기: 실제 발신자 {actual_caller}, 당겨받은 내선 {from_number}")
+																# 올바른 발신자/수신자 설정
+																original_from = from_number  # 당겨받은 내선 저장
+																from_number = actual_caller  # 실제 발신자를 from_number로
+																to_number = original_from    # 당겨받은 내선을 to_number로
+																is_call_pickup = True
+															else:
+																print("진행 중인 통화를 찾을 수 없어 기본 처리")
+
 														if not from_number or not to_number:
 															self.log_error("유효하지 않은 전화번호", additional_info={
 																		"from_user": str(sip_layer.from_user),
@@ -2673,13 +2688,6 @@ class Dashboard(QMainWindow):
 
 														# SDP에서 RTP 포트 정보 추출 및 ExtensionRecordingManager에 전달
 														self._extract_and_update_sdp_info(sip_layer, call_id, from_number, to_number)
-
-														# 내선번호 확인
-														extension = None
-														if len(from_number) == 4 and from_number[0] in '123456789':
-															extension = from_number
-														elif len(to_number) == 4 and to_number[0] in '123456789':
-															extension = to_number
 
 														# 내선번호로 전화가 왔을 때 WebSocket을 통해 클라이언트에 알림
 														if is_extension(to_number):
@@ -2713,7 +2721,6 @@ class Dashboard(QMainWindow):
 														# 통화 정보 저장 및 상태 전이
 														with self.active_calls_lock:
 																try:
-																		before_state = dict(self.active_calls) if call_id in self.active_calls else None
 
 																		# 상태 머신 관리
 																		if call_id in self.call_state_machines:
@@ -2748,7 +2755,9 @@ class Dashboard(QMainWindow):
 																				'to_number': to_number,
 																				'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
 																				'media_endpoints': [],
-																				'packet': packet
+																				'packet': packet,
+																				'is_pickup_call': is_call_pickup,  # 당겨받기 여부 표시
+																				'result': '당겨받기' if is_call_pickup else ''
 																		}
 
 																except Exception as state_error:
@@ -3029,11 +3038,11 @@ class Dashboard(QMainWindow):
 
 								# 내선-IP 매핑을 ExtensionRecordingManager에 전달
 								if hasattr(self, 'recording_manager') and self.recording_manager:
-										# 192.168 대역의 IP를 내선 IP로 판단
+										# 사설 IP 대역의 IP를 내선 IP로 판단
 										extension_ip = None
-										if src_ip and src_ip.startswith('192.168.'):
+										if src_ip and self.recording_manager._is_private_ip(src_ip):
 												extension_ip = src_ip
-										elif dst_ip and dst_ip.startswith('192.168.'):
+										elif dst_ip and self.recording_manager._is_private_ip(dst_ip):
 												extension_ip = dst_ip
 
 										if extension_ip:
@@ -3155,20 +3164,32 @@ class Dashboard(QMainWindow):
 
 		def _update_call_for_refer(self, call_id, original_call, forwarded_ext, log_file):
 				"""REFER 요청에 대한 통화 상태 업데이트"""
-				external_number = original_call['to_number']
-				forwarding_ext = original_call['from_number']
-
-				log_file.write(f"발신번호(유지): {external_number}\n")
-				log_file.write(f"수신번호(유지): {forwarding_ext}\n")
+				# 문서에 따른 올바른 로직: 외부번호 -> 첫번째 내선, 외부번호 -> 두번째 내선
+				# 돌려주기 시 내선 간 통화 기록은 생성하지 않고, 외부발신자와 각 내선 간의 기록만 생성
+				
+				# 원본 통화에서 외부 번호와 내선 번호 식별
+				from_number = original_call['from_number']
+				to_number = original_call['to_number']
+				
+				# 외부 번호 찾기 (내선이 아닌 번호)
+				is_extension = lambda num: num.startswith(('1','2','3','4','5','6','7','8','9')) and len(num) == 4
+				external_number = from_number if not is_extension(from_number) else to_number
+				first_extension = to_number if not is_extension(from_number) else from_number
+				
+				log_file.write("=== 돌려주기 시나리오 (수정된 로직) ===\n")
+				log_file.write(f"외부 발신번호: {external_number}\n")
+				log_file.write(f"첫 번째 내선: {first_extension}\n")
 				log_file.write(f"돌려받을 내선: {forwarded_ext}\n")
+				log_file.write("최종 기록 형태: 외부번호 -> 첫번째내선, 외부번호 -> 두번째내선\n")
 
+				# 현재 통화를 외부번호 -> 첫번째내선으로 업데이트
 				update_info = {
 						'status': '통화중',
 						'is_forwarded': True,
 						'forward_to': forwarded_ext,
 						'result': '돌려주기',
-						'from_number': external_number,
-						'to_number': forwarding_ext
+						'from_number': external_number,  # 항상 외부번호가 발신
+						'to_number': first_extension     # 첫 번째 내선이 수신
 				}
 
 				with self.active_calls_lock:
@@ -3176,85 +3197,44 @@ class Dashboard(QMainWindow):
 								before_update = dict(self.active_calls[call_id])
 								self.active_calls[call_id].update(update_info)
 								after_update = dict(self.active_calls[call_id])
-								log_file.write("통화 상태 업데이트:\n")
+								log_file.write("첫 번째 기록 (외부->첫번째내선) 업데이트:\n")
 								log_file.write(f"업데이트 전: {before_update}\n")
 								log_file.write(f"업데이트 후: {after_update}\n")
 
-								# 발신번호가 내선이 아닐 경우에만 발,수신번호 크로스 변경경
-								if not is_extension(external_number):
-									for active_call_id, call_info in self.active_calls.items():
-											if (call_info.get('from_number') == forwarding_ext and
-													call_info.get('to_number') == forwarding_ext):
-													before_related = dict(call_info)
-													call_info.update({
-															'status': '통화중',
-															'result': '돌려주기'
-													})
-													after_related = dict(call_info)
-													log_file.write(f"관련 통화 업데이트 (Call-ID: {active_call_id}):\n")
-													log_file.write(f"업데이트 전: {before_related}\n")
-													log_file.write(f"업데이트 후: {after_related}\n")
+								# 두 번째 기록 생성: 외부번호 -> 돌려받을 내선
+								# 기존의 내선 간 통화 기록을 찾아서 외부->내선 기록으로 변경
+								for active_call_id, call_info in self.active_calls.items():
+										if (active_call_id != call_id and 
+										    ((call_info.get('from_number') == first_extension and call_info.get('to_number') == forwarded_ext) or
+										     (call_info.get('from_number') == forwarded_ext and call_info.get('to_number') == first_extension))):
+												before_related = dict(call_info)
+												call_info.update({
+														'status': '통화중',
+														'result': '돌려주기',
+														'from_number': external_number,  # 외부번호가 발신
+														'to_number': forwarded_ext,      # 돌려받을 내선이 수신
+														'is_forwarded': True,
+														'forward_to': forwarded_ext
+												})
+												after_related = dict(call_info)
+												log_file.write(f"두 번째 기록 (외부->두번째내선) 업데이트 (Call-ID: {active_call_id}):\n")
+												log_file.write(f"업데이트 전: {before_related}\n")
+												log_file.write(f"업데이트 후: {after_related}\n")
+												break
 
-				log_file.write("=== 돌려주기 처리 완료 ===\n\n")
+				log_file.write("=== 돌려주기 처리 완료 (문서 명세에 따른 2개 기록 생성) ===\n\n")
 
-		def handle_new_call(self, sip_layer, call_id):
-				try:
-						print(f"새로운 통화 처리 시작 - Call-ID: {call_id}")
-						from_number = self.extract_full_number(sip_layer.from_user)
-						to_number = self.extract_full_number(sip_layer.to_user)
-						print(f"발신번호: {from_number}")
-						print(f"수신번호: {to_number}")
-						with self.active_calls_lock:
-								self.active_calls[call_id] = {
-										'start_time': datetime.datetime.now(),
-										'status': '시도중',
-										'from_number': from_number,
-										'to_number': to_number,
-										'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
-										'media_endpoints': []
-								}
-								self.call_state_machines[call_id] = CallStateMachine()
-								self.call_state_machines[call_id].update_state(CallState.TRYING)
-						print(f"통화 정보 저장 완료: {self.active_calls[call_id]}")
-				except Exception as e:
-						print(f"새 통화 처리 중 오류: {e}")
-
-		def handle_call_end(self, sip_layer, call_id):
-				with self.active_calls_lock:
-						if call_id in self.active_calls:
-								self.active_calls[call_id].update({
-										'status': '통화종료',
-										'end_time': datetime.datetime.now(),
-										'result': '정상종료'
-								})
-
-				# RTP 카운터 정리
-				self.cleanup_rtp_counters_for_call(call_id)
-
-				self.update_voip_status()
-				extension = self.get_extension_from_call(call_id)
-				if extension:
-						QMetaObject.invokeMethod(self, "update_block_to_waiting", Qt.QueuedConnection, Q_ARG(str, extension))
-						print(f"통화 종료 처리: {extension}")
 
 		def get_extension_from_call(self, call_id):
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
 								call_info = self.active_calls[call_id]
-								from_number = call_info['from_number']
-								to_number = call_info['to_number']
+								from_number = call_info['to_number']
+								to_number = call_info['from_number']
 								is_extension = lambda num: num.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) and len(num) == 4
 								return from_number if is_extension(from_number) else to_number if is_extension(to_number) else None
 				return None
 
-		def handle_call_cancel(self, call_id):
-				with self.active_calls_lock:
-						if call_id in self.active_calls:
-								self.active_calls[call_id].update({
-										'status': '통화종료',
-										'end_time': datetime.datetime.now(),
-										'result': '발신취소'
-								})
 
 		def update_voip_status(self):
 				# UI 업데이트를 별도 스레드에서 처리
@@ -3510,6 +3490,18 @@ class Dashboard(QMainWindow):
 						# 알파벳이 없으면 전체 번호 추출
 						else:
 								print("알파벳 없음 - 전체 번호 추출")
+
+								# *8 특수번호 (당겨받기) 처리
+								if sip_user.strip() == '*8':
+										print("당겨받기 특수번호 *8 감지...")
+										# 진행 중인 RINGING/TRYING 상태 통화에서 실제 발신자 찾기
+										actual_caller = self.find_ringing_caller()
+										if actual_caller:
+												print(f"당겨받기: 실제 발신자 {actual_caller}로 치환..")
+												return actual_caller
+										else:
+												print("진행 중인 통화를 찾을 수 없어 8로 처리")
+
 								# 모든 숫자 추출
 								digits_only = ''.join(c for c in sip_user if c.isdigit())
 								if digits_only:
@@ -3522,32 +3514,28 @@ class Dashboard(QMainWindow):
 						print(f"전체 번호 추출 중 오류: {e}")
 						return ''
 
-		def get_call_id_from_rtp(self, packet):
+		def find_ringing_caller(self):
+				"""진행 중인 RINGING/TRYING 상태 통화에서 실제 발신자 번호를 찾아 반환"""
 				try:
-						src_ip = packet.ip.src
-						dst_ip = packet.ip.dst
-						src_port = int(packet.udp.srcport)
-						dst_port = int(packet.udp.dstport)
-						src_endpoint = f"{src_ip}:{src_port}"
-						dst_endpoint = f"{dst_ip}:{dst_port}"
 						with self.active_calls_lock:
 								for call_id, call_info in self.active_calls.items():
-										if "media_endpoints_set" in call_info:
-												if (src_endpoint in call_info["media_endpoints_set"]["local"] or
-														src_endpoint in call_info["media_endpoints_set"]["remote"] or
-														dst_endpoint in call_info["media_endpoints_set"]["local"] or
-														dst_endpoint in call_info["media_endpoints_set"]["remote"]):
-														return call_id
-										elif "media_endpoints" in call_info:
-												for endpoint in call_info["media_endpoints"]:
-														if (src_ip == endpoint.get("ip") and src_port == endpoint.get("port")) or \
-															 (dst_ip == endpoint.get("ip") and dst_port == endpoint.get("port")):
-																return call_id
-						return None
+										# RINGING 상태이고 외부 발신자가 내선으로 걸어온 통화 찾기
+										if (call_info.get('status') in ['시도중', 'RINGING', 'TRYING'] and
+												call_info.get('direction') == '수신'):
+												from_number = call_info.get('from_number', '')
+												to_number = call_info.get('to_number', '')
+
+												# 외부번호 -> 내선번호 패턴 확인
+												if (len(from_number) > 4 and  # 외부번호 (휴대폰/일반전화)
+														len(to_number) == 4 and to_number[0] in '123456789'):  # 내선번호
+														return from_number
+
+								print("당겨받을 수 있는 진행 중인 통화가 없음")
+								return None
 				except Exception as e:
-						print(f"RTP Call-ID 매칭 오류: {e}")
-						print(traceback.format_exc())
+						print(f"진행 중인 통화 검색 중 오류: {e}")
 						return None
+
 
 		def handle_sip_response(self, status_code, call_id, sip_layer):
 				try:
@@ -3675,8 +3663,6 @@ class Dashboard(QMainWindow):
 												# RTPStreamManager 완전 제거됨 - ExtensionRecordingManager가 통화 녹음 처리
 												# 통화 종료 시 ExtensionRecordingManager가 자동으로 변환 및 저장 처리함
 
-										extension = self.get_extension_from_call(call_id)
-										received_number = self.active_calls[call_id].get('to_number', "")
 										pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 						self.update_voip_status()
 				except Exception as e:
@@ -4328,29 +4314,6 @@ class Dashboard(QMainWindow):
 				except Exception as e:
 						print(f"클라이언트 중지 중 오류: {e}")
 
-		def extract_ip_from_callid(self, call_id):
-				try:
-						ip_part = call_id.split('@')[1]
-						ip_part = ip_part.split(';')[0]
-						ip_part = ip_part.replace('[', '').replace(']', '')
-						ip_part = ip_part.split(':')[0]
-						if self.is_valid_ip(ip_part):
-								return ip_part
-						else:
-								print(f"유효하지 않은 IP 주소 형식: {ip_part}")
-								return "unknown"
-				except Exception as e:
-						print(f"IP 주소 추출 실패. Call-ID: {call_id}, 오류: {e}")
-						return "unknown"
-
-		def is_valid_ip(self, ip):
-				try:
-						parts = ip.split('.')
-						if len(parts) != 4:
-								return False
-						return all(0 <= int(part) <= 255 for part in parts)
-				except:
-						return False
 
 		def open_admin_site(self):
 				try:

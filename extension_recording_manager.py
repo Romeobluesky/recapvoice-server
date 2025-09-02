@@ -194,7 +194,7 @@ class ExtensionRecordingManager:
                 with getattr(self.dashboard, 'active_calls_lock', threading.Lock()):
                     if call_id in self.dashboard.active_calls:
                         call_data = self.dashboard.active_calls[call_id]
-                        
+
                         # SIP 관련 정보 추출
                         sip_info = {
                             'call_id': call_id,
@@ -203,9 +203,9 @@ class ExtensionRecordingManager:
                             'extension': extension,
                             'status': call_data.get('status', ''),
                         }
-                        
+
                         self.logger.info(f"Dashboard에서 SIP 정보 추출: {sip_info}")
-                        
+
             return sip_info
         except Exception as e:
             self.logger.error(f"Dashboard SIP 정보 추출 실패: {e}")
@@ -219,22 +219,22 @@ class ExtensionRecordingManager:
             if not extension_ip:
                 # Dashboard의 SIP 분석으로부터 내선 IP 자동 감지 시도
                 extension_ip = self._detect_extension_ip_from_dashboard(extension)
-                
+
             # 2. SIP 정보 조회
             call_sip_info = self.get_call_sip_info(call_id)
-            
+
             # 3. 기본 필터 (기존 방식)
             base_filter = "(port 5060) or (udp and portrange 1024-65535)"
-            
+
             # 4. 내선 IP 기반 필터 추가
             if extension_ip:
                 # 해당 내선 IP와 관련된 트래픽만 캡처
                 ip_filter = f"host {extension_ip}"
                 dynamic_filter = f"({base_filter}) and ({ip_filter})"
-                
+
                 self.logger.info(f"동적 필터 생성 (IP 기반): {dynamic_filter}")
                 return dynamic_filter
-            
+
             # 5. SIP 포트 정보가 있는 경우 추가 최적화
             if call_sip_info.get('rtp_ports'):
                 rtp_ports = call_sip_info['rtp_ports']
@@ -244,15 +244,15 @@ class ExtensionRecordingManager:
                     port_filter = f"udp portrange {min(rtp_ports)}-{max(rtp_ports)}"
                 else:
                     port_filter = f"udp and ({' or '.join(f'port {p}' for p in rtp_ports)})"
-                    
+
                 optimized_filter = f"(port 5060) or ({port_filter})"
                 self.logger.info(f"동적 필터 생성 (포트 기반): {optimized_filter}")
                 return optimized_filter
-            
+
             # 6. 기본 필터 반환
             self.logger.warning(f"동적 필터 생성 실패, 기본 필터 사용: {base_filter}")
             return base_filter
-            
+
         except Exception as e:
             self.logger.error(f"동적 필터 생성 실패: {e}")
             return "(port 5060) or (udp and portrange 1024-65535)"
@@ -262,7 +262,7 @@ class ExtensionRecordingManager:
         try:
             if not self.dashboard:
                 return None
-                
+
             # Dashboard의 내선 정보 조회
             if hasattr(self.dashboard, 'extension_widgets'):
                 for ext_num, widget_data in self.dashboard.extension_widgets.items():
@@ -272,16 +272,16 @@ class ExtensionRecordingManager:
                             detected_ip = widget_data.ip_address
                             self.update_extension_ip_mapping(extension, detected_ip)
                             return detected_ip
-            
+
             # SIP REGISTER 패킷 기반 동적 IP 감지 시도
             detected_ip = self._detect_ip_from_sip_register(extension)
             if detected_ip:
                 self.update_extension_ip_mapping(extension, detected_ip)
                 return detected_ip
-                
+
         except Exception as e:
             self.logger.error(f"Dashboard에서 내선 IP 감지 실패: {e}")
-            
+
         return None
 
     def _detect_ip_from_sip_register(self, extension: str) -> Optional[str]:
@@ -289,7 +289,7 @@ class ExtensionRecordingManager:
         try:
             if not self.dashboard or not hasattr(self.dashboard, 'extension_widgets'):
                 return None
-                
+
             # Dashboard의 내선 등록 정보에서 IP 검색
             for ext_num, ext_data in getattr(self.dashboard, 'extension_widgets', {}).items():
                 if str(ext_num) == str(extension):
@@ -304,7 +304,7 @@ class ExtensionRecordingManager:
                         matches = re.findall(ip_pattern, tooltip)
                         if matches:
                             return matches[0]
-                            
+
             return None
         except Exception as e:
             self.logger.error(f"SIP REGISTER 기반 IP 감지 실패: {e}")
@@ -349,7 +349,7 @@ class ExtensionRecordingManager:
 
                 # 동적 필터 생성
                 capture_filter = self._generate_dynamic_filter(call_id, extension, from_number, to_number)
-                
+
                 # 통화별 고유 식별을 위한 코멘트 (로그용)
                 filter_comment = f"Extension {extension}: {from_number} <-> {to_number}"
                 self.logger.info(f"🎯 동적 필터 적용: {filter_comment}")
@@ -653,7 +653,7 @@ class ExtensionRecordingManager:
             #         self.logger.error(f"임시 파일 삭제 실패: {cleanup_error}")
             #         if self.dashboard_logger:
             #             self.dashboard_logger.log_error(f"⚠️ 임시 파일 삭제 실패: {str(cleanup_error)}", level="warning")
-            
+
             # 테스트용: pcapng 파일이 temp_recordings에 보존됨
             if pcapng_path and os.path.exists(pcapng_path):
                 self.logger.info(f"📁 테스트용 pcapng 파일 보존됨: {os.path.basename(pcapng_path)}")
@@ -1322,8 +1322,8 @@ class ExtensionRecordingManager:
             return ip_obj.is_private
         except:
             # fallback: 문자열 기반 확인
-            return (ip.startswith('192.168.') or 
-                   ip.startswith('10.') or 
+            return (ip.startswith('192.168.') or
+                   ip.startswith('10.') or
                    ip.startswith('172.') and ip.split('.')[1] in [str(i) for i in range(16, 32)])
 
     def _is_in_ip_range(self, ip: str, ip_range: str) -> bool:
@@ -1548,7 +1548,7 @@ class ExtensionRecordingManager:
                             else:
                                 detected_extension_ip = server_ip  # 기본값 사용
                                 self.logger.info(f"⚙️ 기본 내선 IP 사용: {detected_extension_ip}")
-                    
+
                     extension_ip = detected_extension_ip
 
                     if src_ip == extension_ip:

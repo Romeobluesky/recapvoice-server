@@ -158,27 +158,28 @@ class DatabaseHandler:
                 elif is_extension(remote_num) and not is_extension(local_num):
                     # 외부 -> 내선 통화
                     if hasattr(sip_layer, 'method') and sip_layer.method == 'REFER':
-                        # 외부에서 온 전화를 돌려주기
+                        # 외부에서 온 전화를 돌려주기 (packet.md 최종 기록 방식 적용)
                         if len(sip_layer.from_user) > 4 and len(sip_layer.from_user) < 9:
-                            local_num_str = re.split(r'[a-zA-Z]+', sip_layer.from_user)
-                            remote_num_str = re.split(r'[a-zA-Z]+', sip_layer.to_user)
-
+                            # packet.md에 따라 올바른 번호 매핑
+                            # local_num은 외부 발신번호로, remote_num은 내선번호로 유지
+                            # REFER 시에도 기존의 local_num(외부번호) -> remote_num(내선번호) 구조 유지
+                            
                             if hasattr(sip_layer, 'msg_hdr'):
                                 msg_hdr = sip_layer.msg_hdr
 
-                                member_doc = self.members.find_one({"extension_num": remote_num_str})
+                                member_doc = self.members.find_one({"extension_num": remote_num})
                                 if member_doc:
                                     per_lv8 = member_doc.get('per_lv8', '')
                                     per_lv9 = member_doc.get('per_lv9', '')
-                                    local_num = local_num_str
-                                    remote_num = remote_num_str
-                            # 로깅 추가
-                            self.dashboard.log_error("SIP 메시지 헤더 확인4", level="info", additional_info={
+                                    
+                            # 로깅 추가 (packet.md 방식 적용)
+                            self.dashboard.log_error("돌려주기 MongoDB 저장 (packet.md 방식)", level="info", additional_info={
                                 "msg_hdr": msg_hdr,
-                                "from_number": local_num,
-                                "to_number": remote_num,
+                                "external_number": local_num,    # 외부 발신번호 유지
+                                "extension_number": remote_num,  # 내선번호 유지
                                 "per_lv8": per_lv8,
-                                "per_lv9": per_lv9
+                                "per_lv9": per_lv9,
+                                "note": "packet.md 최종 기록 방식 적용: 외부번호 -> 내선번호"
                             })
                     else:
                         member_doc = self.members.find_one({"extension_num": remote_num})
