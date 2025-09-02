@@ -52,7 +52,7 @@ $pyinstaller_cmd = "pyinstaller --noconfirm --onedir --windowed --clean " + `
     "--hidden-import `"psutil._psutil_windows`" " + `
     "--hidden-import `"psutil._pswindows`" " + `
     "--version-file `"version.txt`" " + `
-    "dashboard.py"
+    "main.py"
 
 # 명령어 실행
 Write-Host "Executing PyInstaller command..."
