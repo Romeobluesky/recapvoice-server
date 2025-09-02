@@ -346,5 +346,4 @@ settings.ini
 
 docs/
 
-.claude/commands
-.claude/project-chats
+.claude/
