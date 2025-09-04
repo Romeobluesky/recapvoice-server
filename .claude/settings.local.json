@@ -52,7 +52,8 @@
       "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"D:\\Work_state\\packet_wave\\backup\\3.pcapng\" -Y \"sip and sip.Method == \"\"INVITE\"\" and frame.number >= 320 and frame.number <= 325\" -T fields -e frame.number -e sip.from.user -e sip.to.user -e sip.from.display -e sip.Call-ID)",
       "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"D:\\Work_state\\packet_wave\\backup\\3.pcapng\" -Y \"sip and sip.Method == \"\"INVITE\"\" and frame.number >= 320 and frame.number <= 325\" -T fields -e frame.number -e sip.from.user -e sip.to.user -e sip.From -e sip.Call-ID)",
       "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"D:\\Work_state\\packet_wave\\backup\\4.pcapng\" -Y \"sip and frame.number >= 639 and frame.number <= 645\" -V)",
-      "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"D:\\Work_state\\packet_wave\\backup\\4.pcapng\" -Y \"rtp\" -c 10 -T fields -e rtp.ssrc -e udp.srcport -e udp.dstport -e ip.src -e ip.dst)"
+      "Bash(\"C:\\Program Files\\Wireshark\\tshark.exe\" -r \"D:\\Work_state\\packet_wave\\backup\\4.pcapng\" -Y \"rtp\" -c 10 -T fields -e rtp.ssrc -e udp.srcport -e udp.dstport -e ip.src -e ip.dst)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "additionalDirectories": [

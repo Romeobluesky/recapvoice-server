@@ -1,10 +1,13 @@
 #!/mvenv/Scripts/activate
 # -*- coding: utf-8 -*-
+# 표준 라이브러리
+import argparse
 import asyncio
 import atexit
 import configparser
 import datetime
 import gc
+import json
 import os
 import platform
 import psutil
@@ -13,34 +16,30 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import win32con
 import win32gui
 import win32process
-import time
-import argparse
+from enum import Enum, auto
 
 # 서드파티 라이브러리
-from enum import Enum, auto
 import pyshark
 import requests
-# import websockets  # 제거: 직접 사용하지 않음, WebSocketServer에서 사용
-import json
 from pydub import AudioSegment
 from pymongo import MongoClient
-from extension_recording_manager import get_recording_manager
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtNetwork import *
 from PySide6.QtWidgets import *
 
 # 로컬 모듈
+from callstate_machine import CallStateMachine, CallState
 from config_loader import load_config, get_wireshark_path
+from extension_recording_manager import get_recording_manager
+from flow_layout import FlowLayout
 from settings_popup import SettingsPopup
 from wav_merger import WavMerger
-from flow_layout import FlowLayout
-from callstate_machine import CallStateMachine
-from callstate_machine import CallState
 from websocketserver import WebSocketServer
 
 def resource_path(relative_path):
@@ -1252,7 +1251,6 @@ class Dashboard(QMainWindow):
 
 										# SIP 패킷 처리 - 메인 스레드로 Signal 발송
 										if hasattr(packet, 'sip'):
-												print(f"★★★ SIP 패킷 발견! (#{packet_count}) ★★★")
 												self.safe_log(f"★ SIP 패킷 감지됨! (#{packet_count})", "SIP")
 												# 백그라운드 스레드에서 메인 스레드로 SIP 패킷 분석 요청
 												self.sip_packet_signal.emit(packet)
@@ -1645,17 +1643,14 @@ class Dashboard(QMainWindow):
 								print("빈 내선번호")
 								self.log_to_sip_console("빈 내선번호", "WARNING")
 						else:
-								print(f"내선번호 {extension}는 이미 등록됨")
 								self.log_to_sip_console(f"내선번호 {extension}는 이미 등록됨", "INFO")
 
 		def update_extension_display(self):
 				"""내선번호 표시 업데이트 - 왼쪽 사이드바 박스"""
-				print(f"내선번호 UI 업데이트: {len(self.sip_extensions)}개")
 				self.log_to_sip_console(f"내선번호 UI 업데이트: {len(self.sip_extensions)}개", "SIP")
 
 				# extension_list_layout 존재 확인
 				if not hasattr(self, 'extension_list_layout'):
-						print("extension_list_layout이 없습니다!")
 						self.log_to_sip_console("extension_list_layout이 없습니다!", "ERROR")
 						return
 
@@ -2570,12 +2565,10 @@ class Dashboard(QMainWindow):
 						# 메인 스레드에서 실행되는지 확인
 						from PySide6.QtCore import QThread
 						if QThread.currentThread() != self.thread():
-								print("경고: SIP 패킷 분석이 메인 스레드가 아닌 곳에서 호출됨")
 								# 메인 스레드가 아닌 경우 무시 (이미 시그널을 통해 호출되었으므로)
 								self.safe_log("메인 스레드가 아닌 곳에서 호출된 SIP 패킷 분석 무시", "WARNING")
 								return
 						else:
-								print("메인 스레드에서 SIP 패킷 분석 시작")
 								self.log_to_sip_console("메인 스레드에서 SIP 패킷 분석 시작", "INFO")
 
 						# 실제 SIP 패킷 분석 수행
@@ -2585,7 +2578,6 @@ class Dashboard(QMainWindow):
 						self.log_error("SIP 패킷 분석 오류", e)
 
 		def analyze_sip_packet(self, packet):
-				print(f"\n=== SIP 패킷 분석 시작 ===")
 				self.log_to_sip_console("SIP 패킷 분석 시작", "SIP")
 
 				# 포트미러링 환경에서 패킷 정보 추가 출력
@@ -2594,7 +2586,7 @@ class Dashboard(QMainWindow):
 				if hasattr(packet, 'ip'):
 						src_ip = getattr(packet.ip, 'src', 'unknown')
 						dst_ip = getattr(packet.ip, 'dst', 'unknown')
-						print(f"IP 정보 - Source: {src_ip}, Destination: {dst_ip}")
+						#print(f"IP 정보 - Source: {src_ip}, Destination: {dst_ip}")
 						self.log_to_sip_console(f"패킷 IP - 송신: {src_ip}, 수신: {dst_ip}", "SIP")
 
 				# UDP 포트 정보 출력
@@ -2602,35 +2594,34 @@ class Dashboard(QMainWindow):
 						try:
 								src_port = packet.udp.srcport
 								dst_port = packet.udp.dstport
-								print(f"UDP 포트 - Source: {src_port}, Destination: {dst_port}")
+								#print(f"UDP 포트 - Source: {src_port}, Destination: {dst_port}")
 								self.log_to_sip_console(f"UDP 포트 - 송신: {src_port}, 수신: {dst_port}", "SIP")
 						except Exception as e:
 								print(f"UDP 포트 정보 추출 오류: {e}")
 
 				if not hasattr(packet, 'sip'):
-						print("SIP 레이어가 없는 패킷")
+						#print("SIP 레이어가 없는 패킷")
 						self.log_to_sip_console("SIP 레이어가 없는 패킷", "WARNING")
 						self.log_error("SIP 레이어가 없는 패킷")
 						return
 
 				try:
 						sip_layer = packet.sip
-						print(f"SIP 패킷 감지됨")
+						#print(f"SIP 패킷 감지됨")
 						self.log_to_sip_console("SIP 패킷 감지됨", "SIP")
 
 						# SIP 레이어 기본 정보만 출력 (상세 로그 제거)
 						sip_method = getattr(sip_layer, 'method', getattr(sip_layer, 'status_line', 'unknown'))
-						print(f"SIP 메서드/상태: {sip_method}")
+						#print(f"SIP 메서드/상태: {sip_method}")
 						self.log_to_sip_console(f"SIP 메서드: {sip_method}", "SIP")
 
 						if not hasattr(sip_layer, 'call_id'):
-								print("Call-ID가 없는 SIP 패킷")
+								#print("Call-ID가 없는 SIP 패킷")
 								self.log_to_sip_console("Call-ID가 없는 SIP 패킷", "WARNING")
 								# Call-ID가 없어도 계속 진행 (다른 정보 확인)
 								call_id = "no_call_id"
 						else:
 								call_id = sip_layer.call_id
-								print(f"Call-ID: {call_id}")
 								self.log_to_sip_console(f"Call-ID: {call_id}", "SIP")
 
 						# 내선번호 추출 로직...
@@ -2667,17 +2658,17 @@ class Dashboard(QMainWindow):
 														# 당겨받기(*8) 시나리오 감지 및 처리
 														is_call_pickup = False
 														if to_number == '8' or sip_layer.to_user.strip() == '*8':
-															print("당겨받기(*8) 시나리오 감지...")
+															self.log_to_sip_console("당겨받기(*8) 시나리오 감지...", "SIP")
 															actual_caller = self.find_ringing_caller()
 															if actual_caller:
-																print(f"당겨받기: 실제 발신자 {actual_caller}, 당겨받은 내선 {from_number}")
+																self.log_to_sip_console(f"당겨받기: 실제 발신자 {actual_caller}, 당겨받은 내선 {from_number}", "SIP")
 																# 올바른 발신자/수신자 설정
 																original_from = from_number  # 당겨받은 내선 저장
 																from_number = actual_caller  # 실제 발신자를 from_number로
 																to_number = original_from    # 당겨받은 내선을 to_number로
 																is_call_pickup = True
 															else:
-																print("진행 중인 통화를 찾을 수 없어 기본 처리")
+																self.log_to_sip_console("진행 중인 통화를 찾을 수 없어 기본 처리", "SIP")
 
 														if not from_number or not to_number:
 															self.log_error("유효하지 않은 전화번호", additional_info={
