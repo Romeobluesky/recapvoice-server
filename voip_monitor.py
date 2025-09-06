@@ -5,7 +5,7 @@ import configparser
 import os
 import logging
 import socket
-from PySide6.QtWidgets import (QApplication, QMainWindow, QTableWidget, 
+from PySide6.QtWidgets import (QApplication, QMainWindow, QTableWidget,
 							 QTableWidgetItem, QVBoxLayout, QWidget,
 							 QComboBox, QPushButton, QHBoxLayout, QLabel)
 from PySide6.QtCore import Qt, QTimer
@@ -16,11 +16,18 @@ import asyncio
 
 def setup_logging():
 	"""로깅 설정"""
+	# 로그 디렉토리 확인 및 생성
+	log_dir = 'logs'
+	if not os.path.exists(log_dir):
+		os.makedirs(log_dir)
+
+	log_file_path = os.path.join(log_dir, 'voip_monitor.log')
+
 	logging.basicConfig(
 		level=logging.INFO,
 		format='%(asctime)s - %(levelname)s - %(message)s',
 		handlers=[
-			logging.FileHandler('voip_monitor.log', encoding='utf-8'),
+			logging.FileHandler(log_file_path, encoding='utf-8'),
 			logging.StreamHandler()
 		]
 	)
@@ -42,14 +49,14 @@ def load_config():
 			log_message("오류", "settings.ini 파일이 존재하지 않습니다.")
 			return None
 		config.read('settings.ini', encoding='utf-8')
-		
+
 		# 필수 설정 값 검증
 		required_sections = ['Recording', 'Network']
 		for section in required_sections:
 			if section not in config:
 				log_message("오류", f"필수 설정 섹션 '{section}'이 없습니다.")
 				return None
-				
+
 		return config
 	except configparser.Error as e:
 		log_message("오류", f"설정 파일 파싱 오류: {str(e)}")
@@ -63,16 +70,16 @@ def analyze_rtp(packet, voip_monitor):
 	if not packet or not hasattr(packet, 'ip'):
 		log_message("경고", "유효하지 않은 RTP 패킷")
 		return
-		
+
 	try:
 		call_id = get_call_id_from_rtp(packet)
 		if not call_id:
 			return
-			
+
 		if call_id not in voip_monitor.active_calls:
 			log_message("경고", f"알 수 없는 Call-ID의 RTP 패킷: {call_id}")
 			return
-			
+
 		# RTP 엔드포인트 정보 저장
 		try:
 			src_ip = packet.ip.src
@@ -82,10 +89,10 @@ def analyze_rtp(packet, voip_monitor):
 		except AttributeError as e:
 			log_message("오류", f"RTP 패킷에서 IP/포트 정보 추출 실패: {str(e)}")
 			return
-			
+
 		if 'media_endpoints' not in voip_monitor.active_calls[call_id]:
 			voip_monitor.active_calls[call_id]['media_endpoints'] = []
-			
+
 		# 새로운 엔드포인트 추가
 		endpoints = voip_monitor.active_calls[call_id]['media_endpoints']
 		new_endpoint = {
@@ -94,7 +101,7 @@ def analyze_rtp(packet, voip_monitor):
 		}
 		if new_endpoint not in endpoints:
 			endpoints.append(new_endpoint)
-			
+
 		new_endpoint = {
 			'ip': dst_ip,
 			'port': dst_port,
@@ -114,7 +121,7 @@ def get_call_id_from_rtp(packet):  # stream_id 매개변수 제거
 		dst_ip = packet.ip.dst
 		src_port = int(packet.udp.srcport)
 		dst_port = int(packet.udp.dstport)
-		
+
 		# active_calls에서 이 RTP 스트림과 매칭되는 Call-ID 찾기
 		for call_id, call_info in active_calls.items():
 			if "media_endpoints" in call_info:
@@ -123,7 +130,7 @@ def get_call_id_from_rtp(packet):  # stream_id 매개변수 제거
 					   (dst_ip == endpoint["ip"] and dst_port == endpoint["port"]):
 						return call_id
 		return None
-	
+
 	except Exception as e:
 		log_message("오류", f"RTP Call-ID 매칭 오류: {str(e)}")
 		return None
@@ -146,7 +153,7 @@ def extract_number(sip_header):
 	"""SIP 헤더에서 전화번호 추출"""
 	if not sip_header:
 		return ''
-		
+
 	try:
 		# 전화번호 형식 검증
 		def validate_number(number):
@@ -157,7 +164,7 @@ def extract_number(sip_header):
 			if not all(c in valid_chars for c in number):
 				return ''
 			return number
-			
+
 		# From 헤더에서 큰따옴표 안의 값 추출
 		if '"' in sip_header:
 			parts = sip_header.split('"')
@@ -166,16 +173,16 @@ def extract_number(sip_header):
 				if ',' in quoted_part:
 					return validate_number(quoted_part.split(',')[-1])
 				return validate_number(quoted_part)
-				
+
 		# To 헤더에서 sip: 다음의 번호 추출
 		if 'sip:' in sip_header:
 			parts = sip_header.split('sip:')
 			if len(parts) >= 2:
 				number = parts[1].split('@')[0]
 				return validate_number(number)
-				
+
 		return validate_number(str(sip_header))
-		
+
 	except Exception as e:
 		log_message("오류", f"전화번호 추출 중 오류: {str(e)}")
 		return ''
@@ -185,22 +192,22 @@ def analyze_sip(packet, voip_monitor):
 	try:
 		sip_layer = packet.sip
 		call_id = sip_layer.call_id
-		
+
 		# 디버깅을 위한 로그 추가
 		log_message("정보", f"SIP 패킷 분석 시작 - Call-ID: {call_id}")
-		
+
 		if hasattr(sip_layer, 'request_line'):
 			# INVITE 요청 처리
 			if 'INVITE' in sip_layer.request_line:
 				log_message("정보", f"INVITE 요청 감지 - Call-ID: {call_id}")
-				
+
 				if call_id not in voip_monitor.active_calls:
 					try:
 						# From 헤더 파싱
 						from_header = getattr(sip_layer, 'From', '')
 						log_message("정보", f"From 헤더 전체: {from_header}")
 						from_number = ''
-						
+
 						# From 헤더의 display info에서 번호 추출
 						if '"' in from_header:
 							display_info = from_header.split('"')[1]  # "070XXXXXXXX,1427" 추출
@@ -211,14 +218,14 @@ def analyze_sip(packet, voip_monitor):
 								from_number = display_info
 						else:
 							from_number = getattr(sip_layer, 'from_user', '')
-							
+
 						log_message("정보", f"파싱된 발신번호: {from_number}")
-						
+
 						# To 헤더 파싱
 						to_header = getattr(sip_layer, 'To', '')
 						log_message("정보", f"To 헤더: {to_header}")
 						to_number = ''
-						
+
 						# To 헤더에서 번호 추출 시도
 						try:
 							if 'sip:' in to_header:
@@ -228,19 +235,19 @@ def analyze_sip(packet, voip_monitor):
 								to_number = getattr(sip_layer, 'to_user', '')
 						except:
 							to_number = getattr(sip_layer, 'to_user', '')
-							
+
 						log_message("정보", f"추출된 수신번호: {to_number}")
-						
+
 						# 내선번호 판단 함수 추가
 						def is_extension(number):
 							"""내선번호 여부 확인 (4자리 && 1-9로 시작)"""
-							return (number and 
-									len(str(number)) == 4 and 
+							return (number and
+									len(str(number)) == 4 and
 									str(number)[0] in ['1','2','3','4','5','6','7','8','9'])
 
 						# 방향 결정
 						direction = '수신' if is_extension(to_number) else '발신'
-						
+
 						# active_calls에 저장
 						voip_monitor.active_calls[call_id] = {
 							'start_time': datetime.datetime.now(),
@@ -253,12 +260,12 @@ def analyze_sip(packet, voip_monitor):
 							'media_endpoints': []
 						}
 						log_message("정보", f"새로운 통화 추가됨 - Call-ID: {call_id}")
-						
+
 					except Exception as parse_error:
 						log_message("오류", f"헤더 파싱 중 오류 상세: {str(parse_error)}")
 						import traceback
 						log_message("오류", traceback.format_exc())
-			
+
 			# BYE 요청 처리
 			elif 'BYE' in sip_layer.request_line:
 				log_message("정보", f"BYE 요청 감지 - Call-ID: {call_id}")
@@ -270,7 +277,7 @@ def analyze_sip(packet, voip_monitor):
 					else:
 						voip_monitor.active_calls[call_id]['result'] = '수신종료'
 					voip_monitor.active_calls[call_id]['end_time'] = datetime.datetime.now()
-			
+
 			# CANCEL 요청 처리
 			elif 'CANCEL' in sip_layer.request_line:
 				log_message("정보", f"CANCEL 요청 감지 - Call-ID: {call_id}")
@@ -278,12 +285,12 @@ def analyze_sip(packet, voip_monitor):
 					voip_monitor.active_calls[call_id]['status'] = '통화종료'
 					voip_monitor.active_calls[call_id]['result'] = '발신취소'
 					voip_monitor.active_calls[call_id]['end_time'] = datetime.datetime.now()
-		
+
 		# SIP Response 처리
 		elif hasattr(sip_layer, 'status_line'):
 			status_code = sip_layer.status_code
 			log_message("정보", f"SIP 응답 감지 - Status Code: {status_code}, Call-ID: {call_id}")
-			
+
 			if call_id in voip_monitor.active_calls:
 				if status_code == '180':  # Ringing
 					voip_monitor.active_calls[call_id]['status'] = '벨울림'
@@ -298,7 +305,7 @@ def analyze_sip(packet, voip_monitor):
 					voip_monitor.active_calls[call_id]['status'] = '통화종료'
 					voip_monitor.active_calls[call_id]['result'] = '응답없음'
 					voip_monitor.active_calls[call_id]['end_time'] = datetime.datetime.now()
-					
+
 	except Exception as e:
 		log_message("오류", f"SIP 패킷 분석 중 오류 상세: {str(e)}")
 		# 스택 트레이스 출력
@@ -310,18 +317,18 @@ def handle_sip_response(status_code, call_id, sip_layer):
 	try:
 		if call_id in active_calls:
 			current_status = active_calls[call_id]['status']
-			
+
 			# 시도중 상태에서의 응답 처리
 			if current_status == '시도중':
 				if status_code == '200':  # 200 OK - 통화 연결됨
 					active_calls[call_id]['status'] = '통화중'
 					active_calls[call_id]['result'] = ''
-					
+
 				elif status_code in ['486', '487', '603', '480']:  # 즉시 실패하는 응답
 					active_calls[call_id]['status'] = '통화종료'
 					active_calls[call_id]['result'] = '부재중'
 					active_calls[call_id]['end_time'] = datetime.datetime.now()
-					
+
 				elif status_code in ['401', '407']:  # 인증 필요
 					# 이미 인증 시도를 했다면 부재중으로 처리
 					if active_calls[call_id].get('auth_attempted'):
@@ -330,14 +337,14 @@ def handle_sip_response(status_code, call_id, sip_layer):
 						active_calls[call_id]['end_time'] = datetime.datetime.now()
 					else:
 						active_calls[call_id]['auth_attempted'] = True
-			
+
 			# 통화중 상태에서의 응답 처리
 			elif current_status == '통화중':
 				if status_code == '200' and 'BYE' in str(sip_layer):  # 정상 종료
 					active_calls[call_id]['status'] = '통화종료'
 					active_calls[call_id]['result'] = 'OK'
 					active_calls[call_id]['end_time'] = datetime.datetime.now()
-					
+
 	except Exception as e:
 		log_message("오류", f"SIP 응답 처리 중 오류: {str(e)}")
 
@@ -356,7 +363,7 @@ def capture_voip_packets(interface, voip_monitor):
 		# 새로운 이벤트 루프 생성 및 설정
 		loop = asyncio.new_event_loop()
 		asyncio.set_event_loop(loop)
-		
+
 		capture = pyshark.LiveCapture(interface=interface, display_filter='sip or rtp')
 		for packet in capture.sniff_continuously():
 			if 'SIP' in packet:
@@ -387,10 +394,10 @@ class VoipMonitor(QMainWindow):
 		self.setWindowTitle('VOIP MONITOR')
 		self.setWindowIcon(QIcon("images/logo.png"))
 		self.resize(1200, 600)
-		
+
 		# active_calls 초기화
 		self.active_calls = {}
-		
+
 		# 스타일 설정
 		self.setStyleSheet("""
 			QMainWindow {
@@ -401,11 +408,11 @@ class VoipMonitor(QMainWindow):
 				font-size: 12px;
 			}
 		""")
-		
+
 		central_widget = QWidget()
 		self.setCentralWidget(central_widget)
 		layout = QVBoxLayout(central_widget)
-		
+
 		# 인터페이스 선택 영역
 		interface_layout = QHBoxLayout()
 		interface_layout.addSpacing(20)  # 왼쪽 여백 추가
@@ -414,21 +421,21 @@ class VoipMonitor(QMainWindow):
 		self.interface_combo.setStyleSheet("QComboBox { min-width: 200px; height: 27px; }")
 		self.start_button = QPushButton("VOIP MONITOR START")
 		self.start_button.setStyleSheet("QPushButton { min-width: 180px; height: 22px; background-color: #C533BE; }")
-		
+
 		interface_layout.addWidget(interface_label)
 		interface_layout.addWidget(self.interface_combo)
 		interface_layout.addWidget(self.start_button)
 		interface_layout.addStretch()
-		
+
 		layout.addLayout(interface_layout)
-		
+
 		# 테이블 위젯 설정
 		self.table = QTableWidget()
 		self.table.setColumnCount(7)
 		self.table.setHorizontalHeaderLabels([
 			'시간', '통화 방향', '발신번호', '수신번호', '상태', '결과', 'Call-ID'
 		])
-		
+
 		# 테이블 스타일 설정
 		self.table.setStyleSheet("""
 			QTableWidget {
@@ -448,9 +455,9 @@ class VoipMonitor(QMainWindow):
 			QTableWidget::item:selected {
 				background-color: #4A90E2;  /* 선택된 행의 배경색 */
 				color: white;  /* 선택된 행의 텍스트 색상 */
-			}						   
+			}
 		""")
-		
+
 		# 컬럼 너비 설정
 		self.table.setColumnWidth(0, 150)  # 시간
 		self.table.setColumnWidth(1, 80)   # 통화 방향
@@ -459,18 +466,18 @@ class VoipMonitor(QMainWindow):
 		self.table.setColumnWidth(4, 80)   # 상태
 		self.table.setColumnWidth(5, 80)   # 결과
 		self.table.setColumnWidth(6, 400)  # Call-ID
-		
+
 		# 테이블 설정
 		self.table.setSelectionBehavior(QTableWidget.SelectRows)
 		self.table.setSelectionMode(QTableWidget.SingleSelection)
 		self.table.setSortingEnabled(True)
 		self.table.horizontalHeader().setStretchLastSection(True)
-		
+
 		layout.addWidget(self.table)
-		
+
 		# 인터페이스 목록 로드
 		self.load_interfaces()
-		
+
 		# 이벤트 연결
 		self.start_button.clicked.connect(self.start_capture)
 		self.timer = QTimer()
@@ -492,7 +499,7 @@ class VoipMonitor(QMainWindow):
 		if interface:
 			self.start_button.setEnabled(False)
 			self.interface_combo.setEnabled(False)
-			
+
 			capture_thread = threading.Thread(
 				target=capture_voip_packets,
 				args=(interface, self),
@@ -506,56 +513,56 @@ class VoipMonitor(QMainWindow):
 			# 테이블 정렬 상태 저장
 			current_sort_column = self.table.horizontalHeader().sortIndicatorSection()
 			current_sort_order = self.table.horizontalHeader().sortIndicatorOrder()
-			
+
 			# 현재 선택된 항목 저장
 			current_row = self.table.currentRow()
-			
+
 			# 테이블 내용 초기화
 			self.table.setRowCount(0)
 			self.table.setRowCount(len(self.active_calls))
-			
+
 			for row, (call_id, call_info) in enumerate(self.active_calls.items()):
 				# 시간
 				time_item = QTableWidgetItem(call_info['start_time'].strftime('%Y-%m-%d %H:%M:%S'))
 				self.table.setItem(row, 0, time_item)
-				
+
 				# 통화 방향
 				direction_item = QTableWidgetItem(call_info.get('direction', ''))
 				self.table.setItem(row, 1, direction_item)
-				
+
 				# 발신번호
 				from_item = QTableWidgetItem(str(call_info.get('from_number', '')))
 				self.table.setItem(row, 2, from_item)
-				
+
 				# 수신번호
 				to_item = QTableWidgetItem(str(call_info.get('to_number', '')))
 				self.table.setItem(row, 3, to_item)
-				
+
 				# 상태
 				status_item = QTableWidgetItem(call_info.get('status', ''))
 				self.table.setItem(row, 4, status_item)
-				
+
 				# 결과
 				result_item = QTableWidgetItem(call_info.get('result', ''))
 				self.table.setItem(row, 5, result_item)
-				
+
 				# Call-ID
 				callid_item = QTableWidgetItem(call_id)
 				self.table.setItem(row, 6, callid_item)
-				
+
 				# 각 셀을 가운데 정렬
 				for col in range(7):
 					item = self.table.item(row, col)
 					if item:
 						item.setTextAlignment(Qt.AlignCenter)
-			
+
 			# 정렬 상태 복원
 			self.table.sortItems(current_sort_column, current_sort_order)
-			
+
 			# 선택 상태 복원
 			if current_row >= 0 and current_row < self.table.rowCount():
 				self.table.setCurrentCell(current_row, 0)
-				
+
 		except Exception as e:
 			log_message("오류", f"테이블 업데이트 중 오류: {str(e)}")
 
@@ -566,7 +573,7 @@ if __name__ == '__main__':
 	# 전역 변수 초기화
 	active_calls = {}
 	config = load_config()
-	
+
 	if not config:
 		log_message("오류", "설정 파일 로드 실패")
 		exit(1)
@@ -575,7 +582,7 @@ if __name__ == '__main__':
 	app = QApplication(sys.argv)
 	window = VoipMonitor()
 	window.show()
-	
+
 	try:
 		sys.exit(app.exec())
 	except Exception as e:

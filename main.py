@@ -271,6 +271,10 @@ class Dashboard(QMainWindow):
 								self.active_calls = {}
 								self.active_streams = set()  # active_streams 속성 추가
 								self.call_state_machines = {}
+
+								# REFER 관련 변수들
+								self.refer_var = None  # REFER method 값 저장
+								self.from_number_var = None  # 외선과 내선의 최초 연결 때의 발신번호 저장
 								self.capture_thread = None
 
 								# 타이머 설정
@@ -2652,6 +2656,41 @@ class Dashboard(QMainWindow):
 																})
 																return
 
+														# REFER 치환: sip_layer.from_user 직접 수정
+														# 디버깅 로그 추가
+														log_file_path = os.path.join(getattr(self, 'work_dir', os.getcwd()), 'logs', 'voip_monitor.log')
+														with open(log_file_path, 'a', encoding='utf-8') as log_file:
+																log_file.write(f"\n=== INVITE 처리 시 REFER 변수 상태 확인 ===\n")
+																log_file.write(f"시간: {datetime.datetime.now()}\n")
+																log_file.write(f"Call-ID: {call_id}\n")
+																log_file.write(f"sip_layer.from_user: {sip_layer.from_user}\n")
+																log_file.write(f"refer_var: {getattr(self, 'refer_var', 'None')}\n")
+																log_file.write(f"from_number_var: {getattr(self, 'from_number_var', 'None')}\n")
+																log_file.write(f"내선 체크: {str(sip_layer.from_user).startswith(('1','2','3','4','5','6','7','8','9'))}\n")
+
+														if (hasattr(self, 'refer_var') and self.refer_var == 'REFER' and
+																hasattr(self, 'from_number_var') and self.from_number_var and
+																str(sip_layer.from_user).startswith(('1','2','3','4','5','6','7','8','9'))):  # from_user가 내선
+
+																# 치환 로그
+																log_file_path = os.path.join(getattr(self, 'work_dir', os.getcwd()), 'logs', 'voip_monitor.log')
+																with open(log_file_path, 'a', encoding='utf-8') as log_file:
+																		log_file.write(f"\n=== SIP Layer 직접 치환 ===\n")
+																		log_file.write(f"시간: {datetime.datetime.now()}\n")
+																		log_file.write(f"Call-ID: {call_id}\n")
+																		log_file.write(f"원본 sip_layer.from_user: {sip_layer.from_user}\n")
+																		log_file.write(f"치환될 값: {self.from_number_var}\n")
+
+																# sip_layer.from_user 직접 치환
+																sip_layer.from_user = self.from_number_var
+
+																# 치환 완료 로그
+																with open(log_file_path, 'a', encoding='utf-8') as log_file:
+																		log_file.write(f"치환 완료! 새로운 sip_layer.from_user: {sip_layer.from_user}\n")
+
+																# 치환 후 변수 초기화
+																self.clear_refer_variables()
+
 														from_number = self.extract_full_number(sip_layer.from_user)
 														to_number = self.extract_full_number(sip_layer.to_user)
 
@@ -2739,17 +2778,22 @@ class Dashboard(QMainWindow):
 																						"attempted_state": "TRYING"
 																				})
 
-																		self.active_calls[call_id] = {
-																				'start_time': datetime.datetime.now(),
-																				'status': '시도중',
-																				'from_number': from_number,
-																				'to_number': to_number,
-																				'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
-																				'media_endpoints': [],
-																				'packet': packet,
-																				'is_pickup_call': is_call_pickup,  # 당겨받기 여부 표시
-																				'result': '당겨받기' if is_call_pickup else ''
-																		}
+																		# 기존 Call-ID가 있는지 확인하여 중복 생성 방지
+																		if call_id not in self.active_calls:
+																				self.active_calls[call_id] = {
+																						'start_time': datetime.datetime.now(),
+																						'status': '시도중',
+																						'from_number': from_number,
+																						'to_number': to_number,
+																						'direction': '수신' if to_number.startswith(('1','2','3','4','5','6','7','8','9')) else '발신',
+																						'media_endpoints': [],
+																						'packet': packet,
+																						'is_pickup_call': is_call_pickup,  # 당겨받기 여부 표시
+																						'result': '당겨받기' if is_call_pickup else ''
+																				}
+																				self.log_to_sip_console(f"새로운 통화 생성: {call_id} ({from_number} → {to_number})", "SIP")
+																		else:
+																				self.log_to_sip_console(f"중복 INVITE 무시: {call_id} (기존 통화 정보 유지)", "SIP")
 
 																except Exception as state_error:
 																		self.log_error("통화 상태 업데이트 실패", state_error)
@@ -2806,44 +2850,126 @@ class Dashboard(QMainWindow):
 								return
 
 				except Exception as e:
-						self.log_error("SIP 패킷 분석 중 심각한 오류", e)
-						self.log_error("상세 오류 정보", level="info", additional_info={"traceback": traceback.format_exc()})
+					self.log_error("SIP 패킷 분석 중 심각한 오류", e)
+					self.log_error("상세 오류 정보", level="info", additional_info={"traceback": traceback.format_exc()})
 
 		def _handle_refer_request(self, sip_layer, call_id, request_line):
-				"""REFER 요청 처리를 위한 헬퍼 메소드"""
-				with open('voip_monitor.log', 'a', encoding='utf-8') as log_file:
-						log_file.write("\n=== 돌려주기 요청 감지 ===\n")
-						log_file.write(f"시간: {datetime.datetime.now()}\n")
-						log_file.write(f"Call-ID: {call_id}\n")
-						log_file.write(f"Request Line: {request_line}\n")
+				"""REFER 요청 처리를 위한 헬퍼 메소드 - REFER 감지 시 변수 저장"""
+				try:
+						# 1. REFER method 값 저장
+						self.refer_var = 'REFER'
+
+						# 2. 외선과 내선의 최초 연결 때의 발신번호 저장
+						with self.active_calls_lock:
+								if call_id in self.active_calls:
+										original_call = self.active_calls[call_id]
+										self.from_number_var = original_call.get('from_number', '')
+								else:
+										self.from_number_var = ''
+
+						# 변수 저장 직후 확인 로그 및 기존 내선→내선 통화 치환
+						log_file_path = os.path.join(getattr(self, 'work_dir', os.getcwd()), 'logs', 'voip_monitor.log')
+						with open(log_file_path, 'a', encoding='utf-8') as log_file:
+								log_file.write(f"\n=== REFER 변수 저장 직후 확인 ===\n")
+								log_file.write(f"시간: {datetime.datetime.now()}\n")
+								log_file.write(f"refer_var: {self.refer_var}\n")
+								log_file.write(f"from_number_var: {self.from_number_var}\n")
+
+						# 즉시 기존 내선→내선 통화를 찾아서 치환
+						self._find_and_substitute_existing_calls()
+
+						# 로그 기록
+						log_file_path = os.path.join(getattr(self, 'work_dir', os.getcwd()), 'logs', 'voip_monitor.log')
+						with open(log_file_path, 'a', encoding='utf-8') as log_file:
+								log_file.write(f"\n=== REFER 감지 시 현재 통화 정보 확인 ===\n")
+								log_file.write(f"시간: {datetime.datetime.now()}\n")
+								log_file.write(f"Call-ID: {call_id}\n")
+
+								# 현재 active_calls에 저장된 정보 확인
+								if call_id in self.active_calls:
+										current_call = self.active_calls[call_id]
+										log_file.write(f"REFER 시점 현재 통화 정보:\n")
+										log_file.write(f"  - from_number: {current_call.get('from_number', 'N/A')}\n")
+										log_file.write(f"  - to_number: {current_call.get('to_number', 'N/A')}\n")
+										log_file.write(f"  - direction: {current_call.get('direction', 'N/A')}\n")
+										log_file.write(f"  - status: {current_call.get('status', 'N/A')}\n")
+								else:
+										log_file.write(f"ERROR: Call-ID {call_id}가 active_calls에 없음\n")
+
+				except Exception as e:
+						self.log_error("REFER 처리 중 오류", e)
+
+		def get_refer_var(self):
+				"""저장된 REFER method 값을 반환"""
+				return self.refer_var
+
+		def get_from_number_var(self):
+				"""저장된 발신번호를 반환"""
+				return self.from_number_var
+
+		def clear_refer_variables(self):
+				"""REFER 관련 변수들을 초기화"""
+				self.refer_var = None
+				self.from_number_var = None
+
+		def _find_and_substitute_existing_calls(self):
+				"""REFER 후 기존 내선→내선 통화를 찾아서 치환"""
+				try:
+						if not hasattr(self, 'refer_var') or self.refer_var != 'REFER':
+								return
+						if not hasattr(self, 'from_number_var') or not self.from_number_var:
+								return
 
 						with self.active_calls_lock:
-								if call_id not in self.active_calls:
-										log_file.write(f"[오류] 해당 Call-ID를 찾을 수 없음: {call_id}\n")
-										return
+								# 최근 30초 내 생성된 내선→내선 통화 찾기 (REFER 타이밍 고려)
+								current_time = datetime.datetime.now()
+								target_calls = []
 
-								original_call = dict(self.active_calls[call_id])
-								log_file.write(f"현재 통화 정보: {original_call}\n")
+								for call_id, call_info in self.active_calls.items():
+									if (call_info.get('from_number', '').startswith(('1','2','3','4','5','6','7','8','9')) and
+											call_info.get('to_number', '').startswith(('1','2','3','4','5','6','7','8','9')) and
+											call_info.get('start_time') and
+											(current_time - call_info['start_time']).total_seconds() <= 30):
+												target_calls.append((call_id, call_info))
 
-								if not all(k in original_call for k in ['to_number', 'from_number']):
-										log_file.write("[오류] 필수 통화 정보 누락\n")
-										return
+								if target_calls:
+										# 가장 최신 통화 치환
+										latest_call = max(target_calls, key=lambda x: x[1]['start_time'])
+										call_id, call_info = latest_call
 
-								if not hasattr(sip_layer, 'refer_to'):
-										log_file.write("[오류] REFER-TO 헤더 누락\n")
-										return
+										# from_number 치환
+										original_from = call_info['from_number']
+										call_info['from_number'] = self.from_number_var
 
-								refer_to = str(sip_layer.refer_to)
-								forwarded_ext = self.extract_full_number(refer_to.split('@')[0])
+										# 치환 로그
+										log_file_path = os.path.join(getattr(self, 'work_dir', os.getcwd()), 'logs', 'voip_monitor.log')
+										with open(log_file_path, 'a', encoding='utf-8') as log_file:
+												log_file.write(f"\n=== 기존 통화 치환 완료 ===\n")
+												log_file.write(f"시간: {current_time}\n")
+												log_file.write(f"대상 Call-ID: {call_id}\n")
+												log_file.write(f"원본 from_number: {original_from} (내선)\n")
+												log_file.write(f"치환된 from_number: {self.from_number_var} (외선)\n")
+												log_file.write(f"후보 통화 수: {len(target_calls)}\n")
 
-								if not forwarded_ext:
-										log_file.write("[오류] 유효하지 않은 Refer-To 번호\n")
-										return
+										# UI 업데이트
+										self.update_voip_status()
 
-								self._update_call_for_refer(call_id, original_call, forwarded_ext, log_file)
+										# 변수 초기화
+										self.clear_refer_variables()
+								else:
+										log_file_path = os.path.join(getattr(self, 'work_dir', os.getcwd()), 'logs', 'voip_monitor.log')
+										with open(log_file_path, 'a', encoding='utf-8') as log_file:
+												log_file.write(f"\n=== 치환할 내선→내선 통화 없음 ===\n")
+												log_file.write(f"시간: {current_time}\n")
+
+				except Exception as e:
+						self.log_error("기존 통화 치환 중 오류", e)
 
 		def _handle_bye_request(self, call_id):
 				"""BYE 요청 처리를 위한 헬퍼 메소드"""
+
+				# BYE 시에는 REFER 변수 초기화하지 않음 (새로운 INVITE에서 초기화)
+
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
 								before_state = dict(self.active_calls[call_id])
@@ -3153,75 +3279,12 @@ class Dashboard(QMainWindow):
 														received_number = self.active_calls[call_id]['to_number']
 														pass  # 통화 시에는 내선번호를 사이드바에 추가하지 않음
 
-		def _update_call_for_refer(self, call_id, original_call, forwarded_ext, log_file):
-				"""REFER 요청에 대한 통화 상태 업데이트"""
-				# 문서에 따른 올바른 로직: 외부번호 -> 첫번째 내선, 외부번호 -> 두번째 내선
-				# 돌려주기 시 내선 간 통화 기록은 생성하지 않고, 외부발신자와 각 내선 간의 기록만 생성
-
-				# 원본 통화에서 외부 번호와 내선 번호 식별
-				from_number = original_call['from_number']
-				to_number = original_call['to_number']
-
-				# 외부 번호 찾기 (내선이 아닌 번호)
-				is_extension = lambda num: num.startswith(('1','2','3','4','5','6','7','8','9')) and len(num) == 4
-				external_number = from_number if not is_extension(from_number) else to_number
-				first_extension = to_number if not is_extension(from_number) else from_number
-
-				log_file.write("=== 돌려주기 시나리오 (수정된 로직) ===\n")
-				log_file.write(f"외부 발신번호: {external_number}\n")
-				log_file.write(f"첫 번째 내선: {first_extension}\n")
-				log_file.write(f"돌려받을 내선: {forwarded_ext}\n")
-				log_file.write("최종 기록 형태: 외부번호 -> 첫번째내선, 외부번호 -> 두번째내선\n")
-
-				# 현재 통화를 외부번호 -> 첫번째내선으로 업데이트
-				update_info = {
-						'status': '통화중',
-						'is_forwarded': True,
-						'forward_to': forwarded_ext,
-						'result': '돌려주기',
-						'from_number': external_number,  # 항상 외부번호가 발신
-						'to_number': first_extension     # 첫 번째 내선이 수신
-				}
-
-				with self.active_calls_lock:
-						if call_id in self.active_calls:
-								before_update = dict(self.active_calls[call_id])
-								self.active_calls[call_id].update(update_info)
-								after_update = dict(self.active_calls[call_id])
-								log_file.write("첫 번째 기록 (외부->첫번째내선) 업데이트:\n")
-								log_file.write(f"업데이트 전: {before_update}\n")
-								log_file.write(f"업데이트 후: {after_update}\n")
-
-								# 두 번째 기록 생성: 외부번호 -> 돌려받을 내선
-								# 기존의 내선 간 통화 기록을 찾아서 외부->내선 기록으로 변경
-								for active_call_id, call_info in self.active_calls.items():
-										if (active_call_id != call_id and
-										    ((call_info.get('from_number') == first_extension and call_info.get('to_number') == forwarded_ext) or
-										     (call_info.get('from_number') == forwarded_ext and call_info.get('to_number') == first_extension))):
-												before_related = dict(call_info)
-												call_info.update({
-														'status': '통화중',
-														'result': '돌려주기',
-														'from_number': external_number,  # 외부번호가 발신
-														'to_number': forwarded_ext,      # 돌려받을 내선이 수신
-														'is_forwarded': True,
-														'forward_to': forwarded_ext
-												})
-												after_related = dict(call_info)
-												log_file.write(f"두 번째 기록 (외부->두번째내선) 업데이트 (Call-ID: {active_call_id}):\n")
-												log_file.write(f"업데이트 전: {before_related}\n")
-												log_file.write(f"업데이트 후: {after_related}\n")
-												break
-
-				log_file.write("=== 돌려주기 처리 완료 (문서 명세에 따른 2개 기록 생성) ===\n\n")
-
-
 		def get_extension_from_call(self, call_id):
 				with self.active_calls_lock:
 						if call_id in self.active_calls:
 								call_info = self.active_calls[call_id]
-								from_number = call_info['to_number']
-								to_number = call_info['from_number']
+								from_number = call_info['from_number']  # 올바른 발신번호
+								to_number = call_info['to_number']      # 올바른 수신번호
 								is_extension = lambda num: num.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) and len(num) == 4
 								return from_number if is_extension(from_number) else to_number if is_extension(to_number) else None
 				return None
@@ -3268,7 +3331,8 @@ class Dashboard(QMainWindow):
 												table.setItem(row, 1, direction_item)
 
 												# 발신번호
-												from_item = QTableWidgetItem(str(call_info.get('from_number', '')))
+												from_number = call_info.get('from_number', '')
+												from_item = QTableWidgetItem(str(from_number))
 												table.setItem(row, 2, from_item)
 
 												# 수신번호
@@ -4335,8 +4399,6 @@ class Dashboard(QMainWindow):
 						# per_lv8, per_lv9 값 가져오기
 						per_lv8 = ""
 						per_lv9 = ""
-						per_lv8_update = ""
-						per_lv9_update = ""
 
 						# packet이 None인 경우 안전 처리
 						sip_layer = None
@@ -4357,79 +4419,12 @@ class Dashboard(QMainWindow):
 												per_lv8 = member_doc.get('per_lv8', '')
 												per_lv9 = member_doc.get('per_lv9', '')
 
-						# 내선 간 통화인 경우 (packet이 있는 경우만)
-						elif is_extension(local_num) and is_extension(remote_num):
-								if packet and hasattr(packet, 'sip'):
-										if hasattr(sip_layer, 'method') and sip_layer.method == 'INVITE':
-
-												 if hasattr(sip_layer, 'msg_hdr'):
-															msg_hdr = sip_layer.msg_hdr
-
-															# X-xfer-pressed: True 찾기
-															if 'X-xfer-pressed: True' in msg_hdr:
-																	# 내선 -> 내선 통화일때때 데이타베이스 수신내선,발신내선,파일명 같은 데이타 찾기
-																	file_path_str = merged_file
-																	file_name_str = os.path.basename(file_path_str)
-																	# wav 파일명만 추출
-																	fileinfo_doc = self.filesinfo.find_one({"from_number": local_num, "to_number": remote_num, "filename": {"$regex": file_name_str}})
-
-																	if fileinfo_doc:
-																			member_doc_update = self.members.find_one({"extension_num": local_num})
-																			if member_doc_update:
-																					per_lv8_update = member_doc_update.get('per_lv8', '')
-																					per_lv9_update = member_doc_update.get('per_lv9', '')
-
-																					result = self.filesinfo.update_one({"from_number": local_num, "to_number": remote_num, "filename": {"$regex": file_name_str}}, {"$set": {"per_lv8": per_lv8_update, "per_lv9": per_lv9_update}})
-
-																			member_doc = self.members.find_one({"extension_num": remote_num})
-																			if member_doc:
-																					if member_doc_update:
-																						per_lv8 = member_doc.get('per_lv8', '')
-																						per_lv9 = member_doc.get('per_lv9', '')
-
-																			# 로깅 추가
-																			self.log_error("SIP 메시지 헤더 확인3", level="info", additional_info={
-																					"msg_hdr": msg_hdr,
-																					"from_number": local_num,
-																					"to_number": remote_num,
-																					"filename": {"$regex": file_name_str},
-																					"per_lv8_update": per_lv8_update,
-																					"per_lv9_update": per_lv9_update,
-																					"per_lv8": per_lv8,
-																					"per_lv9": per_lv9
-																			})
-
 						elif is_extension(remote_num) and not is_extension(local_num):
 								# 외부 -> 내선 통화
-								if packet and hasattr(packet, 'sip'):
-										if hasattr(sip_layer, 'method') and sip_layer.method == 'REFER':
-												# 외부에서 온 전화를 돌려주기
-												if len(sip_layer.from_user) > 4 and len(sip_layer.from_user) < 9:
-														local_num_str = re.split(r'[a-zA-Z]+', sip_layer.from_user)
-														remote_num_str = re.split(r'[a-zA-Z]+', sip_layer.to_user)
-
-														if hasattr(sip_layer, 'msg_hdr'):
-																msg_hdr = sip_layer.msg_hdr
-
-																member_doc = self.members.find_one({"extension_num": remote_num_str})
-																if member_doc:
-																		per_lv8 = member_doc.get('per_lv8', '')
-																		per_lv9 = member_doc.get('per_lv9', '')
-																		local_num = local_num_str
-																		remote_num = remote_num_str
-												# 로깅 추가
-												self.log_error("SIP 메시지 헤더 확인4", level="info", additional_info={
-														"msg_hdr": msg_hdr,
-														"from_number": local_num,
-														"to_number": remote_num,
-														"per_lv8": per_lv8,
-														"per_lv9": per_lv9
-												})
-										else:
-												member_doc = self.members.find_one({"extension_num": remote_num})
-												if member_doc:
-														per_lv8 = member_doc.get('per_lv8', '')
-														per_lv9 = member_doc.get('per_lv9', '')
+								member_doc = self.members.find_one({"extension_num": remote_num})
+								if member_doc:
+										per_lv8 = member_doc.get('per_lv8', '')
+										per_lv9 = member_doc.get('per_lv9', '')
 
 						elif is_extension(local_num) and not is_extension(remote_num):
 								if packet and hasattr(packet, 'sip'):
@@ -4561,77 +4556,82 @@ class Dashboard(QMainWindow):
 						self.settings_popup.network_ip_changed.connect(self.on_network_ip_changed)
 						self.settings_popup.exec()
 				except Exception as e:
-						print(f"설정 창 표시 중 오류: {e}")
-						QMessageBox.warning(self, "오류", "Settings를 열 수 없습니다.")
+					print(f"설정 창 표시 중 오류: {e}")
+					QMessageBox.warning(self, "오류", "Settings를 열 수 없습니다.")
 
 		def quit_application(self):
 				try:
-						# 타이머와 리소스 정리
-						self.cleanup()
+					# 타이머와 리소스 정리
+					self.cleanup()
 
-						# 통화별 녹음 관리자 정리
-						if hasattr(self, 'recording_manager') and self.recording_manager:
-								try:
-										self.recording_manager.cleanup_all_recordings()
-										print("통화별 녹음 프로세스 정리 완료")
-								except Exception as e:
-										print(f"녹음 프로세스 정리 실패: {e}")
-
-						# WebSocket 서버 종료
-						if hasattr(self, 'websocket_server') and self.websocket_server:
-								try:
-										if self.websocket_server.running:
-												asyncio.run(self.websocket_server.stop_server())
-												print("WebSocket 서버가 종료되었습니다.")
-								except Exception as e:
-										print(f"WebSocket server shutdown error: {e}")
-
-						# 외부 프로세스 종료
-						processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe', 'Dumpcap.exe']
-						for process in processes_to_kill:
-								os.system(f'taskkill /f /im {process}')
-								print(f"프로세스 종료 시도: {process}")
-
-						# voip_monitor.log 파일을 0바이트로 초기화
+					# 통화별 녹음 관리자 정리
+					if hasattr(self, 'recording_manager') and self.recording_manager:
 						try:
-								with open('voip_monitor.log', 'w') as f:
-										f.truncate(0)
-						except Exception as log_error:
-								print(f"로그 파일 초기화 중 오류: {log_error}")
+							self.recording_manager.cleanup_all_recordings()
+							print("통화별 녹음 프로세스 정리 완료")
+						except Exception as e:
+							print(f"녹음 프로세스 정리 실패: {e}")
 
-						self.tray_icon.hide()
-						QApplication.quit()
+					# WebSocket 서버 종료
+					if hasattr(self, 'websocket_server') and self.websocket_server:
+						try:
+							if self.websocket_server.running:
+								asyncio.run(self.websocket_server.stop_server())
+								print("WebSocket 서버가 종료되었습니다.")
+						except Exception as e:
+							print(f"WebSocket server shutdown error: {e}")
+
+					# 외부 프로세스 종료
+					processes_to_kill = ['nginx.exe', 'mongod.exe', 'node.exe', 'Dumpcap.exe']
+					for process in processes_to_kill:
+						os.system(f'taskkill /f /im {process}')
+						print(f"프로세스 종료 시도: {process}")
 				except Exception as e:
-						print(f"프로그램 종료 중 오류: {e}")
+					print(f"응용 프로그램 종료 중 오류: {e}")
+
+				# voip_monitor.log 파일을 0바이트로 초기화
+				try:
+					log_file_path = os.path.join(os.getcwd(), 'logs', 'voip_monitor.log')
+					with open(log_file_path, 'w') as f:
+						f.truncate(0)
+				except Exception as log_error:
+					print(f"로그 파일 초기화 중 오류: {log_error}")
+
+				try:
+					self.tray_icon.hide()
+					QApplication.quit()
+				except Exception as e:
+					print(f"프로그램 종료 중 오류: {e}")
 
 		def tray_icon_activated(self, reason):
-				if reason == QSystemTrayIcon.DoubleClick:
-						self.show_window()
+			if reason == QSystemTrayIcon.DoubleClick:
+				self.show_window()
 
 		def monitor_system_resources(self):
 				try:
-						cpu_percent = psutil.cpu_percent()
-						memory_info = psutil.Process().memory_info()
-						memory_percent = psutil.Process().memory_percent()
+					cpu_percent = psutil.cpu_percent()
+					memory_info = psutil.Process().memory_info()
+					memory_percent = psutil.Process().memory_percent()
 
-						# 로그 파일에만 기록하고 콘솔에는 출력하지 않음
-						with open('voip_monitor.log', 'a', encoding='utf-8', buffering=1) as log_file:
-								timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-								log_file.write(f"\n[{timestamp}] 시스템 리소스 상태\n")
-								log_info = {
-										"cpu_percent": f"{cpu_percent}%",
-										"memory_used": f"{memory_info.rss / (1024 * 1024):.2f}MB",
-										"memory_percent": f"{memory_percent}%",
-										"active_calls": len(self.active_calls),
-										"active_streams": len(self.active_streams)
-								}
-								log_file.write(f"추가 정보: {log_info}\n\n")
-								log_file.flush()
-								os.fsync(log_file.fileno())
+					# 로그 파일에만 기록하고 콘솔에는 출력하지 않음
+					log_file_path = os.path.join(os.getcwd(), 'logs', 'voip_monitor.log')
+					with open(log_file_path, 'a', encoding='utf-8', buffering=1) as log_file:
+						timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+						log_file.write(f"\n[{timestamp}] 시스템 리소스 상태\n")
+						log_info = {
+							"cpu_percent": f"{cpu_percent}%",
+							"memory_used": f"{memory_info.rss / (1024 * 1024):.2f}MB",
+							"memory_percent": f"{memory_percent}%",
+							"active_calls": len(self.active_calls),
+							"active_streams": len(self.active_streams)
+						}
+						log_file.write(f"추가 정보: {log_info}\n\n")
+						log_file.flush()
+						os.fsync(log_file.fileno())
 
 				except Exception as e:
-						# 오류는 기존 log_error 함수를 통해 기록하되, 콘솔 출력 없이
-						self.log_error("리소스 모니터링 오류", e, level="error", console_output=False)
+					# 오류는 기존 log_error 함수를 통해 기록하되, 콘솔 출력 없이
+					self.log_error("리소스 모니터링 오류", e, level="error", console_output=False)
 
 		def start_new_thread(self, target, name=None):
 				"""스레드 생성 및 관리"""
@@ -4679,44 +4679,44 @@ class Dashboard(QMainWindow):
 						self.log_error("시스템 리소스 확인 중 오류", e, level="error", console_output=False)
 
 def main():
-		try:
-					app = QApplication(sys.argv)
-					app.setApplicationName("Recap Voice")
+	try:
+		app = QApplication(sys.argv)
+		app.setApplicationName("Recap Voice")
 
-					# 명령줄 인수 처리
-					parser = argparse.ArgumentParser(description="Recap Voice - VoIP SIP 신호 감지 및 클라이언트 알림 시스템")
-					parser.add_argument("--log-level", choices=["debug", "info", "warning", "error"], default="info", help="로그 레벨 설정")
-					args = parser.parse_args()
+		# 명령줄 인수 처리
+		parser = argparse.ArgumentParser(description="Recap Voice - VoIP SIP 신호 감지 및 클라이언트 알림 시스템")
+		parser.add_argument("--log-level", choices=["debug", "info", "warning", "error"], default="info", help="로그 레벨 설정")
+		args = parser.parse_args()
 
-					# 단일 인스턴스 확인
-					client = QLocalSocket()
-					client.connectToServer("RecapVoiceInstance")
+		# 단일 인스턴스 확인
+		client = QLocalSocket()
+		client.connectToServer("RecapVoiceInstance")
 
-					if client.waitForConnected(500):
-							# 이미 실행 중인 경우
-							client.write(b"show")
-							client.disconnectFromServer()
-							app.quit()
-							sys.exit(0)
+		if client.waitForConnected(500):
+			# 이미 실행 중인 경우
+			client.write(b"show")
+			client.disconnectFromServer()
+			app.quit()
+			sys.exit(0)
 
-					# 새 인스턴스 시작
-					window = Dashboard()
+		# 새 인스턴스 시작
+		window = Dashboard()
 
+		# 일반 모드로 실행
+		window.show()
+		app.setQuitOnLastWindowClosed(False)
+		app.exec()
 
-					# 일반 모드로 실행
-					window.show()
-					app.setQuitOnLastWindowClosed(False)
-					app.exec()
-
-		except Exception as e:
-				traceback.print_exc()
-				with open('voip_monitor.log', 'a', encoding='utf-8') as f:
-						f.write(f"\n=== 프로그램 시작 실패 ===\n")
-						f.write(f"시간: {datetime.datetime.now()}\n")
-						f.write(f"오류: {str(e)}\n")
-						f.write(traceback.format_exc())
-						f.write("\n")
-				sys.exit(1)
+	except Exception as e:
+		traceback.print_exc()
+		log_file_path = os.path.join(os.getcwd(), 'logs', 'voip_monitor.log')
+		with open(log_file_path, 'a', encoding='utf-8') as f:
+			f.write(f"\n=== 프로그램 시작 실패 ===\n")
+			f.write(f"시간: {datetime.datetime.now()}\n")
+			f.write(f"오류: {str(e)}\n")
+			f.write(traceback.format_exc())
+			f.write("\n")
+		sys.exit(1)
 
 # ============ 통화별 녹음 관리 메서드 ============
 

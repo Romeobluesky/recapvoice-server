@@ -171,7 +171,24 @@ class ExtensionRecordingManager:
 		def get_extension_ip(self, extension: str) -> Optional[str]:
 				"""내선번호에 해당하는 IP 주소 조회"""
 				with self.mapping_lock:
-						return self.extension_ip_mapping.get(extension)
+						# 기존 매핑 확인
+						mapped_ip = self.extension_ip_mapping.get(extension)
+						if mapped_ip:
+								return mapped_ip
+
+						# 임시 하드코딩 매핑 (테스트용)
+						hardcoded_mapping = {
+								'1427': '192.168.0.55',
+								'1428': '192.168.0.54',
+								'1429': '192.168.0.56'
+						}
+
+						if extension in hardcoded_mapping:
+								ip = hardcoded_mapping[extension]
+								self.logger.info(f"🔧 하드코딩 매핑 사용: {extension} → {ip}")
+								return ip
+
+						return None
 
 		def update_call_sip_info(self, call_id: str, sip_info: Dict):
 				"""통화별 SIP 정보 업데이트"""
@@ -223,17 +240,41 @@ class ExtensionRecordingManager:
 						# 2. SIP 정보 조회
 						call_sip_info = self.get_call_sip_info(call_id)
 
-						# 3. 기본 필터 (기존 방식)
-						base_filter = "(port 5060) or (udp and portrange 1024-65535)"
+						# 3. 기본 필터 - 더 구체적으로 수정
+						base_filter = "port 5060"  # SIP만 기본 캡처
 
-						# 4. 내선 IP 기반 필터 추가
-						if extension_ip:
-								# 해당 내선 IP와 관련된 트래픽만 캡처
-								ip_filter = f"host {extension_ip}"
-								dynamic_filter = f"({base_filter}) and ({ip_filter})"
+						# 4. 통화별 고유 필터 생성 (RTP 포트 우선 사용)
+						if call_sip_info.get('rtp_ports'):
+								# RTP 포트가 있는 경우: 포트 기반 필터 (가장 구체적)
+								rtp_ports = call_sip_info['rtp_ports']
+								if len(rtp_ports) == 1:
+										port_filter = f"udp port {rtp_ports[0]}"
+								elif len(rtp_ports) >= 2:
+										port_filter = f"udp portrange {min(rtp_ports)}-{max(rtp_ports)}"
+								else:
+										port_filter = f"udp and ({' or '.join(f'port {p}' for p in rtp_ports)})"
 
-								self.logger.info(f"동적 필터 생성 (IP 기반): {dynamic_filter}")
-								return dynamic_filter
+								# SIP + 특정 RTP 포트만 캡처
+								specific_filter = f"(port 5060) or ({port_filter})"
+								self.logger.info(f"🎯 동적 필터 생성 (RTP 포트 기반): {specific_filter}")
+								return specific_filter
+
+						elif extension_ip:
+								# RTP 포트 정보가 없는 경우: 내선 IP 기반 (세션별 구분)
+								# 내선→내선 통화인지 확인
+								is_extension_call = (from_number.startswith(('1','2','3','4','5','6','7','8','9')) and
+												   to_number.startswith(('1','2','3','4','5','6','7','8','9')))
+
+								if is_extension_call:
+										# 내선→내선: 발신측 내선 IP만 캡처 (중복 방지)
+										strict_filter = f"(host {extension_ip}) and ((port 5060) or (udp and portrange 10000-65535))"
+										self.logger.info(f"🎯 동적 필터 생성 (내선간 발신측만): {strict_filter}")
+										return strict_filter
+
+								# 외선→내선 또는 내선→외선: 해당 내선 IP만
+								single_filter = f"(host {extension_ip}) and ((port 5060) or (udp and portrange 10000-65535))"
+								self.logger.info(f"🎯 동적 필터 생성 (단일 내선): {single_filter}")
+								return single_filter
 
 						# 5. SIP 포트 정보가 있는 경우 추가 최적화
 						if call_sip_info.get('rtp_ports'):
@@ -249,13 +290,14 @@ class ExtensionRecordingManager:
 								self.logger.info(f"동적 필터 생성 (포트 기반): {optimized_filter}")
 								return optimized_filter
 
-						# 6. 기본 필터 반환
-						self.logger.warning(f"동적 필터 생성 실패, 기본 필터 사용: {base_filter}")
-						return base_filter
+						# 6. 기본 필터 반환 (SIP + RTP 포트 범위)
+						fallback_filter = "port 5060 or (udp and portrange 10000-65535)"
+						self.logger.warning(f"⚠️ 동적 필터 생성 실패, 광범위 필터 사용: {fallback_filter}")
+						return fallback_filter
 
 				except Exception as e:
 						self.logger.error(f"동적 필터 생성 실패: {e}")
-						return "(port 5060) or (udp and portrange 1024-65535)"
+						return "port 5060"  # 오류 시에도 SIP만 캡처
 
 		def _detect_extension_ip_from_dashboard(self, extension: str) -> Optional[str]:
 				"""Dashboard의 내선 정보에서 IP 자동 감지"""
@@ -322,16 +364,16 @@ class ExtensionRecordingManager:
 										self.logger.error("Dumpcap 경로가 설정되지 않음")
 										return False
 
-								# 임시 pcapng 파일 경로 (call_id 해시를 포함하여 고유성 보장)
-								timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S%f")[:19]  # 마이크로초 포함
-								call_hash = hashlib.md5(call_id.encode()).hexdigest()[:8]  # 8자리 해시
-								pcapng_filename = f"call_{call_hash}_{extension}_{timestamp}_{os.getpid()}.pcapng"
+								# 임시 pcapng 파일 경로 (Call-ID에서 @ 앞부분만 사용)
+								# @ 뒤쪽 제거하여 파일명 간소화
+								call_id_short = call_id.split('@')[0] if '@' in call_id else call_id
+								pcapng_filename = f"{call_id_short}.pcapng"
 								pcapng_path = self.temp_dir / pcapng_filename
 
-								# 추가 보안: 파일 중복 검사
+								# 추가 보안: 파일 중복 검사 (Call-ID 기반)
 								counter = 1
 								while pcapng_path.exists():
-										pcapng_filename = f"call_{call_hash}_{extension}_{timestamp}_{counter:03d}.pcapng"
+										pcapng_filename = f"{call_id_short}_{counter:03d}.pcapng"
 										pcapng_path = self.temp_dir / pcapng_filename
 										counter += 1
 										if counter > 999:  # 무한 루프 방지
@@ -355,14 +397,24 @@ class ExtensionRecordingManager:
 								self.logger.info(f"🎯 동적 필터 적용: {filter_comment}")
 								self.logger.info(f"📡 캡처 필터: {capture_filter}")
 
-								# Dumpcap 명령어 구성
+								# Dumpcap 명령어 구성 (파일명 정확히 지정)
 								dumpcap_cmd = [
 										self.dumpcap_path,
 										"-i", self.interface_number,
 										"-f", capture_filter,
-										"-w", str(pcapng_path),
-										"-b", "files:1"  # 단일 파일
+										"-w", str(pcapng_path)
+										# -b 옵션 제거: 날짜/시간 자동 추가 방지
 								]
+
+								# REFER 시나리오에서 Dumpcap 동시 실행 방지를 위한 미세 지연
+								if hasattr(self, 'last_dumpcap_start_time'):
+										time_diff = time.time() - self.last_dumpcap_start_time
+										if time_diff < 0.5:  # 500ms 이내 실행이면 대기
+												delay = 0.5 - time_diff
+												self.logger.info(f"🕒 Dumpcap 동시 실행 방지 지연: {delay:.3f}초")
+												time.sleep(delay)
+
+								self.last_dumpcap_start_time = time.time()
 
 								# Dumpcap 프로세스 시작
 								self.logger.info(f"Dumpcap 명령: {' '.join(dumpcap_cmd)}")
@@ -374,7 +426,6 @@ class ExtensionRecordingManager:
 								)
 
 								# 프로세스 시작 확인
-								import time
 								time.sleep(0.1)  # 짧은 대기
 								if process.poll() is not None:
 										stdout, stderr = process.communicate()
@@ -395,8 +446,7 @@ class ExtensionRecordingManager:
 										'to_number': to_number,
 										'start_time': current_time,
 										'filter': capture_filter,
-										'call_hash': call_hash,  # 고유 식별자
-										'call_id': call_id,  # 원본 call_id 보존
+										'call_id': call_id,  # Call-ID 직접 사용
 										'direction_info': {  # IN/OUT 구분을 위한 정보
 												'extension_number': extension,
 												'remote_number': to_number if from_number == extension else from_number,
@@ -407,9 +457,9 @@ class ExtensionRecordingManager:
 								self.call_recordings[call_id] = recording_info
 
 								self.logger.info(f"통화 녹음 시작: {call_id} (내선: {extension}, 파일: {pcapng_filename})")
-								self.logger.info(f"📝 녹음 세부 정보 - Call Hash: {call_hash}, 필터: {capture_filter}")
+								self.logger.info(f"📝 녹음 세부 정보 - Call-ID Short: {call_id_short}, 필터: {capture_filter}")
 								if self.dashboard_logger:
-										self.dashboard_logger.log_error(f"📝 다중통화 지원 녹음 시작 - Call Hash: {call_hash}", level="info")
+										self.dashboard_logger.log_error(f"📝 다중통화 지원 녹음 시작 - Call-ID: {call_id_short}", level="info")
 
 								return True
 
@@ -426,6 +476,7 @@ class ExtensionRecordingManager:
 										return None
 
 								recording_info = self.call_recordings[call_id]
+
 								process = recording_info['process']
 
 								# Dumpcap 프로세스 종료
@@ -460,21 +511,38 @@ class ExtensionRecordingManager:
 						from_number = recording_info['from_number']
 						to_number = recording_info['to_number']
 						start_time = recording_info['start_time']
-						call_hash = recording_info.get('call_hash', '')
+						call_id = recording_info.get('call_id', '')
+						# Call-ID @ 앞부분을 call_hash 대신 사용
+						call_hash = call_id.split('@')[0] if '@' in call_id else call_id
+
+						# REFER 치환된 최신 번호를 active_calls에서 가져오기
+						if self.dashboard and hasattr(self.dashboard, 'active_calls') and call_id:
+								with self.dashboard.active_calls_lock:
+										if call_id in self.dashboard.active_calls:
+												updated_call_info = self.dashboard.active_calls[call_id]
+												updated_from = updated_call_info.get('from_number', from_number)
+												updated_to = updated_call_info.get('to_number', to_number)
+
+												# 치환된 번호가 있으면 사용
+												if updated_from != from_number or updated_to != to_number:
+														self.logger.info(f"🔄 REFER 치환된 번호 적용: {from_number}→{updated_from}, {to_number}→{updated_to}")
+														from_number = updated_from
+														to_number = updated_to
 
 						# 실제 생성된 파일을 찾기 (dumpcap이 추가 번호를 붙일 수 있음)
 						if not pcapng_path or not os.path.exists(pcapng_path):
 								self.logger.warning(f"예상 pcapng 파일이 없음: {pcapng_path}")
 
-								# 패턴 매칭으로 실제 파일 찾기
+								# 패턴 매칭으로 실제 파일 찾기 (Call-ID @ 앞부분 기반)
 								if pcapng_path:
 										base_name = os.path.splitext(os.path.basename(pcapng_path))[0]
 										temp_dir = os.path.dirname(pcapng_path)
 
-										# call_hash 기반으로 매칭되는 파일 찾기
+										# Call-ID @ 앞부분으로 매칭되는 파일 찾기
+										call_id_short = call_id.split('@')[0] if '@' in call_id else call_id
 										matching_files = []
 										for file in os.listdir(temp_dir):
-												if file.startswith(f"call_{call_hash}") and file.endswith('.pcapng'):
+												if file.startswith(call_id_short) and file.endswith('.pcapng'):
 														matching_files.append(os.path.join(temp_dir, file))
 
 										if matching_files:
@@ -482,7 +550,7 @@ class ExtensionRecordingManager:
 												pcapng_path = max(matching_files, key=os.path.getctime)
 												self.logger.info(f"실제 pcapng 파일 발견: {pcapng_path}")
 										else:
-												self.logger.error(f"call_hash {call_hash}와 매칭되는 pcapng 파일을 찾을 수 없음")
+												self.logger.error(f"Call-ID {call_id_short}와 매칭되는 pcapng 파일을 찾을 수 없음")
 												return False
 								else:
 										self.logger.error(f"pcapng 파일이 없음: {pcapng_path}")
@@ -490,7 +558,7 @@ class ExtensionRecordingManager:
 
 						self.logger.info(f"🎧 pcapng→WAV 변환 시작: {os.path.basename(pcapng_path)} | {from_number} → {to_number}")
 						if self.dashboard_logger:
-								self.dashboard_logger.log_error(f"🎧 직접 WAV 변환: {call_hash}", level="info")
+								self.dashboard_logger.log_error(f"🎧 직접 WAV 변환: {call_id[:8]}...", level="info")
 
 						# 1단계: pcapng에서 RTP 스트림 추출 (통화별 시간 기반 필터링 적용)
 						rtp_streams = self._extract_rtp_streams_from_pcapng(pcapng_path, from_number, to_number, start_time)
