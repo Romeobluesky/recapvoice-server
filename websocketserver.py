@@ -274,16 +274,26 @@ class WebSocketServer:
 		"""WebSocket 서버 중지"""
 		if self.server:
 			print("[서버 종료] WebSocket 서버 종료 중...")
-			self.server.close()
-			await self.server.wait_closed()
-			print("[서버 종료] WebSocket 서버가 정상적으로 종료됨")
-			self.log("WebSocket 서버 중지됨", level="info")
+			try:
+				self.running = False
+				self.server.close()
+				await self.server.wait_closed()
+				print("[서버 종료] WebSocket 서버가 정상적으로 종료됨")
+				self.log("WebSocket 서버 중지됨", level="info")
+			except Exception as e:
+				print(f"[서버 종료 오류] WebSocket 서버 종료 중 오류: {str(e)}")
+				self.log("WebSocket 서버 종료 중 오류", e, level="warning")
+
+	def stop_server_gracefully(self):
+		"""메인 스레드에서 안전하게 서버 종료를 요청"""
+		if self.running:
+			print("[서버 종료 요청] WebSocket 서버 종료 요청됨")
 			self.running = False
 
 	def run_in_thread(self):
 		"""별도 스레드에서 서버 실행"""
-		asyncio.set_event_loop(asyncio.new_event_loop())
-		loop = asyncio.get_event_loop()
+		loop = asyncio.new_event_loop()
+		asyncio.set_event_loop(loop)
 
 		try:
 			print("[스레드] WebSocket 서버 스레드 시작")
@@ -294,8 +304,26 @@ class WebSocketServer:
 			print(f"[스레드 오류] WebSocket 서버 실행 중 오류: {str(e)}")
 			self.log("WebSocket 서버 실행 중 오류", e, level="error")
 		finally:
-			if self.running:
-				loop.run_until_complete(self.stop_server())
-			loop.close()
-			print("[스레드] WebSocket 서버 스레드 종료")
-			self.log("WebSocket 서버 스레드 종료", level="info")
+			# 서버가 실행 중이면 안전하게 종료
+			try:
+				if self.server and self.running:
+					loop.run_until_complete(self.stop_server())
+				
+				# 남은 태스크들을 정리
+				pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+				if pending_tasks:
+					print(f"[정리] {len(pending_tasks)}개의 미완료 태스크 취소 중...")
+					for task in pending_tasks:
+						task.cancel()
+					
+					# 취소된 태스크들이 완료될 때까지 대기
+					loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+			except Exception as cleanup_error:
+				print(f"[정리 오류] WebSocket 서버 정리 중 오류: {str(cleanup_error)}")
+			finally:
+				try:
+					loop.close()
+				except Exception:
+					pass
+				print("[스레드] WebSocket 서버 스레드 종료")
+				self.log("WebSocket 서버 스레드 종료", level="info")

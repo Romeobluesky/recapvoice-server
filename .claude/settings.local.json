@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Read(/D:\\Work_state\\packet_wave\\**)"
+      "Read(/D:\\Work_state\\packet_wave\\**)",
+      "Bash(python test_rtp_extraction.py:*)",
+      "Bash(ffprobe:*)",
+      "Bash(python test_extension_extraction.py:*)",
+      "Bash(python:*)",
+      "Read(//d/Work_state/**)",
+      "Read(//d/PacketWaveRecord/**)"
     ],
     "deny": [],
     "additionalDirectories": []
